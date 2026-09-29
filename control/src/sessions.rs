@@ -104,6 +104,38 @@ impl Default for Sessions {
     }
 }
 impl Sessions {
+    /// Per-key admission hints; stopping jobs stay charged until teardown.
+    pub fn available(&self, principal: &Principal, now: u64) -> crate::credentials::Quotas {
+        let jobs: Vec<_> = self
+            .jobs
+            .values()
+            .filter(|job| job.reservations.contains(&principal.key.id))
+            .collect();
+        let inputs = jobs
+            .iter()
+            .map(|job| job.input.as_str())
+            .collect::<BTreeSet<_>>()
+            .len() as u32;
+        let viewers = self
+            .viewers
+            .values()
+            .filter(|viewer| {
+                viewer.owner == principal.key.id
+                    && viewer.view.expires_at > now
+                    && matches!(viewer.view.status, Status::Starting | Status::Ready)
+            })
+            .count() as u32;
+        crate::credentials::Quotas {
+            inputs: principal.key.spec.quotas.inputs.saturating_sub(inputs),
+            outputs: principal
+                .key
+                .spec
+                .quotas
+                .outputs
+                .saturating_sub(jobs.len() as u32),
+            viewers: principal.key.spec.quotas.viewers.saturating_sub(viewers),
+        }
+    }
     /// Resolve idempotent retries before performing any source network I/O.
     pub fn replay(
         &self,
@@ -743,6 +775,7 @@ mod tests {
         sessions.ready(&first.viewer.job_id, 1);
         sessions.release(&p, &first.viewer.id, 2).unwrap();
         sessions.reap(17);
+        assert_eq!(sessions.available(&p,17).inputs,0,"cleanup must remain charged in capacity hints");
         let mut next = request("family");
         next.input.url.push_str("/other");
         assert_eq!(
@@ -750,6 +783,7 @@ mod tests {
             "input_capacity"
         );
         sessions.finish_stop(&first.viewer.job_id);
+        assert_eq!(sessions.available(&p,18).inputs,1);
         assert!(sessions.reserve(&p, &next, &plan(), "b", 18).is_ok());
     }
 

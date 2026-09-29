@@ -195,8 +195,9 @@ async fn capabilities(
     if !principal.key.spec.scopes.contains(&Scope::Capabilities) {
         return Err(ApiError("forbidden"));
     }
+    let available=state.workers.available(&principal,now()?).map_err(ApiError)?;
     Ok(Json(
-        serde_json::json!({"version":API_VERSION, "ready":state.ready.load(Ordering::Acquire), "protocols":["hls","progressive"], "viewer_lease_seconds":VIEWER_LEASE_SECONDS, "renew_after_seconds":RENEW_AFTER_SECONDS, "namespaces":principal.key.spec.namespaces, "scopes":principal.key.spec.scopes, "limits":principal.key.spec.quotas}),
+        serde_json::json!({"version":API_VERSION, "ready":state.ready.load(Ordering::Acquire), "protocols":["hls","progressive"], "viewer_lease_seconds":VIEWER_LEASE_SECONDS, "renew_after_seconds":RENEW_AFTER_SECONDS, "namespaces":principal.key.spec.namespaces, "scopes":principal.key.spec.scopes, "limits":principal.key.spec.quotas,"available":available}),
     ))
 }
 async fn ready(State(state): State<Api>) -> Response {

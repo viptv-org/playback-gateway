@@ -27,6 +27,9 @@ impl PlaybackManager {
     pub fn new(config: Config) -> Arc<Self> {
         Self::new_with_qsv(config, None)
     }
+    pub fn available_output_slots(&self) -> usize {
+        self.slots.available_permits()
+    }
 
     pub fn new_with_qsv(config: Config, qsv_device: Option<PathBuf>) -> Arc<Self> {
         Self::new_with_hardware(config, qsv_device, None)

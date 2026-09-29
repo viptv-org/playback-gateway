@@ -67,6 +67,11 @@ changing the body under that key returns `409`.
 - `GET /v1/capabilities` reports protocol version, supported delivery transports,
   own namespaces, operation scopes and configured quota limits. Integrators can
   validate key permissions without creating a playback session.
+  The available object reports remaining inputs/outputs/viewers for that key;
+  output availability also respects the engine's global worker admission. These
+  are advisory snapshots, not reservations. Stopping jobs remain charged until
+  teardown; a compatible viewer may reuse an existing job despite no room for
+  a new input/output.
 
 Leases last 60 seconds; renew every 20. Media reads do not renew leases. Shared
 workers have 15 seconds of zero-viewer grace. Startup and cleanup retain quota

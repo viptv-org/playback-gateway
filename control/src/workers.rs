@@ -22,6 +22,21 @@ pub struct Workers {
     reaper: tokio::sync::Mutex<()>,
 }
 impl Workers {
+    pub fn available(
+        &self,
+        principal: &Principal,
+        now: u64,
+    ) -> Result<crate::credentials::Quotas, &'static str> {
+        let mut available = self
+            .sessions
+            .lock()
+            .map_err(|_| "session_store_unavailable")?
+            .available(principal, now);
+        available.outputs = available
+            .outputs
+            .min(self.engine.available_output_slots() as u32);
+        Ok(available)
+    }
     /// Safe control response projection: substitute viewer-scoped media URLs
     /// and IDs; never expose the engine capability or source authorization.
     pub(crate) fn delivery(

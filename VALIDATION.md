@@ -51,7 +51,11 @@ suite passes with scope assertions. The backend's opt-in executable integration
 test verifies issuance/registration/check against the current native service.
 The earlier image 2551a1586f24 predates this metadata addition and must be rebuilt
 before using it with the new backend registration flow; it is not a current-image
-deployment claim.
+deployment claim. A subsequent local rebuild, f215fa924b8f, includes scope and
+per-key available-capacity reporting. The backend's isolated real-media fixture
+passed with that image: creation, HLS/segment delivery, renewal and release,
+without backend embedded execution. The fixture uses network none and a
+container-only address alias; no production policy override or deployment occurred.
 
 This is not approval for public deployment or VIPTV cutover. Pending work includes
 pending-inspection quota/rate admission, detailed upstream failure classification,
