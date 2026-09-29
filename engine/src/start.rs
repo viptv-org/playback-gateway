@@ -13,6 +13,33 @@ impl PlaybackManager {
         provider_permit: Option<OwnedSemaphorePermit>,
         selection: TrackSelection,
     ) -> Result<PlaybackResponse, String> {
+        self.prepare_with_selection(
+            url,
+            headers,
+            position,
+            capabilities,
+            force,
+            live,
+            provider_permit,
+            selection,
+        )
+        .await?
+        .start()
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn prepare_with_selection(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+        position: f64,
+        capabilities: Option<Capabilities>,
+        force: bool,
+        live: bool,
+        provider_permit: Option<OwnedSemaphorePermit>,
+        selection: TrackSelection,
+    ) -> Result<PreparedPlayback<'_>, String> {
         let reason = selection.conversion_reason.as_deref();
         if reason.is_some_and(|value| {
             !matches!(
@@ -68,12 +95,12 @@ impl PlaybackManager {
             && selection.subtitle_track_index.is_none()
         {
             let permit = self
-                .slots
+                .preparation_slots
                 .clone()
                 .try_acquire_owned()
                 .map_err(|_| MSG_PLAYBACK_CAPACITY.to_owned())?;
             let permits = Arc::new(InputPermits {
-                _playback: permit,
+                _playback: permit.into(),
                 _provider: provider_permit,
             });
             let started = Instant::now();
@@ -104,37 +131,41 @@ impl PlaybackManager {
                 selected_subtitle: None,
                 subtitles_supported: false,
             };
-            self.sessions.lock().await.insert(
-                id,
-                Session {
-                    stream: None,
-                    _source_probe: None,
-                    direct: Some(direct),
-                    capability,
-                    dir: PathBuf::new(),
-                    child: None,
-                    touched: Instant::now(),
-                    stable_target_duration: false,
-                    target_duration: None,
-                    supervised_live: false,
-                    throttle: Throttle::default(),
-                    permits,
-                    cleanup_tasks: self.cleanup_tasks.clone(),
-                },
-            );
-            tracing::info!(
-                connection_ms = started.elapsed().as_millis() as u64,
-                mode = "client-inspection",
-                "Original media prepared without ffprobe"
-            );
-            return Ok(response);
+            return Ok(PreparedPlayback::new(None, async move {
+                let _lifecycle = _lifecycle;
+                permits.admit_output(&self.slots)?;
+                self.sessions.lock().await.insert(
+                    id,
+                    Session {
+                        stream: None,
+                        _source_probe: None,
+                        direct: Some(direct),
+                        capability,
+                        dir: PathBuf::new(),
+                        child: None,
+                        touched: Instant::now(),
+                        stable_target_duration: false,
+                        target_duration: None,
+                        supervised_live: false,
+                        throttle: Throttle::default(),
+                        permits,
+                        cleanup_tasks: self.cleanup_tasks.clone(),
+                    },
+                );
+                tracing::info!(
+                    connection_ms = started.elapsed().as_millis() as u64,
+                    mode = "client-inspection",
+                    "Original media prepared without ffprobe"
+                );
+                Ok(response)
+            }));
         }
         let (width, height) = dimensions(&caps)?;
         if !caps.h264 || !caps.aac {
             return Err("H264 and AAC playback support is required".into());
         }
         let permit = self
-            .slots
+            .preparation_slots
             .clone()
             .try_acquire_owned()
             // Distinct from a provider-connection limit: this is the server's own
@@ -142,7 +173,7 @@ impl PlaybackManager {
             // something rather than to retry. It is reported as 503, not 429.
             .map_err(|_| MSG_PLAYBACK_CAPACITY.to_owned())?;
         let permits = Arc::new(InputPermits {
-            _playback: permit,
+            _playback: permit.into(),
             _provider: provider_permit,
         });
         self.initialize().await?;
@@ -247,6 +278,26 @@ impl PlaybackManager {
                     direct::Direct::prepare(validated.clone(), &headers, format, permits.clone())
                         .await
                 {
+                    let plan = OutputPlan {
+                        mode: "direct".into(),
+                        format: format.into(),
+                        video_mode: "copy".into(),
+                        audio_mode: if selected_input.is_some() {
+                            "copy"
+                        } else {
+                            "none"
+                        }
+                        .into(),
+                        video_codec: probe.video()?.codec_name.clone().unwrap_or_default(),
+                        audio_codec: selected_input.and_then(|s| s.codec_name.clone()),
+                        width: probe.video()?.width.unwrap_or(0),
+                        height: probe.video()?.height.unwrap_or(0),
+                        audio_track: selected_input.and_then(|s| s.index),
+                        subtitle_track: None,
+                        position_micros: (position * 1_000_000.0).round() as u64,
+                        segmentation: "original".into(),
+                        shareable: true,
+                    };
                     let id = Uuid::new_v4().to_string();
                     let capability =
                         format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
@@ -284,31 +335,35 @@ impl PlaybackManager {
                         selected_audio,
                         selected_subtitle: None,
                     };
-                    self.sessions.lock().await.insert(
-                        id,
-                        Session {
-                            stream: None,
-                            _source_probe: (!live).then(|| probe.clone()),
-                            direct: Some(transport),
-                            capability,
-                            dir: PathBuf::new(),
-                            child: None,
-                            touched: Instant::now(),
-                            stable_target_duration: false,
-                            target_duration: None,
-                            supervised_live: false,
-                            throttle: Throttle::default(),
-                            permits,
-                            cleanup_tasks: self.cleanup_tasks.clone(),
-                        },
-                    );
-                    tracing::info!(
-                        mode = "direct",
-                        format,
-                        probe_ms,
-                        "Playback preparation completed"
-                    );
-                    return Ok(response);
+                    return Ok(PreparedPlayback::new(Some(plan), async move {
+                        let _lifecycle = _lifecycle;
+                        permits.admit_output(&self.slots)?;
+                        self.sessions.lock().await.insert(
+                            id,
+                            Session {
+                                stream: None,
+                                _source_probe: Some(probe.clone()),
+                                direct: Some(transport),
+                                capability,
+                                dir: PathBuf::new(),
+                                child: None,
+                                touched: Instant::now(),
+                                stable_target_duration: false,
+                                target_duration: None,
+                                supervised_live: false,
+                                throttle: Throttle::default(),
+                                permits,
+                                cleanup_tasks: self.cleanup_tasks.clone(),
+                            },
+                        );
+                        tracing::info!(
+                            mode = "direct",
+                            format,
+                            probe_ms,
+                            "Playback preparation completed"
+                        );
+                        Ok(response)
+                    }));
                 }
                 tracing::info!(
                     reason = "original_transport_unavailable",
@@ -320,6 +375,10 @@ impl PlaybackManager {
         // inspected source must be inside it. Original delivery above is exempt:
         // there the client's own decoders, not this policy, decide.
         probe.ensure_supported()?;
+        // Encoders never upscale. Normalize excess capability headroom before
+        // computing transforms so equivalent output requests share one plan.
+        let width = width.min(probe.video()?.width.unwrap_or(width)) / 2 * 2;
+        let height = height.min(probe.video()?.height.unwrap_or(height)) / 2 * 2;
         let hdr_transfer = probe.hdr_transfer()?;
         let hdr = hdr_transfer.is_some();
         let interlaced = probe.interlaced();
@@ -420,381 +479,448 @@ impl PlaybackManager {
             && (position == 0.0 || seek_origin.is_some())
             && probe.compatible_audio_stream(selected_input);
         let remux = copy_video && copy_audio;
-        let id = Uuid::new_v4().to_string();
-        let capability = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
-        // An absolute output path keeps relative config roots independent of FFmpeg's cwd.
-        tokio::fs::create_dir_all(&self.config.root)
-            .await
-            .map_err(|_| "Media storage unavailable".to_owned())?;
-        let root = tokio::fs::canonicalize(&self.config.root)
-            .await
-            .map_err(|_| "Media storage unavailable".to_owned())?;
-        let dir = root.join(&id);
-        let mut session = Session {
-            stream: None,
-            _source_probe: (!live).then(|| probe.clone()),
-            direct: None,
-            capability: capability.clone(),
-            dir: dir.clone(),
-            child: None,
-            touched: Instant::now(),
-            stable_target_duration: true,
-            target_duration: None,
-            supervised_live: false,
-            throttle: if live {
-                Throttle::default()
+        let has_audio = selected_input.is_some();
+        let continuous_output = continuous && copy_video;
+        let fmp4_hls = (!copy_video || hevc_copy)
+            && selected_subtitle.is_none()
+            && caps.browser.as_ref().is_some_and(|browser| browser.fmp4);
+        let plan = OutputPlan {
+            mode: if remux { "remux" } else { "transcode" }.into(),
+            format: if continuous_output { "fmp4" } else { "hls" }.into(),
+            video_mode: if copy_video { "copy" } else { "encode" }.into(),
+            audio_mode: if !has_audio {
+                "none"
+            } else if copy_audio {
+                "copy"
             } else {
-                Throttle::on_demand()
+                "encode"
+            }
+            .into(),
+            video_codec: if copy_video {
+                video.codec_name.clone().unwrap_or_default()
+            } else {
+                "h264".into()
             },
-            permits,
-            cleanup_tasks: self.cleanup_tasks.clone(),
-        };
-        tokio::fs::create_dir(&dir)
-            .await
-            .map_err(|_| "Media storage unavailable".to_owned())?;
-        let accel = if copy_video {
-            hardware::Accel::default()
-        } else {
-            self.accel().await
-        };
-        let mut pipeline =
-            hardware::plan(copy_video, accel, probe.video()?, hdr_transfer, interlaced);
-        let tone_map = hardware::tone_map(accel.vaapi, hdr_transfer);
-        let engine_started = Instant::now();
-        loop {
-            let mut cmd = Command::new(&self.config.ffmpeg);
-            cmd.kill_on_drop(true)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null());
-            cmd.args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y"]);
-            if pipeline.vaapi() {
-                hardware::vaapi_device_args(
-                    &mut cmd,
-                    self.vaapi_path().expect("validated device"),
-                    pipeline == hardware::Pipeline::VaapiDecode,
-                );
-            } else if pipeline.accelerated() {
-                hardware::device_args(
-                    &mut cmd,
-                    self.qsv_device.as_ref().expect("validated device"),
-                );
-                if pipeline == hardware::Pipeline::QsvDecode {
-                    cmd.args(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"]);
-                    // FFmpeg 5.x needs the explicit QSV decoder to keep frames on GPU.
-                    let decoder = if probe.video()?.codec_name.as_deref() == Some("hevc") {
-                        "hevc_qsv"
-                    } else {
-                        "h264_qsv"
-                    };
-                    cmd.args(["-c:v", decoder]);
-                }
-            }
-            input_args(&mut cmd, &header_block);
-            // Input is never paced to realtime. A live input already arrives in
-            // realtime, and `-re` only withheld the upstream's initial burst (an
-            // HLS source starts three segments behind its edge), which pinned
-            // browsers to a one-segment buffer that stuttered on any jitter.
-            // Jellyfin's M3U tuners, Threadfin and ErsatzTV read live input the
-            // same way. On-demand encoding is paced by its viewer (`Throttle`).
-            if position > 0.0 {
-                cmd.arg("-ss").arg(format!("{position:.6}"));
-            }
-            cmd.arg("-i").arg(validated.as_str());
-            cmd.args(["-map", "0:v:0"]);
-            if let Some(audio) = &selected_audio {
-                cmd.arg("-map").arg(format!("0:{}", audio.input_index));
-            }
-            if let Some(subtitle) = &selected_subtitle {
-                cmd.arg("-map").arg(format!("0:{}", subtitle.input_index));
-                cmd.args(["-c:s", "webvtt", "-max_interleave_delta", "1000000"]);
+            audio_codec: if !has_audio {
+                None
+            } else if copy_audio {
+                selected_input.and_then(|s| s.codec_name.clone())
             } else {
-                cmd.arg("-sn");
-            }
-            cmd.args(["-dn", "-map_metadata", "-1", "-map_chapters", "-1"]);
-            if let Some(audio) = &selected_audio {
-                cmd.arg("-metadata:s:a:0")
-                    .arg(if audio.language_status == "tagged_english" {
-                        "language=eng"
-                    } else {
-                        "language=und"
-                    });
-            }
-            if copy_video {
-                cmd.args(["-c:v", "copy"]);
-                if hevc_copy {
-                    cmd.args(["-tag:v", "hvc1"]);
-                }
+                Some("aac".into())
+            },
+            width: if copy_video {
+                video.width.unwrap_or(0)
             } else {
-                let gop = (HLS_SEGMENT_SECONDS * 30).to_string();
-                let force_key_frames = format!(
-                "expr:gte(t,if(eq(n_forced,0),0,{HLS_INITIAL_SEGMENT_SECONDS}+(n_forced-1)*{HLS_SEGMENT_SECONDS}))"
-            );
-                let filter = match pipeline {
-                    hardware::Pipeline::QsvDecode => hardware::scale(probe.video()?, width, height),
-                    hardware::Pipeline::QsvEncode => format!(
-                        "{},format=nv12,hwupload=extra_hw_frames=64",
-                        transforms.join(",")
-                    ),
-                    hardware::Pipeline::VaapiDecode | hardware::Pipeline::VaapiEncode => {
-                        hardware::vaapi_filter(
-                            pipeline,
-                            tone_map,
-                            probe.video()?,
-                            width,
-                            height,
-                            deinterlace.as_deref(),
-                            &transforms.join(","),
-                        )
-                    }
-                    _ => transforms.join(","),
-                };
-                cmd.arg("-vf").arg(filter);
-                if hdr {
-                    cmd.args([
-                        "-color_primaries",
-                        "bt709",
-                        "-color_trc",
-                        "bt709",
-                        "-colorspace",
-                        "bt709",
-                        "-color_range",
-                        "tv",
-                    ]);
-                }
-                if pipeline.vaapi() {
-                    // Same envelope as Quick Sync. `-level:v 4` is h264_vaapi's
-                    // named constant for level 4.0 (a literal 4.0 parses as 4).
-                    cmd.args([
-                        "-c:v",
-                        "h264_vaapi",
-                        "-profile:v",
-                        "main",
-                        "-level:v",
-                        "4",
-                        "-rc_mode",
-                        "VBR",
-                        "-b:v",
-                        "4000k",
-                        "-maxrate",
-                        "5000k",
-                        "-bufsize",
-                        "10000k",
-                        "-bf",
-                        "0",
-                        "-fpsmax",
-                        "30",
-                        "-g",
-                        &gop,
-                        // VAAPI encodes every forced I-frame as an IDR.
-                        "-force_key_frames",
-                        &force_key_frames,
-                    ]);
-                } else if pipeline.accelerated() {
-                    cmd.args([
-                        "-c:v",
-                        "h264_qsv",
-                        "-preset",
-                        "veryfast",
-                        "-profile:v",
-                        "main",
-                        "-level:v",
-                        "4.0",
-                        "-b:v",
-                        "4000k",
-                        "-maxrate",
-                        "5000k",
-                        "-bufsize",
-                        "10000k",
-                        "-look_ahead",
-                        "0",
-                        "-async_depth",
-                        "1",
-                        "-bf",
-                        "0",
-                        "-fpsmax",
-                        "30",
-                        "-g",
-                        &gop,
-                        "-forced_idr",
-                        "1",
-                        "-force_key_frames",
-                        &force_key_frames,
-                    ]);
+                width
+            },
+            height: if copy_video {
+                video.height.unwrap_or(0)
+            } else {
+                height
+            },
+            audio_track: selected_audio.as_ref().map(|s| s.input_index),
+            subtitle_track: selected_subtitle.as_ref().map(|s| s.input_index),
+            position_micros: (position * 1_000_000.0).round() as u64,
+            segmentation: format!(
+                "{}:{}",
+                if continuous_output {
+                    "continuous"
+                } else if fmp4_hls {
+                    "fmp4"
                 } else {
-                    // No `-tune zerolatency`: ultrafast already disables B-frames,
-                    // lookahead and mbtree, so the tune mainly swapped frame threads
-                    // for sliced threads. That saves a few frames of encoder delay,
-                    // which segmented HLS never sees, and cost throughput (measured
-                    // 10% on 4 threads with FFmpeg 5.1, 43% on 20) and efficiency.
-                    cmd.args([
-                        "-c:v",
-                        "libx264",
-                        "-preset",
-                        "ultrafast",
-                        "-profile:v",
-                        "main",
-                        "-level:v",
-                        "4.0",
-                        "-pix_fmt",
-                        "yuv420p",
-                        "-crf",
-                        "23",
-                        "-maxrate",
-                        "5000k",
-                        "-bufsize",
-                        "10000k",
-                        "-fpsmax",
-                        "30",
-                        "-g",
-                        &gop,
-                        "-keyint_min",
-                        &gop,
-                        "-sc_threshold",
-                        "0",
-                        "-flags",
-                        "+cgop",
-                        "-x264-params",
-                        "open-gop=0",
-                        "-forced-idr",
-                        "1",
-                        "-force_key_frames",
-                        &force_key_frames,
-                    ]);
-                }
-            }
-            if selected_input.is_some() {
-                if copy_audio {
-                    cmd.args(["-c:a", "copy"]);
+                    "mpegts"
+                },
+                if copy_video && caps.browser.is_none() {
+                    "split"
                 } else {
-                    cmd.args(["-c:a", "aac", "-b:a", "128k", "-ac", "2", "-ar", "48000"]);
+                    "keyframes"
                 }
-            }
-            if continuous && copy_video {
-                cmd.args([
-                    "-f",
-                    "mp4",
-                    "-movflags",
-                    "frag_keyframe+empty_moov+default_base_moof",
-                    "-frag_duration",
-                    "2000000",
-                ]);
-                cmd.args(["-progress", "pipe:2", "-stats_period", "0.1"])
-                    .arg("pipe:1")
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped());
-                let mut child = cmd
-                    .spawn()
-                    .map_err(|_| "Playback engine unavailable".to_owned())?;
-                let output = child.stdout.take().ok_or("Media output unavailable")?;
-                let progress = child.stderr.take().ok_or("Media progress unavailable")?;
-                let stream = fmp4::Stream::new(output, progress, position, session.permits.clone());
-                session.child = Some(child);
-                session.stream = Some(stream.clone());
-                session.throttle = if live {
+            ),
+            shareable: !continuous_output,
+        };
+        let hdr_transfer = hdr_transfer.map(str::to_owned);
+        Ok(PreparedPlayback::new(Some(plan), async move {
+            let _lifecycle = _lifecycle;
+            permits.admit_output(&self.slots)?;
+            let hdr_transfer = hdr_transfer.as_deref();
+            let id = Uuid::new_v4().to_string();
+            let capability = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+            // An absolute output path keeps relative config roots independent of FFmpeg's cwd.
+            tokio::fs::create_dir_all(&self.config.root)
+                .await
+                .map_err(|_| "Media storage unavailable".to_owned())?;
+            let root = tokio::fs::canonicalize(&self.config.root)
+                .await
+                .map_err(|_| "Media storage unavailable".to_owned())?;
+            let dir = root.join(&id);
+            let mut session = Session {
+                stream: None,
+                _source_probe: Some(probe.clone()),
+                direct: None,
+                capability: capability.clone(),
+                dir: dir.clone(),
+                child: None,
+                touched: Instant::now(),
+                stable_target_duration: true,
+                target_duration: None,
+                supervised_live: false,
+                throttle: if live {
                     Throttle::default()
                 } else {
                     Throttle::on_demand()
-                };
-                stream.ready().await?;
-                let _ = tokio::fs::remove_dir(&dir).await;
-                session.dir = PathBuf::new();
-                self.sessions.lock().await.insert(id.clone(), session);
-                tracing::info!(
-                    probe_ms,
-                    engine_ready_ms = engine_started.elapsed().as_millis() as u64,
-                    video_mode = "copy",
-                    "Streaming fragmented MP4 ready"
-                );
-                return Ok(PlaybackResponse {
-                    id: id.clone(),
-                    url: format!("/media/{id}/{capability}/stream.mp4"),
-                    format: "fmp4".into(),
-                    mode: if remux { "remux" } else { "transcode" }.into(),
-                    video_mode: "copy".into(),
-                    audio_mode: if selected_input.is_none() {
-                        "none"
-                    } else if copy_audio {
-                        "copy"
-                    } else {
-                        "encode"
-                    }
-                    .into(),
-                    position,
-                    live,
-                    duration: duration.unwrap_or(0.0),
-                    audio_tracks,
-                    subtitle_tracks,
-                    selected_audio,
-                    selected_subtitle: None,
-                    subtitles_supported: false,
-                });
-            }
-            if let Some(subtitle) = &selected_subtitle {
-                let language = subtitle.language.as_deref().unwrap_or("und");
-                let audio_map = if selected_audio.is_some() { "a:0," } else { "" };
-                // Keep AV and WebVTT on the same post-seek timestamp clock. Without
-                // copyts, the nested MPEGTS muxer adds a private offset absent from VTT.
-                cmd.args(["-hls_segment_options", "mpegts_copyts=1", "-var_stream_map"])
-                    .arg(format!(
-                        "v:0,{audio_map}s:0,sgroup:subs,language:{language}"
-                    ));
-            }
-            let initial_segment_seconds = HLS_INITIAL_SEGMENT_SECONDS.to_string();
-            let segment_seconds = HLS_SEGMENT_SECONDS.to_string();
-            let list_size = (HLS_WINDOW_SECONDS / HLS_SEGMENT_SECONDS).to_string();
-            let delete_threshold = (HLS_DELETE_GRACE_SECONDS / HLS_SEGMENT_SECONDS).to_string();
-            cmd.args([
-                "-max_muxing_queue_size",
-                "1024",
-                "-f",
-                "hls",
-                "-hls_init_time",
-                &initial_segment_seconds,
-            ]);
-            let hls_flags = if copy_video {
-                if caps.browser.is_some() {
-                    "delete_segments+temp_file+independent_segments"
-                } else {
-                    "delete_segments+temp_file+split_by_time"
-                } // Preserve the legacy delivery contract during rollout.
-            } else {
-                "delete_segments+temp_file"
+                },
+                permits,
+                cleanup_tasks: self.cleanup_tasks.clone(),
             };
-            let fmp4_hls = (!copy_video || hevc_copy)
-                && selected_subtitle.is_none()
-                && caps.browser.as_ref().is_some_and(|browser| browser.fmp4);
-            if fmp4_hls {
-                cmd.args([
-                    "-hls_segment_type",
-                    "fmp4",
-                    "-hls_fmp4_init_filename",
-                    "init.mp4",
-                ]);
-            }
-            cmd.args([
-                "-hls_time",
-                &segment_seconds,
-                "-hls_list_size",
-                &list_size,
-                "-hls_delete_threshold",
-                &delete_threshold,
-                "-hls_flags",
-                hls_flags,
-                "-hls_segment_filename",
-            ]);
-            cmd.arg(dir.join(if fmp4_hls {
-                "segment-%09d.m4s"
+            tokio::fs::create_dir(&dir)
+                .await
+                .map_err(|_| "Media storage unavailable".to_owned())?;
+            let accel = if copy_video {
+                hardware::Accel::default()
             } else {
-                "segment-%09d.ts"
-            }))
-            .arg(dir.join("index.m3u8"));
-            session.child = Some(
-                cmd.spawn()
-                    .map_err(|_| "Playback engine unavailable".to_owned())?,
+                self.accel().await
+            };
+            let mut pipeline =
+                hardware::plan(copy_video, accel, probe.video()?, hdr_transfer, interlaced);
+            let tone_map = hardware::tone_map(accel.vaapi, hdr_transfer);
+            let engine_started = Instant::now();
+            loop {
+                let mut cmd = Command::new(&self.config.ffmpeg);
+                cmd.kill_on_drop(true)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null());
+                cmd.args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y"]);
+                if pipeline.vaapi() {
+                    hardware::vaapi_device_args(
+                        &mut cmd,
+                        self.vaapi_path().expect("validated device"),
+                        pipeline == hardware::Pipeline::VaapiDecode,
+                    );
+                } else if pipeline.accelerated() {
+                    hardware::device_args(
+                        &mut cmd,
+                        self.qsv_device.as_ref().expect("validated device"),
+                    );
+                    if pipeline == hardware::Pipeline::QsvDecode {
+                        cmd.args(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"]);
+                        // FFmpeg 5.x needs the explicit QSV decoder to keep frames on GPU.
+                        let decoder = if probe.video()?.codec_name.as_deref() == Some("hevc") {
+                            "hevc_qsv"
+                        } else {
+                            "h264_qsv"
+                        };
+                        cmd.args(["-c:v", decoder]);
+                    }
+                }
+                input_args(&mut cmd, &header_block);
+                // Input is never paced to realtime. A live input already arrives in
+                // realtime, and `-re` only withheld the upstream's initial burst (an
+                // HLS source starts three segments behind its edge), which pinned
+                // browsers to a one-segment buffer that stuttered on any jitter.
+                // Jellyfin's M3U tuners, Threadfin and ErsatzTV read live input the
+                // same way. On-demand encoding is paced by its viewer (`Throttle`).
+                if position > 0.0 {
+                    cmd.arg("-ss").arg(format!("{position:.6}"));
+                }
+                cmd.arg("-i").arg(validated.as_str());
+                cmd.args(["-map", "0:v:0"]);
+                if let Some(audio) = &selected_audio {
+                    cmd.arg("-map").arg(format!("0:{}", audio.input_index));
+                }
+                if let Some(subtitle) = &selected_subtitle {
+                    cmd.arg("-map").arg(format!("0:{}", subtitle.input_index));
+                    cmd.args(["-c:s", "webvtt", "-max_interleave_delta", "1000000"]);
+                } else {
+                    cmd.arg("-sn");
+                }
+                cmd.args(["-dn", "-map_metadata", "-1", "-map_chapters", "-1"]);
+                if let Some(audio) = &selected_audio {
+                    cmd.arg("-metadata:s:a:0")
+                        .arg(if audio.language_status == "tagged_english" {
+                            "language=eng"
+                        } else {
+                            "language=und"
+                        });
+                }
+                if copy_video {
+                    cmd.args(["-c:v", "copy"]);
+                    if hevc_copy {
+                        cmd.args(["-tag:v", "hvc1"]);
+                    }
+                } else {
+                    let gop = (HLS_SEGMENT_SECONDS * 30).to_string();
+                    let force_key_frames = format!(
+                "expr:gte(t,if(eq(n_forced,0),0,{HLS_INITIAL_SEGMENT_SECONDS}+(n_forced-1)*{HLS_SEGMENT_SECONDS}))"
             );
-            // Do not return a URL until both the playlist and first segment exist.
-            let ready = timeout(Duration::from_secs(if pipeline.accelerated() { 12 } else { 30 }), async {
+                    let filter = match pipeline {
+                        hardware::Pipeline::QsvDecode => {
+                            hardware::scale(probe.video()?, width, height)
+                        }
+                        hardware::Pipeline::QsvEncode => format!(
+                            "{},format=nv12,hwupload=extra_hw_frames=64",
+                            transforms.join(",")
+                        ),
+                        hardware::Pipeline::VaapiDecode | hardware::Pipeline::VaapiEncode => {
+                            hardware::vaapi_filter(
+                                pipeline,
+                                tone_map,
+                                probe.video()?,
+                                width,
+                                height,
+                                deinterlace.as_deref(),
+                                &transforms.join(","),
+                            )
+                        }
+                        _ => transforms.join(","),
+                    };
+                    cmd.arg("-vf").arg(filter);
+                    if hdr {
+                        cmd.args([
+                            "-color_primaries",
+                            "bt709",
+                            "-color_trc",
+                            "bt709",
+                            "-colorspace",
+                            "bt709",
+                            "-color_range",
+                            "tv",
+                        ]);
+                    }
+                    if pipeline.vaapi() {
+                        // Same envelope as Quick Sync. `-level:v 4` is h264_vaapi's
+                        // named constant for level 4.0 (a literal 4.0 parses as 4).
+                        cmd.args([
+                            "-c:v",
+                            "h264_vaapi",
+                            "-profile:v",
+                            "main",
+                            "-level:v",
+                            "4",
+                            "-rc_mode",
+                            "VBR",
+                            "-b:v",
+                            "4000k",
+                            "-maxrate",
+                            "5000k",
+                            "-bufsize",
+                            "10000k",
+                            "-bf",
+                            "0",
+                            "-fpsmax",
+                            "30",
+                            "-g",
+                            &gop,
+                            // VAAPI encodes every forced I-frame as an IDR.
+                            "-force_key_frames",
+                            &force_key_frames,
+                        ]);
+                    } else if pipeline.accelerated() {
+                        cmd.args([
+                            "-c:v",
+                            "h264_qsv",
+                            "-preset",
+                            "veryfast",
+                            "-profile:v",
+                            "main",
+                            "-level:v",
+                            "4.0",
+                            "-b:v",
+                            "4000k",
+                            "-maxrate",
+                            "5000k",
+                            "-bufsize",
+                            "10000k",
+                            "-look_ahead",
+                            "0",
+                            "-async_depth",
+                            "1",
+                            "-bf",
+                            "0",
+                            "-fpsmax",
+                            "30",
+                            "-g",
+                            &gop,
+                            "-forced_idr",
+                            "1",
+                            "-force_key_frames",
+                            &force_key_frames,
+                        ]);
+                    } else {
+                        // No `-tune zerolatency`: ultrafast already disables B-frames,
+                        // lookahead and mbtree, so the tune mainly swapped frame threads
+                        // for sliced threads. That saves a few frames of encoder delay,
+                        // which segmented HLS never sees, and cost throughput (measured
+                        // 10% on 4 threads with FFmpeg 5.1, 43% on 20) and efficiency.
+                        cmd.args([
+                            "-c:v",
+                            "libx264",
+                            "-preset",
+                            "ultrafast",
+                            "-profile:v",
+                            "main",
+                            "-level:v",
+                            "4.0",
+                            "-pix_fmt",
+                            "yuv420p",
+                            "-crf",
+                            "23",
+                            "-maxrate",
+                            "5000k",
+                            "-bufsize",
+                            "10000k",
+                            "-fpsmax",
+                            "30",
+                            "-g",
+                            &gop,
+                            "-keyint_min",
+                            &gop,
+                            "-sc_threshold",
+                            "0",
+                            "-flags",
+                            "+cgop",
+                            "-x264-params",
+                            "open-gop=0",
+                            "-forced-idr",
+                            "1",
+                            "-force_key_frames",
+                            &force_key_frames,
+                        ]);
+                    }
+                }
+                if has_audio {
+                    if copy_audio {
+                        cmd.args(["-c:a", "copy"]);
+                    } else {
+                        cmd.args(["-c:a", "aac", "-b:a", "128k", "-ac", "2", "-ar", "48000"]);
+                    }
+                }
+                if continuous && copy_video {
+                    cmd.args([
+                        "-f",
+                        "mp4",
+                        "-movflags",
+                        "frag_keyframe+empty_moov+default_base_moof",
+                        "-frag_duration",
+                        "2000000",
+                    ]);
+                    cmd.args(["-progress", "pipe:2", "-stats_period", "0.1"])
+                        .arg("pipe:1")
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::piped());
+                    let mut child = cmd
+                        .spawn()
+                        .map_err(|_| "Playback engine unavailable".to_owned())?;
+                    let output = child.stdout.take().ok_or("Media output unavailable")?;
+                    let progress = child.stderr.take().ok_or("Media progress unavailable")?;
+                    let stream =
+                        fmp4::Stream::new(output, progress, position, session.permits.clone());
+                    session.child = Some(child);
+                    session.stream = Some(stream.clone());
+                    session.throttle = if live {
+                        Throttle::default()
+                    } else {
+                        Throttle::on_demand()
+                    };
+                    stream.ready().await?;
+                    let _ = tokio::fs::remove_dir(&dir).await;
+                    session.dir = PathBuf::new();
+                    self.sessions.lock().await.insert(id.clone(), session);
+                    tracing::info!(
+                        probe_ms,
+                        engine_ready_ms = engine_started.elapsed().as_millis() as u64,
+                        video_mode = "copy",
+                        "Streaming fragmented MP4 ready"
+                    );
+                    return Ok(PlaybackResponse {
+                        id: id.clone(),
+                        url: format!("/media/{id}/{capability}/stream.mp4"),
+                        format: "fmp4".into(),
+                        mode: if remux { "remux" } else { "transcode" }.into(),
+                        video_mode: "copy".into(),
+                        audio_mode: if !has_audio {
+                            "none"
+                        } else if copy_audio {
+                            "copy"
+                        } else {
+                            "encode"
+                        }
+                        .into(),
+                        position,
+                        live,
+                        duration: duration.unwrap_or(0.0),
+                        audio_tracks,
+                        subtitle_tracks,
+                        selected_audio,
+                        selected_subtitle: None,
+                        subtitles_supported: false,
+                    });
+                }
+                if let Some(subtitle) = &selected_subtitle {
+                    let language = subtitle.language.as_deref().unwrap_or("und");
+                    let audio_map = if selected_audio.is_some() { "a:0," } else { "" };
+                    // Keep AV and WebVTT on the same post-seek timestamp clock. Without
+                    // copyts, the nested MPEGTS muxer adds a private offset absent from VTT.
+                    cmd.args(["-hls_segment_options", "mpegts_copyts=1", "-var_stream_map"])
+                        .arg(format!(
+                            "v:0,{audio_map}s:0,sgroup:subs,language:{language}"
+                        ));
+                }
+                let initial_segment_seconds = HLS_INITIAL_SEGMENT_SECONDS.to_string();
+                let segment_seconds = HLS_SEGMENT_SECONDS.to_string();
+                let list_size = (HLS_WINDOW_SECONDS / HLS_SEGMENT_SECONDS).to_string();
+                let delete_threshold = (HLS_DELETE_GRACE_SECONDS / HLS_SEGMENT_SECONDS).to_string();
+                cmd.args([
+                    "-max_muxing_queue_size",
+                    "1024",
+                    "-f",
+                    "hls",
+                    "-hls_init_time",
+                    &initial_segment_seconds,
+                ]);
+                let hls_flags = if copy_video {
+                    if caps.browser.is_some() {
+                        "delete_segments+temp_file+independent_segments"
+                    } else {
+                        "delete_segments+temp_file+split_by_time"
+                    } // Preserve the legacy delivery contract during rollout.
+                } else {
+                    "delete_segments+temp_file"
+                };
+                let fmp4_hls = (!copy_video || hevc_copy)
+                    && selected_subtitle.is_none()
+                    && caps.browser.as_ref().is_some_and(|browser| browser.fmp4);
+                if fmp4_hls {
+                    cmd.args([
+                        "-hls_segment_type",
+                        "fmp4",
+                        "-hls_fmp4_init_filename",
+                        "init.mp4",
+                    ]);
+                }
+                cmd.args([
+                    "-hls_time",
+                    &segment_seconds,
+                    "-hls_list_size",
+                    &list_size,
+                    "-hls_delete_threshold",
+                    &delete_threshold,
+                    "-hls_flags",
+                    hls_flags,
+                    "-hls_segment_filename",
+                ]);
+                cmd.arg(dir.join(if fmp4_hls {
+                    "segment-%09d.m4s"
+                } else {
+                    "segment-%09d.ts"
+                }))
+                .arg(dir.join("index.m3u8"));
+                session.child = Some(
+                    cmd.spawn()
+                        .map_err(|_| "Playback engine unavailable".to_owned())?,
+                );
+                // Do not return a URL until both the playlist and first segment exist.
+                let ready = timeout(Duration::from_secs(if pipeline.accelerated() { 12 } else { 30 }), async {
             loop {
                 if !cache_safe(&dir, false).await {
                     return false;
@@ -816,85 +942,86 @@ impl PlaybackManager {
         })
         .await
         .unwrap_or(false);
-            if ready {
-                break;
-            }
-            if let Some(next) = pipeline.fallback() {
-                if let Some(mut child) = session.child.take() {
-                    let _ = child.kill().await;
-                    let _ = child.wait().await;
+                if ready {
+                    break;
                 }
-                // A failed attempt may have emitted a partial playlist. Never reuse it.
-                tokio::fs::remove_dir_all(&dir)
-                    .await
-                    .map_err(|_| "Playback cleanup failed")?;
-                tokio::fs::create_dir(&dir)
-                    .await
-                    .map_err(|_| "Playback storage unavailable")?;
-                tracing::warn!(from = ?pipeline, to = ?next, "Retrying playback pipeline");
-                pipeline = next;
-                continue;
+                if let Some(next) = pipeline.fallback() {
+                    if let Some(mut child) = session.child.take() {
+                        let _ = child.kill().await;
+                        let _ = child.wait().await;
+                    }
+                    // A failed attempt may have emitted a partial playlist. Never reuse it.
+                    tokio::fs::remove_dir_all(&dir)
+                        .await
+                        .map_err(|_| "Playback cleanup failed")?;
+                    tokio::fs::create_dir(&dir)
+                        .await
+                        .map_err(|_| "Playback storage unavailable")?;
+                    tracing::warn!(from = ?pipeline, to = ?next, "Retrying playback pipeline");
+                    pipeline = next;
+                    continue;
+                }
+                if !ready {
+                    session.cleanup().await;
+                    return Err(
+                        "Playback could not start; try forced transcoding or another stream".into(),
+                    );
+                }
             }
-            if !ready {
-                session.cleanup().await;
-                return Err(
-                    "Playback could not start; try forced transcoding or another stream".into(),
-                );
-            }
-        }
-        let engine_ready_ms = engine_started.elapsed().as_millis() as u64;
-        tracing::info!(
-            probe_ms,
-            engine_ready_ms,
-            encoder = pipeline.encoder(),
-            pipeline = ?pipeline,
-            tone_map = ?if pipeline.vaapi() {
-                tone_map
-            } else {
-                hdr.then_some(hardware::ToneMap::Software)
-            },
-            live,
-            video_mode = if copy_video { "copy" } else { "encode" },
-            audio_mode = if selected_input.is_none() {
-                "none"
-            } else if copy_audio {
-                "copy"
-            } else {
-                "encode"
-            },
-            "Playback preparation completed"
-        );
-        session.touched = Instant::now();
-        self.sessions.lock().await.insert(id.clone(), session);
-        Ok(PlaybackResponse {
-            url: format!(
-                "/media/{id}/{capability}/{}",
-                if selected_subtitle.is_some() {
-                    "master.m3u8"
+            let engine_ready_ms = engine_started.elapsed().as_millis() as u64;
+            tracing::info!(
+                probe_ms,
+                engine_ready_ms,
+                encoder = pipeline.encoder(),
+                pipeline = ?pipeline,
+                tone_map = ?if pipeline.vaapi() {
+                    tone_map
                 } else {
-                    "index.m3u8"
+                    hdr.then_some(hardware::ToneMap::Software)
+                },
+                live,
+                video_mode = if copy_video { "copy" } else { "encode" },
+                audio_mode = if !has_audio {
+                    "none"
+                } else if copy_audio {
+                    "copy"
+                } else {
+                    "encode"
+                },
+                "Playback preparation completed"
+            );
+            session.touched = Instant::now();
+            self.sessions.lock().await.insert(id.clone(), session);
+            Ok(PlaybackResponse {
+                url: format!(
+                    "/media/{id}/{capability}/{}",
+                    if selected_subtitle.is_some() {
+                        "master.m3u8"
+                    } else {
+                        "index.m3u8"
+                    }
+                ),
+                id,
+                format: "hls".into(),
+                mode: if remux { "remux" } else { "transcode" }.into(),
+                video_mode: if copy_video { "copy" } else { "encode" }.into(),
+                audio_mode: if !has_audio {
+                    "none"
+                } else if copy_audio {
+                    "copy"
+                } else {
+                    "encode"
                 }
-            ),
-            id,
-            format: "hls".into(),
-            mode: if remux { "remux" } else { "transcode" }.into(),
-            video_mode: if copy_video { "copy" } else { "encode" }.into(),
-            audio_mode: if selected_input.is_none() {
-                "none"
-            } else if copy_audio {
-                "copy"
-            } else {
-                "encode"
-            }
-            .into(),
-            position,
-            live,
-            duration: duration.unwrap_or(0.0),
-            audio_tracks,
-            subtitles_supported: subtitle_tracks.iter().any(|track| track.supported),
-            subtitle_tracks,
-            selected_audio,
-            selected_subtitle,
-        })
+                .into(),
+                position,
+                live,
+                duration: duration.unwrap_or(0.0),
+                audio_tracks,
+                subtitles_supported: subtitle_tracks.iter().any(|track| track.supported),
+                subtitle_tracks,
+                selected_audio,
+                selected_subtitle,
+            })
+        }))
     }
 }

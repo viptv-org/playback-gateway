@@ -7,26 +7,8 @@ use crate::{
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum Mode {
-    Passthrough,
-    Remux,
-    Transcode,
-}
-/// Actual output chosen after inspection, not the caller's raw capabilities.
-#[derive(Clone, Debug, Serialize)]
-pub struct ExecutionPlan {
-    pub mode: Mode,
-    pub format: String,
-    pub video_codec: String,
-    pub audio_codec: String,
-    pub width: u32,
-    pub height: u32,
-    pub audio_track: Option<u32>,
-    pub subtitle_track: Option<u32>,
-    pub start_millis: u64,
-}
+/// Use the engine's inspected plan, never a parallel control-layer approximation.
+pub use playback_engine::OutputPlan as ExecutionPlan;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
@@ -121,14 +103,14 @@ impl Default for Sessions {
     }
 }
 impl Sessions {
-    pub fn reserve(
-        &mut self,
+    /// Resolve idempotent retries before performing any source network I/O.
+    pub fn replay(
+        &self,
         principal: &Principal,
         request: &CreateSession,
-        plan: &ExecutionPlan,
         idempotency: &str,
         now: u64,
-    ) -> Result<Reservation, &'static str> {
+    ) -> Result<Option<Viewer>, &'static str> {
         request.validate()?;
         principal.require(&request.namespace, Scope::Create)?;
         if idempotency.is_empty()
@@ -139,25 +121,42 @@ impl Sessions {
         {
             return Err("invalid_idempotency_key");
         }
-        let body = serde_json::to_string(request).map_err(|_| "invalid_request")?;
-        let request_hash = hash(&body);
-        if let Some(existing) = self
+        let request_hash = hash(&serde_json::to_string(request).map_err(|_| "invalid_request")?);
+        let Some(existing) = self
             .viewers
             .values()
             .find(|v| v.owner == principal.key.id && v.idempotency == idempotency)
-        {
-            if existing.request_hash != request_hash {
-                return Err("idempotency_conflict");
-            }
-            let mut view = existing.view.clone();
-            if view.expires_at <= now && matches!(view.status, Status::Starting | Status::Ready) {
-                view.status = Status::Expired;
-            }
+        else {
+            return Ok(None);
+        };
+        if existing.request_hash != request_hash {
+            return Err("idempotency_conflict");
+        }
+        let mut view = existing.view.clone();
+        if view.expires_at <= now && matches!(view.status, Status::Starting | Status::Ready) {
+            view.status = Status::Expired;
+        }
+        Ok(Some(view))
+    }
+    pub fn reserve(
+        &mut self,
+        principal: &Principal,
+        request: &CreateSession,
+        plan: &ExecutionPlan,
+        idempotency: &str,
+        now: u64,
+    ) -> Result<Reservation, &'static str> {
+        if let Some(viewer) = self.replay(principal, request, idempotency, now)? {
             return Ok(Reservation {
-                viewer: view,
+                viewer,
                 start_job: false,
             });
         }
+        if !plan.shareable {
+            return Err("unsupported_output");
+        }
+        let body = serde_json::to_string(request).map_err(|_| "invalid_request")?;
+        let request_hash = hash(&body);
         if self.viewers.len() >= self.max_records {
             return Err("session_capacity");
         }
@@ -514,6 +513,22 @@ impl Sessions {
     pub fn job_count(&self) -> usize {
         self.jobs.len()
     }
+    pub fn stopping_jobs(&self) -> Vec<String> {
+        self.jobs
+            .values()
+            .filter(|job| job.state == JobState::Stopping)
+            .map(|job| job.id.clone())
+            .collect()
+    }
+    pub fn active_owners(&self) -> Vec<String> {
+        self.viewers
+            .values()
+            .filter(|viewer| matches!(viewer.view.status, Status::Starting | Status::Ready))
+            .map(|viewer| viewer.owner.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
 }
 fn hex(value: &[u8]) -> String {
     value.iter().map(|byte| format!("{byte:02x}")).collect()
@@ -568,15 +583,19 @@ mod tests {
     }
     fn plan() -> ExecutionPlan {
         ExecutionPlan {
-            mode: Mode::Remux,
+            mode: "remux".into(),
             format: "hls".into(),
             video_codec: "h264".into(),
-            audio_codec: "aac".into(),
+            audio_codec: Some("aac".into()),
+            video_mode: "copy".into(),
+            audio_mode: "copy".into(),
             width: 1920,
             height: 1080,
             audio_track: None,
             subtitle_track: None,
-            start_millis: 0,
+            position_micros: 0,
+            segmentation: "mpegts:split".into(),
+            shareable: true,
         }
     }
     #[test]

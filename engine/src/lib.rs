@@ -16,12 +16,14 @@ mod lifecycle;
 mod manager;
 mod probe;
 mod start;
+mod prepared;
 mod subtitles;
 #[cfg(test)]
 mod tests;
 mod types;
 
 pub use manager::{PlaybackManager, SampleLimits};
+pub use prepared::{OutputPlan, PreparedPlayback};
 pub use types::{
     Capabilities, Config, MediaTrack, PlaybackResponse, SelectedAudio,
     SelectedSubtitle, TrackDisposition, TrackSelection,

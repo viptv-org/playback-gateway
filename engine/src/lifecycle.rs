@@ -43,6 +43,7 @@ impl PlaybackManager {
     /// Dropping the manager kills children but only schedules best-effort deletion.
     pub async fn shutdown(&self) {
         self.slots.close();
+        self.preparation_slots.close();
         let _lifecycle = self.lifecycle.write().await;
         if self.initialize().await.is_err() {
             tracing::warn!("Playback startup cleanup could not finish");
@@ -212,7 +213,7 @@ impl PlaybackManager {
             .try_acquire_owned()
             .map_err(|_| "deferred_capacity")?;
         let permits = Arc::new(InputPermits {
-            _playback: slot,
+            _playback: slot.into(),
             _provider: Some(provider),
         });
         let client = crate::egress_proxy_builder(

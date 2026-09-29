@@ -3,8 +3,24 @@ use super::*;
 // Every process reading an input shares these reservations. Cancellation may
 // detach cleanup, but admission stays closed until the final child is reaped.
 pub(super) struct InputPermits {
-    pub(super) _playback: OwnedSemaphorePermit,
+    pub(super) _playback: std::sync::Mutex<OwnedSemaphorePermit>,
     pub(super) _provider: Option<OwnedSemaphorePermit>,
+}
+impl InputPermits {
+    /// Swap bounded inspection admission for output admission only when an
+    /// actual worker will start. Shared viewers can inspect cached facts even
+    /// when every output slot is occupied, then drop their unused preparation.
+    pub(super) fn admit_output(&self, slots: &Arc<Semaphore>) -> Result<(), String> {
+        let permit = slots
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| MSG_PLAYBACK_CAPACITY.to_owned())?;
+        *self
+            ._playback
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = permit;
+        Ok(())
+    }
 }
 
 pub(super) struct Session {
@@ -191,7 +207,12 @@ pub(super) fn header_block(headers: &HashMap<String, String>) -> Result<String, 
     let mut pairs: Vec<_> = headers.iter().collect();
     pairs.sort_by(|a, b| a.0.cmp(b.0));
     let mut out = String::new();
-    if pairs.len() > 32 {
+    if pairs
+        .iter()
+        .filter(|(key, _)| !key.eq_ignore_ascii_case("x-playback-egress-proxy"))
+        .count()
+        > 32
+    {
         return Err("Invalid playback headers".into());
     }
     for (key, value) in pairs {

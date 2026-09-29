@@ -64,7 +64,7 @@ async fn fixture() -> (Url, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
 }
 fn permits() -> Arc<InputPermits> {
     Arc::new(InputPermits {
-        _playback: Arc::new(Semaphore::new(1)).try_acquire_owned().unwrap(),
+        _playback: Arc::new(Semaphore::new(1)).try_acquire_owned().unwrap().into(),
         _provider: None,
     })
 }

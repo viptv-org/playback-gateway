@@ -40,11 +40,18 @@ impl Input {
             return Err("invalid_input");
         }
         if self.headers.len() > 32
+            || self
+                .headers
+                .keys()
+                .map(|key| key.to_ascii_lowercase())
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                != self.headers.len()
             || self.headers.iter().any(|(key, value)| {
                 key.is_empty()
                     || key.len() > 128
                     || !key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
-                    || value.len() > 8192
+                    || value.len() > 4096
                     || value.chars().any(char::is_control)
                     || matches!(
                         key.to_ascii_lowercase().as_str(),

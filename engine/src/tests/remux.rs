@@ -4,8 +4,10 @@ use super::*;
 #[tokio::test]
 #[ignore = "requires real FFmpeg/libx264 and ffprobe binaries"]
 async fn real_ffmpeg_remux_transcode_and_cleanup() {
-    let ffmpeg = PathBuf::from(std::env::var("PLAYBACK_TEST_FFMPEG").expect("PLAYBACK_TEST_FFMPEG"));
-    let ffprobe = PathBuf::from(std::env::var("PLAYBACK_TEST_FFPROBE").expect("PLAYBACK_TEST_FFPROBE"));
+    let ffmpeg =
+        PathBuf::from(std::env::var("PLAYBACK_TEST_FFMPEG").expect("PLAYBACK_TEST_FFMPEG"));
+    let ffprobe =
+        PathBuf::from(std::env::var("PLAYBACK_TEST_FFPROBE").expect("PLAYBACK_TEST_FFPROBE"));
     let root = tempfile::tempdir().unwrap();
     let fixture = root.path().join("fixture.mp4");
     let status = Command::new(&ffmpeg)
@@ -70,8 +72,8 @@ async fn real_ffmpeg_remux_transcode_and_cleanup() {
         } else {
             Capabilities::default()
         };
-        let response = manager
-            .start_with_permit(
+        let prepared = manager
+            .prepare_with_selection(
                 url.clone(),
                 HashMap::new(),
                 position,
@@ -79,9 +81,17 @@ async fn real_ffmpeg_remux_transcode_and_cleanup() {
                 force,
                 false,
                 Some(provider_slots.clone().try_acquire_owned().unwrap()),
+                TrackSelection::default(),
             )
             .await
             .unwrap();
+        assert_eq!(manager.active_count().await, 0);
+        let plan = prepared.plan.clone().unwrap();
+        let response = prepared.start().await.unwrap();
+        assert_eq!(plan.mode, response.mode);
+        assert_eq!(plan.format, response.format);
+        assert_eq!(plan.video_mode, response.video_mode);
+        assert_eq!(plan.audio_mode, response.audio_mode);
         assert_eq!(provider_slots.available_permits(), 0);
         assert_eq!(
             response.mode,
@@ -231,8 +241,10 @@ async fn real_ffmpeg_remux_transcode_and_cleanup() {
 #[ignore = "requires real FFmpeg/ffprobe binaries"]
 async fn a_720p60_source_is_stream_copied_into_hls() {
     use std::os::unix::fs::PermissionsExt;
-    let ffmpeg = PathBuf::from(std::env::var("PLAYBACK_TEST_FFMPEG").expect("PLAYBACK_TEST_FFMPEG"));
-    let ffprobe = PathBuf::from(std::env::var("PLAYBACK_TEST_FFPROBE").expect("PLAYBACK_TEST_FFPROBE"));
+    let ffmpeg =
+        PathBuf::from(std::env::var("PLAYBACK_TEST_FFMPEG").expect("PLAYBACK_TEST_FFMPEG"));
+    let ffprobe =
+        PathBuf::from(std::env::var("PLAYBACK_TEST_FFPROBE").expect("PLAYBACK_TEST_FFPROBE"));
     let root = tempfile::tempdir().unwrap();
     let fixture = root.path().join("live720p60.mkv");
     // Level 4.1 at 59.94fps, exactly like the production live channels.
@@ -398,8 +410,10 @@ async fn a_720p60_source_is_stream_copied_into_hls() {
 #[ignore = "requires real FFmpeg/ffprobe binaries"]
 async fn compatible_video_is_copied_while_incompatible_audio_is_encoded() {
     use std::os::unix::fs::PermissionsExt;
-    let ffmpeg = PathBuf::from(std::env::var("PLAYBACK_TEST_FFMPEG").expect("PLAYBACK_TEST_FFMPEG"));
-    let ffprobe = PathBuf::from(std::env::var("PLAYBACK_TEST_FFPROBE").expect("PLAYBACK_TEST_FFPROBE"));
+    let ffmpeg =
+        PathBuf::from(std::env::var("PLAYBACK_TEST_FFMPEG").expect("PLAYBACK_TEST_FFMPEG"));
+    let ffprobe =
+        PathBuf::from(std::env::var("PLAYBACK_TEST_FFPROBE").expect("PLAYBACK_TEST_FFPROBE"));
     let root = tempfile::tempdir().unwrap();
     let fixture = root.path().join("hybrid.mkv");
     let status = Command::new(&ffmpeg)

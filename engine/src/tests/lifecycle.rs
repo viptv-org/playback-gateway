@@ -47,7 +47,7 @@ async fn open_segment_growth_and_stalled_leased_process_are_reaped() {
             supervised_live: false,
             throttle: Throttle::default(),
             permits: Arc::new(InputPermits {
-                _playback: manager.slots.clone().try_acquire_owned().unwrap(),
+                _playback: manager.slots.clone().try_acquire_owned().unwrap().into(),
                 _provider: None,
             }),
             cleanup_tasks: manager.cleanup_tasks.clone(),
@@ -446,7 +446,7 @@ async fn capabilities_expiry_and_cleanup_are_enforced() {
             supervised_live: false,
             throttle: Throttle::default(),
             permits: Arc::new(InputPermits {
-                _playback: permit,
+                _playback: permit.into(),
                 _provider: None,
             }),
             cleanup_tasks: manager.cleanup_tasks.clone(),
@@ -529,7 +529,7 @@ async fn shutdown_reaps_children_and_cancelled_start_artifacts() {
             supervised_live: false,
             throttle: Throttle::default(),
             permits: Arc::new(InputPermits {
-                _playback: manager.slots.clone().try_acquire_owned().unwrap(),
+                _playback: manager.slots.clone().try_acquire_owned().unwrap().into(),
                 _provider: Some(provider_slots.clone().try_acquire_owned().unwrap()),
             }),
             cleanup_tasks: manager.cleanup_tasks.clone(),

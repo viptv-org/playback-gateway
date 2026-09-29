@@ -1,6 +1,6 @@
 # Foundation validation
 
-The extracted engine has 65 passing unit/process-fixture tests and 17
+The extracted engine has 66 passing unit/process-fixture tests and 17
 opt-in media/hardware tests. Its 1080p clamp is removed; the dimension test now
 checks 3840x2160 while retaining even dimensions and no-upscale filters.
 
@@ -10,7 +10,7 @@ five logical viewers sharing one logical job; cleanup retaining key capacity;
 startup deadline/late completion; private/reserved IP denial; and proxy forwarding
 to an explicit test-only loopback origin without proxy credentials leaking.
 
-The control crate now has 15 passing tests. Additional coverage verifies
+The control crate now has 17 passing tests. Additional coverage verifies
 per-viewer hashed media capabilities, rotation, exact lease expiry, revocation
 before background cleanup, credential-type separation and safe shared-job failure
 codes while retaining admission until teardown. Bootstrap-only HTTP key routes
@@ -38,8 +38,18 @@ still serves media through a managed resource. Original-file delivery follows
 declared dimensions without hard-coded 1080p/4K clamps, with tests for 4K/8K and
 rejection above the client-declared envelope. Codec/decoder checks remain.
 
-These are not yet end-to-end media-service tests. The session ledger is not wired
-to engine workers or HTTP media delivery. Input/output sharing, Docker/runtime
-startup, FFmpeg network enforcement and backend integration remain incomplete.
+Preparation now exposes an engine-owned normalized plan before output startup,
+with separately bounded inspection/output admission and cancellation-safe drops.
+Two different capability envelopes yield the same source-sized output plan.
+The real remux/transcode fixture also checks that prepared plans match the actual
+started response. The control worker bridge's scripted-process tests prove five
+viewers use one engine worker, individual media-token authorization, revocation,
+and cancelled-worker teardown before quota release. These do not prove one real
+upstream connection or multiple distinct outputs sharing a single input.
+
+These are not yet end-to-end media-service tests. Public session/media HTTP
+routes, Docker/runtime startup, complete network enforcement and backend
+integration remain incomplete. Worker credential-store reads still need async
+offloading at the HTTP integration boundary.
 The egress proxy alone does not prove engine-wide SSRF protection until all engine
 fetches are verified to traverse it. Do not deploy this checkpoint publicly.

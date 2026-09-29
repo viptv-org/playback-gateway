@@ -2,6 +2,65 @@ use super::*;
 
 #[cfg(unix)]
 #[tokio::test]
+async fn preparation_normalizes_output_and_does_not_start_a_worker() {
+    let root = tempfile::tempdir().unwrap();
+    let manager = scripted_probe(
+        root.path(),
+        r#"printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","width":1280,"height":720,"pix_fmt":"yuv420p","profile":"High","level":41,"avg_frame_rate":"30/1","r_frame_rate":"30/1","field_order":"progressive"},{"index":1,"codec_type":"audio","codec_name":"aac","profile":"LC","channels":2}],"format":{"duration":"30"}}'"#,
+    );
+    let provider = Arc::new(Semaphore::new(1));
+    let mut plans = Vec::new();
+    for (width, height) in [(1920, 1080), (3840, 2160)] {
+        let prepared = manager
+            .prepare_with_selection(
+                "https://fixture.invalid/private-source".into(),
+                HashMap::new(),
+                0.0,
+                Some(Capabilities {
+                    max_width: width,
+                    max_height: height,
+                    ..Capabilities::default()
+                }),
+                false,
+                false,
+                Some(provider.clone().try_acquire_owned().unwrap()),
+                TrackSelection::default(),
+            )
+            .await
+            .unwrap();
+        let plan = prepared.plan.as_ref().unwrap();
+        assert_eq!(plan.mode, "remux");
+        assert_eq!((plan.width, plan.height), (1280, 720));
+        assert!(plan.shareable);
+        assert!(!serde_json::to_string(plan)
+            .unwrap()
+            .contains("private-source"));
+        plans.push(plan.clone());
+        assert_eq!(provider.available_permits(), 0);
+        assert_eq!(manager.active_count().await, 0);
+        assert!(
+            !root.path().join("media").exists(),
+            "preparation must not write worker output"
+        );
+        // The encoder path intentionally does not exist. Successful preparation
+        // proves no output process was required. Dropping it frees admission.
+        drop(prepared);
+        assert_eq!(provider.available_permits(), 1);
+    }
+    assert_eq!(
+        plans[0], plans[1],
+        "capability headroom must not split identical outputs"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("probe.sh.count")).unwrap(),
+        "x",
+        "inspection reused while cached"
+    );
+    manager.shutdown().await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn qsv_failure_retries_with_same_reservation_and_copies_compatible_audio() {
     use std::os::unix::fs::PermissionsExt;
     let root = tempfile::tempdir().unwrap();
@@ -256,7 +315,8 @@ printf '%s' '{"streams":[{"codec_type":"video","codec_name":"h264","width":960,"
     };
     wait_probe_file(&root.path().join("probe.sh.count")).await;
     assert_eq!(capacity.available_permits(), 0);
-    assert_eq!(manager.slots.available_permits(), 0);
+    assert_eq!(manager.preparation_slots.available_permits(), 0);
+    assert_eq!(manager.slots.available_permits(), 1);
     let result = timeout(Duration::from_secs(5), worker)
         .await
         .unwrap()
@@ -278,6 +338,7 @@ printf '%s' '{"streams":[{"codec_type":"video","codec_name":"h264","width":960,"
     }
     assert_eq!(capacity.available_permits(), 1);
     assert_eq!(manager.slots.available_permits(), 1);
+    assert_eq!(manager.preparation_slots.available_permits(), 1);
     assert!(manager
         .probe("http://example.com/video", "", None)
         .await
