@@ -146,13 +146,20 @@ impl Workers {
                 headers,
                 request.position_seconds,
                 Some(caps),
-                false,
+                request.output.conversion != crate::protocol::Conversion::Auto,
                 request.input.live,
                 None,
                 TrackSelection {
+                    conversion_reason: match request.output.conversion {
+                        crate::protocol::Conversion::Audio => Some("audio-codec".into()),
+                        crate::protocol::Conversion::Video => Some("video-codec".into()),
+                        _ => None,
+                    },
                     audio_track_index: request.output.audio_track,
                     subtitle_track_index: request.output.subtitle_track,
-                    ..TrackSelection::default()
+                    audio_language: request.output.audio_language.clone(),
+                    preferred_audio_language: request.output.preferred_audio_language.clone(),
+                    preferred_subtitle_language: request.output.preferred_subtitle_language.clone(),
                 },
             ),
         )
@@ -720,6 +727,11 @@ printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","wi
                 live: true,
             },
             output: Output {
+                conversion: crate::protocol::Conversion::Auto,
+                audio_language: None,
+                preferred_audio_language: None,
+                preferred_subtitle_language: None,
+                subtitles_off: false,
                 protocol: OutputProtocol::Hls,
                 video_codecs: vec!["h264".into()],
                 audio_codecs: vec!["aac".into()],

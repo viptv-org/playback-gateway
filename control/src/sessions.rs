@@ -551,20 +551,19 @@ impl Sessions {
         for job in self.jobs.values_mut() {
             let timed_out = job.state == JobState::Starting
                 && now.saturating_sub(job.created) >= STARTUP_DEADLINE_SECONDS;
-            if timed_out
+            if (timed_out
                 || job
                     .idle_since
-                    .is_some_and(|at| now.saturating_sub(at) >= self.idle_grace)
+                    .is_some_and(|at| now.saturating_sub(at) >= self.idle_grace))
+                && job.state != JobState::Stopping
             {
-                if job.state != JobState::Stopping {
-                    job.state = JobState::Stopping;
-                    stopping.push(job.id.clone());
-                    for id in &job.viewers {
-                        if let Some(viewer) = self.viewers.get_mut(id) {
-                            viewer.view.status = Status::Failed;
-                            viewer.view.error_code = Some("startup_timeout".into());
-                            viewer.view.expires_at = now;
-                        }
+                job.state = JobState::Stopping;
+                stopping.push(job.id.clone());
+                for id in &job.viewers {
+                    if let Some(viewer) = self.viewers.get_mut(id) {
+                        viewer.view.status = Status::Failed;
+                        viewer.view.error_code = Some("startup_timeout".into());
+                        viewer.view.expires_at = now;
                     }
                 }
             }
@@ -647,6 +646,11 @@ mod tests {
                 live: true,
             },
             output: Output {
+                conversion: crate::protocol::Conversion::Auto,
+                audio_language: None,
+                preferred_audio_language: None,
+                preferred_subtitle_language: None,
+                subtitles_off: false,
                 protocol: OutputProtocol::Hls,
                 video_codecs: vec!["h264".into()],
                 audio_codecs: vec!["aac".into()],
@@ -775,7 +779,11 @@ mod tests {
         sessions.ready(&first.viewer.job_id, 1);
         sessions.release(&p, &first.viewer.id, 2).unwrap();
         sessions.reap(17);
-        assert_eq!(sessions.available(&p,17).inputs,0,"cleanup must remain charged in capacity hints");
+        assert_eq!(
+            sessions.available(&p, 17).inputs,
+            0,
+            "cleanup must remain charged in capacity hints"
+        );
         let mut next = request("family");
         next.input.url.push_str("/other");
         assert_eq!(
@@ -783,7 +791,7 @@ mod tests {
             "input_capacity"
         );
         sessions.finish_stop(&first.viewer.job_id);
-        assert_eq!(sessions.available(&p,18).inputs,1);
+        assert_eq!(sessions.available(&p, 18).inputs, 1);
         assert!(sessions.reserve(&p, &next, &plan(), "b", 18).is_ok());
     }
 

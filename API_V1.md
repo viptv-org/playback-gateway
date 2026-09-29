@@ -34,16 +34,32 @@ hyphens or underscores) and a JSON body shaped as follows:
   },
   "output": {
     "protocol": "hls",
+    "conversion": "auto",
     "video_codecs": ["h264"],
     "audio_codecs": ["aac"],
     "max_width": 3840,
     "max_height": 2160,
     "audio_track": null,
-    "subtitle_track": null
+    "subtitle_track": null,
+    "audio_language": null,
+    "preferred_audio_language": null,
+    "preferred_subtitle_language": null,
+    "subtitles_off": false
   },
   "position_seconds": 0
 }
 ```
+
+`conversion` is `auto` (default), `audio`, `video`, or `audio_video`. It explicitly
+requests which media components must be encoded; automatic mode retains the
+copy/remux-first planner. These are closed choices, never arbitrary FFmpeg
+arguments. Track indices are absolute input indices bounded to 65535. Optional
+language tags are at most 35 ASCII alphanumeric/hyphen characters. Explicit track
+selection and language preferences are passed to the inspected engine planner.
+`subtitles_off` cannot be combined with a subtitle index or preferred subtitle
+language. Normalized output plans, including chosen tracks and conversion modes,
+still determine worker sharing; request preferences cannot merge incompatible
+outputs. Use matching control clients/gateway builds for these new fields.
 
 This is a schema example, not a playable public URL. `progressive` requests are
 accepted only when the selected original-container transport is compatible;

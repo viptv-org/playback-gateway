@@ -1,8 +1,20 @@
 # Validation checkpoint — 2026-09-29
 
+## Conversion and track contract extension
+
+Generic output conversion now exposes auto/audio/video/audio_video; the worker
+passes its force/reason pair to the existing inspected planner. Explicit tracks,
+language preferences and subtitle-off validation reach that same planner.
+Bounded schema fixtures cover defaults, supported conversion choices, 4K facts,
+invalid language/index values and conflicting subtitle choices. Full workspace:
+87 passed, 20 opt-in fixtures ignored; strict all-target Clippy passed. A prior
+collapsible-if warning in the reaper was corrected without changing its condition.
+No new real-codec/hardware qualification or Docker image build is claimed here;
+cross-output ingest sharing and other open acceptance requirements remain open.
+
 ## Verified locally
 
-- cargo test --workspace --locked: 66 engine tests, 19 control/API tests and one
+- cargo test --workspace --locked: 66 engine tests, 20 control/API tests and one
   service-storage test pass. Eighteen engine fixtures, one real-worker fixture
   and one standalone-service fixture are opt-in and excluded from that count.
 - HTTP route tests cover key issuance, redacted listing, revocation, operation

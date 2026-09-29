@@ -77,9 +77,21 @@ pub enum OutputProtocol {
     Progressive,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Conversion {
+    #[default]
+    Auto,
+    Audio,
+    Video,
+    AudioVideo,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Output {
+    #[serde(default)]
+    pub conversion: Conversion,
     pub protocol: OutputProtocol,
     pub video_codecs: Vec<String>,
     pub audio_codecs: Vec<String>,
@@ -87,10 +99,33 @@ pub struct Output {
     pub max_height: u32,
     pub audio_track: Option<u32>,
     pub subtitle_track: Option<u32>,
+    pub audio_language: Option<String>,
+    pub preferred_audio_language: Option<String>,
+    pub preferred_subtitle_language: Option<String>,
+    #[serde(default)]
+    pub subtitles_off: bool,
 }
 impl Output {
     pub fn validate(&self) -> Result<(), &'static str> {
         if !(2..=16384).contains(&self.max_width)
+            || self.audio_track.is_some_and(|index| index > 65535)
+            || self.subtitle_track.is_some_and(|index| index > 65535)
+            || (self.subtitles_off
+                && (self.subtitle_track.is_some() || self.preferred_subtitle_language.is_some()))
+            || [
+                &self.audio_language,
+                &self.preferred_audio_language,
+                &self.preferred_subtitle_language,
+            ]
+            .into_iter()
+            .flatten()
+            .any(|language| {
+                language.is_empty()
+                    || language.len() > 35
+                    || !language
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            })
             || !(2..=16384).contains(&self.max_height)
             || self.video_codecs.is_empty()
             || self.audio_codecs.is_empty()
@@ -157,6 +192,44 @@ pub enum SessionState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn output_conversion_and_track_policy_is_explicit_and_bounded() {
+        let base = serde_json::json!({"protocol":"hls","video_codecs":["h264"],"audio_codecs":["aac"],"max_width":3840,"max_height":2160,"audio_track":null,"subtitle_track":null});
+        let automatic: Output = serde_json::from_value(base.clone()).unwrap();
+        assert_eq!(automatic.conversion, Conversion::Auto);
+        assert!(automatic.validate().is_ok());
+        for conversion in ["auto", "audio", "video", "audio_video"] {
+            let mut value = base.clone();
+            value["conversion"] = serde_json::json!(conversion);
+            value["preferred_audio_language"] = serde_json::json!("pt-BR");
+            assert!(serde_json::from_value::<Output>(value)
+                .unwrap()
+                .validate()
+                .is_ok());
+        }
+        for (field, bad) in [
+            ("audio_track", serde_json::json!(65536)),
+            ("subtitle_track", serde_json::json!(65536)),
+            ("audio_language", serde_json::json!("en\nsecret")),
+            ("preferred_audio_language", serde_json::json!("")),
+        ] {
+            let mut value = base.clone();
+            value[field] = bad;
+            assert!(serde_json::from_value::<Output>(value)
+                .unwrap()
+                .validate()
+                .is_err());
+        }
+        let mut value = base;
+        value["subtitles_off"] = serde_json::json!(true);
+        value["subtitle_track"] = serde_json::json!(2);
+        assert!(serde_json::from_value::<Output>(value.clone())
+            .unwrap()
+            .validate()
+            .is_err());
+        value["conversion"] = serde_json::json!("shell-command");
+        assert!(serde_json::from_value::<Output>(value).is_err());
+    }
     #[test]
     fn sensitive_inputs_never_appear_in_debug() {
         let input = Input {
