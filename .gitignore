@@ -1,0 +1,6 @@
+/target/
+**/target/
+/data/
+.env
+*.sqlite*
+*.log
