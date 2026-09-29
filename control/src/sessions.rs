@@ -1,7 +1,7 @@
 //! Atomic lifecycle bookkeeping. Engine work happens outside this lock; stopping
 //! jobs retain their admission reservation until the engine confirms teardown.
 use crate::{
-    credentials::{hash, random_hex, Principal, Scope},
+    credentials::{hash, random_hex, Credentials, Principal, Scope},
     protocol::{CreateSession, IDLE_GRACE_SECONDS, STARTUP_DEADLINE_SECONDS, VIEWER_LEASE_SECONDS},
 };
 use serde::Serialize;
@@ -70,6 +70,38 @@ struct OwnedViewer {
     owner: String,
     request_hash: [u8; 32],
     idempotency: String,
+    media_hash: Option<[u8; 32]>,
+}
+
+/// Returned only on issuance. Never include this capability in logs or a
+/// control-plane session representation. Rotation invalidates the previous one.
+#[derive(Serialize)]
+pub struct MediaCredential {
+    pub token: String,
+}
+impl std::fmt::Debug for MediaCredential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("MediaCredential(<redacted>)")
+    }
+}
+
+/// Allowlisted public failures, never raw engine diagnostics or upstream URLs.
+#[derive(Clone, Copy, Debug)]
+pub enum Failure {
+    SourceUnavailable,
+    SourceConnectionLimit,
+    UnsupportedMedia,
+    ProcessingFailed,
+}
+impl Failure {
+    fn code(self) -> &'static str {
+        match self {
+            Self::SourceUnavailable => "source_unavailable",
+            Self::SourceConnectionLimit => "source_connection_limit",
+            Self::UnsupportedMedia => "unsupported_media",
+            Self::ProcessingFailed => "processing_failed",
+        }
+    }
 }
 
 pub struct Sessions {
@@ -219,6 +251,7 @@ impl Sessions {
                 owner: principal.key.id.clone(),
                 request_hash,
                 idempotency: idempotency.into(),
+                media_hash: None,
             },
         );
         Ok(Reservation {
@@ -264,6 +297,89 @@ impl Sessions {
             view.status = Status::Expired;
         }
         Ok(view)
+    }
+    /// Call only with a freshly authenticated control principal. A media token
+    /// can never mint another token or authorize a control operation.
+    pub fn issue_media(
+        &mut self,
+        principal: &Principal,
+        id: &str,
+        now: u64,
+    ) -> Result<MediaCredential, &'static str> {
+        let view = self.get(principal, id, now)?;
+        if !matches!(view.status, Status::Starting | Status::Ready) {
+            return Err("session_expired");
+        }
+        let token = format!("pgm_{}", random_hex(32));
+        self.viewers
+            .get_mut(id)
+            .ok_or("session_not_found")?
+            .media_hash = Some(hash(&token));
+        Ok(MediaCredential { token })
+    }
+    /// Every media resource (including child playlists, keys and subtitles)
+    /// must pass this check. Reads never extend the viewer lease. The returned
+    /// job ID is internal routing data, not an engine/media credential.
+    pub fn authorize_media(
+        &self,
+        credentials: &Credentials,
+        id: &str,
+        token: &str,
+        now: u64,
+    ) -> Result<String, &'static str> {
+        let denied = "media_unauthorized";
+        if token.len() != 68 || !token.starts_with("pgm_") {
+            return Err(denied);
+        }
+        let viewer = self.viewers.get(id).ok_or(denied)?;
+        let expected = viewer.media_hash.ok_or(denied)?;
+        let supplied = hash(token);
+        let difference = expected
+            .iter()
+            .zip(supplied)
+            .fold(0u8, |difference, (a, b)| difference | (a ^ b));
+        if difference != 0 || viewer.view.status != Status::Ready || viewer.view.expires_at <= now {
+            return Err(denied);
+        }
+        let timestamp = i64::try_from(now).map_err(|_| denied)?;
+        // Fail closed even if the credential store is unavailable. Consult the
+        // current record, not the principal cached when the job was created.
+        if !credentials
+            .active(&viewer.owner, timestamp)
+            .map_err(|_| denied)?
+        {
+            return Err(denied);
+        }
+        if !self
+            .jobs
+            .get(&viewer.view.job_id)
+            .is_some_and(|job| job.state == JobState::Ready)
+        {
+            return Err(denied);
+        }
+        Ok(viewer.view.job_id.clone())
+    }
+    /// Mark all viewers failed immediately, but keep capacity reserved until
+    /// the worker has stopped and calls finish_stop. Returns true once only.
+    pub fn fail(&mut self, id: &str, failure: Failure, now: u64) -> bool {
+        let Some(job) = self.jobs.get_mut(id) else {
+            return false;
+        };
+        if job.state == JobState::Stopping {
+            return false;
+        }
+        job.state = JobState::Stopping;
+        for id in &job.viewers {
+            if let Some(viewer) = self.viewers.get_mut(id) {
+                if matches!(viewer.view.status, Status::Starting | Status::Ready) {
+                    viewer.view.status = Status::Failed;
+                    viewer.view.error_code = Some(failure.code().into());
+                    viewer.view.expires_at = now;
+                    viewer.media_hash = None;
+                }
+            }
+        }
+        true
     }
     pub fn renew(
         &mut self,
@@ -571,5 +687,101 @@ mod tests {
         );
         sessions.finish_stop(&first.viewer.job_id);
         assert!(sessions.reserve(&p, &next, &plan(), "b", 18).is_ok());
+    }
+
+    #[test]
+    fn media_capabilities_are_viewer_scoped_revocable_and_do_not_renew() {
+        let bootstrap = "test-bootstrap-key-long-enough-for-fixture";
+        let credentials = Credentials::from_connection(
+            rusqlite::Connection::open_in_memory().unwrap(),
+            bootstrap,
+        )
+        .unwrap();
+        let issued = credentials
+            .issue(bootstrap, principal("template", "family").key.spec, 0)
+            .unwrap();
+        let p = credentials.authenticate(&issued.secret, 0).unwrap();
+        let mut sessions = Sessions::default();
+        let one = sessions
+            .reserve(&p, &request("family"), &plan(), "one", 0)
+            .unwrap()
+            .viewer;
+        let two = sessions
+            .reserve(&p, &request("family"), &plan(), "two", 0)
+            .unwrap()
+            .viewer;
+        let old = sessions.issue_media(&p, &one.id, 0).unwrap();
+        assert!(!format!("{old:?}").contains(&old.token));
+        assert!(sessions
+            .authorize_media(&credentials, &one.id, &old.token, 0)
+            .is_err());
+        assert!(sessions.ready(&one.job_id, 1));
+        let fresh = sessions.issue_media(&p, &one.id, 1).unwrap();
+        let second = sessions.issue_media(&p, &two.id, 1).unwrap();
+        assert!(sessions
+            .authorize_media(&credentials, &one.id, &old.token, 1)
+            .is_err());
+        assert!(sessions
+            .authorize_media(&credentials, &two.id, &fresh.token, 1)
+            .is_err());
+        assert!(sessions
+            .authorize_media(&credentials, &one.id, &issued.secret, 1)
+            .is_err());
+        assert!(credentials.authenticate(&fresh.token, 1).is_err());
+        assert_eq!(
+            sessions
+                .authorize_media(&credentials, &one.id, &fresh.token, 59)
+                .unwrap(),
+            one.job_id
+        );
+        assert!(sessions
+            .authorize_media(&credentials, &one.id, &fresh.token, 60)
+            .is_err());
+        sessions.renew(&p, &two.id, 59).unwrap();
+        assert!(sessions
+            .authorize_media(&credentials, &two.id, &second.token, 60)
+            .is_ok());
+        // Revocation works before the background reaper or explicit revoke hook.
+        credentials.revoke(bootstrap, &p.key.id).unwrap();
+        assert!(sessions
+            .authorize_media(&credentials, &two.id, &second.token, 60)
+            .is_err());
+    }
+
+    #[test]
+    fn failed_jobs_deny_late_ready_and_retain_capacity_until_teardown() {
+        let p = principal("one", "family");
+        let mut sessions = Sessions::default();
+        let one = sessions
+            .reserve(&p, &request("family"), &plan(), "one", 0)
+            .unwrap()
+            .viewer;
+        let two = sessions
+            .reserve(&p, &request("family"), &plan(), "two", 0)
+            .unwrap()
+            .viewer;
+        assert!(sessions.fail(&one.job_id, Failure::SourceConnectionLimit, 1));
+        assert!(!sessions.fail(&one.job_id, Failure::ProcessingFailed, 2));
+        assert!(!sessions.ready(&one.job_id, 2));
+        for viewer in [one.clone(), two] {
+            let state = sessions.get(&p, &viewer.id, 2).unwrap();
+            assert_eq!(state.status, Status::Failed);
+            assert_eq!(state.error_code.as_deref(), Some("source_connection_limit"));
+            assert!(sessions.issue_media(&p, &viewer.id, 2).is_err());
+            assert!(sessions.renew(&p, &viewer.id, 2).is_err());
+        }
+        assert_eq!(
+            sessions
+                .reserve(&p, &request("family"), &plan(), "three", 2)
+                .unwrap_err(),
+            "input_cleanup_pending"
+        );
+        assert!(sessions.finish_stop(&one.job_id));
+        assert!(
+            sessions
+                .reserve(&p, &request("family"), &plan(), "three", 3)
+                .unwrap()
+                .start_job
+        );
     }
 }
