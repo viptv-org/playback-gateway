@@ -196,7 +196,7 @@ async fn capabilities(
         return Err(ApiError("forbidden"));
     }
     Ok(Json(
-        serde_json::json!({"version":API_VERSION, "ready":state.ready.load(Ordering::Acquire), "protocols":["hls","progressive"], "viewer_lease_seconds":VIEWER_LEASE_SECONDS, "renew_after_seconds":RENEW_AFTER_SECONDS, "namespaces":principal.key.spec.namespaces, "limits":principal.key.spec.quotas}),
+        serde_json::json!({"version":API_VERSION, "ready":state.ready.load(Ordering::Acquire), "protocols":["hls","progressive"], "viewer_lease_seconds":VIEWER_LEASE_SECONDS, "renew_after_seconds":RENEW_AFTER_SECONDS, "namespaces":principal.key.spec.namespaces, "scopes":principal.key.spec.scopes, "limits":principal.key.spec.quotas}),
     ))
 }
 async fn ready(State(state): State<Api>) -> Response {
@@ -310,6 +310,11 @@ mod tests {
         assert_eq!(status, StatusCode::CREATED);
         let issued: Value = serde_json::from_slice(&issued).unwrap();
         let key = issued["secret"].as_str().unwrap();
+        let (_, _, capabilities) = call(&app, "GET", "/v1/capabilities", key, None, String::new()).await;
+        let capabilities: Value = serde_json::from_slice(&capabilities).unwrap();
+        for scope in ["capabilities", "create", "read", "renew", "release"] {
+            assert!(capabilities["scopes"].as_array().unwrap().contains(&json!(scope)));
+        }
         assert_eq!(
             call(&app, "GET", "/v1/capabilities", key, None, String::new())
                 .await

@@ -65,7 +65,8 @@ changing the body under that key returns `409`.
 - `POST /v1/sessions/:id/renew` renews a live viewer lease; no body is required.
 - `DELETE /v1/sessions/:id` releases that viewer (`204`), not the shared job.
 - `GET /v1/capabilities` reports protocol version, supported delivery transports,
-  own namespaces and configured quota limits.
+  own namespaces, operation scopes and configured quota limits. Integrators can
+  validate key permissions without creating a playback session.
 
 Leases last 60 seconds; renew every 20. Media reads do not renew leases. Shared
 workers have 15 seconds of zero-viewer grace. Startup and cleanup retain quota

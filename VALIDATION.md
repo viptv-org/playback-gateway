@@ -45,6 +45,14 @@ HTTP inputs; default-enabled verification avoids that regression.
 
 ## Remaining acceptance work
 
+Capability responses now expose the authenticated key's operation scopes so an
+integrator can validate permissions without starting media. The 86-test default
+suite passes with scope assertions. The backend's opt-in executable integration
+test verifies issuance/registration/check against the current native service.
+The earlier image 2551a1586f24 predates this metadata addition and must be rebuilt
+before using it with the new backend registration flow; it is not a current-image
+deployment claim.
+
 This is not approval for public deployment or VIPTV cutover. Pending work includes
 pending-inspection quota/rate admission, detailed upstream failure classification,
 all-format/redirect/DNS network enforcement, multi-output single-input fan-out,
