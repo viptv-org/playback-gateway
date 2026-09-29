@@ -1,9 +1,110 @@
 use super::*;
 
 #[tokio::test]
+#[ignore = "requires real FFmpeg/ffprobe; local proxy/forbidden destination fixtures"]
+async fn real_egress_proxy_covers_root_redirects_nested_segments_and_keys() {
+    use tokio::io::AsyncWriteExt;
+    for variable in ["PLAYBACK_TEST_FFPROBE", "PLAYBACK_TEST_FFMPEG"] {
+        let binary = std::env::var(variable).unwrap();
+        for kind in ["root", "redirect", "segment", "key", "tcp", "tls"] {
+            let forbidden = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let destination = forbidden.local_addr().unwrap();
+            let proxy = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let proxy_address = proxy.local_addr().unwrap();
+            let trace = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+            let received = trace.clone();
+            let server = tokio::spawn(async move {
+                loop {
+                    let (mut socket, _) = proxy.accept().await.unwrap();
+                    let mut request = Vec::new();
+                    while !request.ends_with(b"\r\n\r\n") && request.len() < 16384 {
+                        match socket.read_u8().await {
+                            Ok(byte) => request.push(byte),
+                            Err(_) => break,
+                        }
+                    }
+                    let request = String::from_utf8_lossy(&request).into_owned();
+                    let initial = request
+                        .lines()
+                        .next()
+                        .is_some_and(|line| line.contains("/index.m3u8"));
+                    received.lock().unwrap().push(request);
+                    let body = if initial && kind == "redirect" {
+                        format!("HTTP/1.1 302 Found\r\nLocation: http://{destination}/secret.ts\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                    } else if initial && kind != "root" {
+                        let scheme = if matches!(kind, "tcp" | "tls") {
+                            kind
+                        } else {
+                            "http"
+                        };
+                        let key = if kind == "key" {
+                            format!("#EXT-X-KEY:METHOD=AES-128,URI=\"http://{destination}/secret.key\",IV=0x00000000000000000000000000000001\n")
+                        } else {
+                            String::new()
+                        };
+                        let playlist = format!("#EXTM3U\n#EXT-X-TARGETDURATION:4\n{key}#EXTINF:4,\n{scheme}://{destination}/secret.ts\n#EXT-X-ENDLIST\n");
+                        format!("HTTP/1.1 200 OK\r\nContent-Type: application/vnd.apple.mpegurl\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{playlist}", playlist.len())
+                    } else {
+                        "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                            .into()
+                    };
+                    let _ = socket.write_all(body.as_bytes()).await;
+                }
+            });
+            let mut command = Command::new(&binary);
+            command
+                .kill_on_drop(true)
+                .args(["-v", "error", "-allowed_extensions", "ALL"])
+                .env("no_proxy", "*")
+                .env("NO_PROXY", "*")
+                .env("http_proxy", "http://127.0.0.1:1");
+            input_args(
+                &mut command,
+                &format!("x-playback-egress-proxy: http://{proxy_address}\r\n"),
+            );
+            if variable == "PLAYBACK_TEST_FFPROBE" {
+                command.arg("-show_streams");
+            }
+            command
+                .arg("-i")
+                .arg(format!("http://{destination}/index.m3u8"));
+            if variable == "PLAYBACK_TEST_FFMPEG" {
+                command.args(["-t", "1", "-f", "null", "-"]);
+            }
+            let outcome = timeout(Duration::from_secs(8), command.output()).await;
+            server.abort();
+            let _ = server.await;
+            assert!(
+                timeout(Duration::from_millis(30), forbidden.accept())
+                    .await
+                    .is_err(),
+                "{kind} must never contact a destination outside the proxy"
+            );
+            let output = outcome.expect("bounded failure").unwrap();
+            assert!(!output.status.success(), "forbidden fixture must not play");
+            let requests = trace.lock().unwrap();
+            assert!(
+                !requests.is_empty(),
+                "root request must use the explicit proxy"
+            );
+            if matches!(kind, "redirect" | "segment" | "key") {
+                assert!(
+                    requests.len() >= 2,
+                    "{kind} must reach proxy enforcement for child request"
+                );
+            }
+            assert!(requests
+                .iter()
+                .all(|request| !request.contains("x-playback-egress-proxy")));
+        }
+    }
+}
+
+#[tokio::test]
 #[ignore = "requires a real ffprobe binary"]
 async fn real_ffprobe_rejects_nested_local_segments_and_aes_keys() {
-    let ffprobe = PathBuf::from(std::env::var("PLAYBACK_TEST_FFPROBE").expect("PLAYBACK_TEST_FFPROBE"));
+    let ffprobe =
+        PathBuf::from(std::env::var("PLAYBACK_TEST_FFPROBE").expect("PLAYBACK_TEST_FFPROBE"));
     for encrypted in [false, true] {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());

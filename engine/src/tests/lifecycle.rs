@@ -218,6 +218,8 @@ fn remux_rates_admit_up_to_sixty_frames_per_second() {
 #[test]
 fn private_egress_is_an_input_option_not_an_upstream_header() {
     let mut cmd = Command::new("ffmpeg");
+    cmd.env("no_proxy", "*")
+        .env("HTTP_PROXY", "http://untrusted.invalid");
     input_args(
         &mut cmd,
         "x-playback-egress-proxy: http://warp:8899\r\nUser-Agent: VIPTV\r\n",
@@ -234,6 +236,21 @@ fn private_egress_is_an_input_option_not_an_upstream_header() {
         .windows(2)
         .any(|v| v == ["-headers", "User-Agent: VIPTV\r\n"]));
     assert!(!args.iter().any(|v| v.contains("x-playback-egress-proxy")));
+    for variable in [
+        "no_proxy",
+        "NO_PROXY",
+        "http_proxy",
+        "HTTP_PROXY",
+        "https_proxy",
+        "HTTPS_PROXY",
+        "all_proxy",
+        "ALL_PROXY",
+    ] {
+        assert!(cmd
+            .as_std()
+            .get_envs()
+            .any(|(key, value)| key == variable && value.is_none()));
+    }
 }
 
 #[test]

@@ -65,8 +65,8 @@ fn direct_file_format(
     }
     let video = probe.video().ok()?;
     let extension = direct_file_extension(probe.format.get("format_name")?.as_str()?)?;
-    let width = caps.max_width.min(3840);
-    let height = caps.max_height.min(2160);
+    let width = caps.max_width;
+    let height = caps.max_height;
     let fits =
         |value: Option<u32>, limit: u32| value.is_some_and(|v| v >= 2 && v <= limit && v % 2 == 0);
     if !fits(video.width, width) || !fits(video.height, height) {
@@ -81,37 +81,6 @@ fn direct_file_format(
         return None;
     }
     Some(extension)
-}
-
-/// The upstream headers a direct-url client must present to fetch the source
-/// itself: the provider's cookie and user agent, if the server holds any.
-pub(super) fn source_authorization(
-    headers: &HashMap<String, String>,
-) -> Option<PlaybackAuthorization> {
-    let header = |name: &str| {
-        headers
-            .iter()
-            .find(|(key, _)| key.eq_ignore_ascii_case(name))
-            .map(|(_, value)| value.clone())
-    };
-    // Every upstream header the engine may need (Referer and friends) rides
-    // along; cookie and user agent keep their dedicated fields.
-    let rest: HashMap<String, String> = headers
-        .iter()
-        .filter(|(key, _)| {
-            !key.eq_ignore_ascii_case("Cookie") && !key.eq_ignore_ascii_case("User-Agent")
-        })
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect();
-    let authorization = PlaybackAuthorization {
-        cookie: header("Cookie"),
-        user_agent: header("User-Agent"),
-        headers: (!rest.is_empty()).then_some(rest),
-    };
-    (authorization.cookie.is_some()
-        || authorization.user_agent.is_some()
-        || authorization.headers.is_some())
-    .then_some(authorization)
 }
 
 pub(super) fn direct_format(
@@ -151,9 +120,9 @@ pub(super) fn direct_format(
         }
     }
     let video = probe.video().ok()?;
-    let width = caps.max_width.min(3840);
-    let height = caps.max_height.min(2160);
-    let h264 = probe.compatible_video(width.min(1920), height.min(1080), H264_COPY_LEVEL);
+    let width = caps.max_width;
+    let height = caps.max_height;
+    let h264 = probe.compatible_video(width, height, H264_COPY_LEVEL);
     let hevc = caps.hevc
         && caps.hevc_sdr
         && video.codec_name.as_deref() == Some("hevc")

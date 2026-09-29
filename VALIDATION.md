@@ -1,6 +1,6 @@
 # Foundation validation
 
-The extracted engine has 64 passing unit/process-fixture tests and 16 existing
+The extracted engine has 65 passing unit/process-fixture tests and 17
 opt-in media/hardware tests. Its 1080p clamp is removed; the dimension test now
 checks 3840x2160 while retaining even dimensions and no-upscale filters.
 
@@ -22,6 +22,21 @@ One opt-in real-media test was additionally run with `/usr/bin/ffmpeg` and
 `/usr/bin/ffprobe`: `real_ffmpeg_remux_transcode_and_cleanup` passed. This checks
 the extracted engine's real remux/transcode and cleanup path, not gateway HTTP
 integration or hardware acceleration.
+
+The real `real_egress_proxy_covers_root_redirects_nested_segments_and_keys` test
+also passes for both FFmpeg and ffprobe. It overrides child-process proxy
+environment variables, then verifies root URLs, redirects, HLS segments and AES
+keys reach an explicit denying proxy without contacting a protected local
+listener. Raw TCP/TLS segment URLs fail without bypassing that proxy. This does
+not yet certify all network paths or HTTPS certificate/hostname validation.
+An unconditional `-tls_verify 1` was tested and rejected because FFmpeg fails
+ordinary HTTP inputs with that unused option; TLS acceptance remains required.
+
+The gateway engine no longer contains native direct-URL/credential handoff.
+That product decision belongs in the integrating backend; gateway passthrough
+still serves media through a managed resource. Original-file delivery follows
+declared dimensions without hard-coded 1080p/4K clamps, with tests for 4K/8K and
+rejection above the client-declared envelope. Codec/decoder checks remain.
 
 These are not yet end-to-end media-service tests. The session ledger is not wired
 to engine workers or HTTP media delivery. Input/output sharing, Docker/runtime

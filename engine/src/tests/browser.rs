@@ -72,7 +72,10 @@ async fn client_inspection_needs_no_ffprobe_or_encoder_and_revokes_media() {
         .unwrap();
     assert_eq!(response.mode, "direct");
     assert_eq!(response.position, 9.0);
-    assert!(response.authorization.is_none());
+    assert!(serde_json::to_value(&response)
+        .unwrap()
+        .get("authorization")
+        .is_none());
     let parts = response.url.split('/').collect::<Vec<_>>();
     let served = manager
         .serve_original(parts[2], parts[3], parts[4], Method::GET, HeaderMap::new())

@@ -143,6 +143,20 @@ pub(super) async fn cleanup_orphans(root: &std::path::Path) -> Result<(), String
 }
 
 pub(super) fn input_args(cmd: &mut Command, headers: &str) {
+    // The engine's explicit egress policy must not be bypassed by host shell
+    // proxy exclusions or silently replaced by an inherited system proxy.
+    for variable in [
+        "no_proxy",
+        "NO_PROXY",
+        "http_proxy",
+        "HTTP_PROXY",
+        "https_proxy",
+        "HTTPS_PROXY",
+        "all_proxy",
+        "ALL_PROXY",
+    ] {
+        cmd.env_remove(variable);
+    }
     // Restrict nested playlists/redirects to network protocols, never local files or devices.
     cmd.args([
         "-protocol_whitelist",

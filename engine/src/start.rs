@@ -60,75 +60,6 @@ impl PlaybackManager {
         if caps.browser.as_ref().is_some_and(|b| !b.valid()) {
             return Err("Invalid browser capability report".into());
         }
-        // Native players inspect and decode the original source themselves.
-        // Do not reserve an FFmpeg worker or delay them behind a server probe.
-        if caps.direct_urls == Some(true) {
-            if force {
-                return Err("Native direct playback cannot request transcoding".into());
-            }
-            let permit = self
-                .slots
-                .clone()
-                .try_acquire_owned()
-                .map_err(|_| MSG_PLAYBACK_CAPACITY.to_owned())?;
-            let permits = Arc::new(InputPermits {
-                _playback: permit,
-                _provider: provider_permit,
-            });
-            let format = match validated
-                .path()
-                .rsplit('.')
-                .next()
-                .map(str::to_ascii_lowercase)
-                .as_deref()
-            {
-                Some("m3u8") => "hls",
-                Some("mpd") => "dash",
-                _ => "file",
-            };
-            let id = Uuid::new_v4().to_string();
-            let response = PlaybackResponse {
-                id: id.clone(),
-                url: validated.as_str().to_owned(),
-                format: format.into(),
-                mode: "direct".into(),
-                video_mode: "copy".into(),
-                audio_mode: "copy".into(),
-                position,
-                live,
-                duration: 0.0,
-                audio_tracks: Vec::new(),
-                subtitle_tracks: Vec::new(),
-                subtitles_supported: false,
-                selected_audio: None,
-                selected_subtitle: None,
-                authorization: source_authorization(&headers),
-            };
-            self.sessions.lock().await.insert(
-                id,
-                Session {
-                    stream: None,
-                    _source_probe: None,
-                    direct: None,
-                    capability: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
-                    dir: PathBuf::new(),
-                    child: None,
-                    touched: Instant::now(),
-                    stable_target_duration: false,
-                    target_duration: None,
-                    supervised_live: false,
-                    throttle: Throttle::default(),
-                    permits,
-                    cleanup_tasks: self.cleanup_tasks.clone(),
-                },
-            );
-            tracing::info!(
-                mode = "direct",
-                format,
-                "Native playback prepared without server processing"
-            );
-            return Ok(response);
-        }
         if !force
             && caps.direct_play
             && caps.browser.as_ref().is_some_and(|b| b.inspect_original)
@@ -172,7 +103,6 @@ impl PlaybackManager {
                 selected_audio: None,
                 selected_subtitle: None,
                 subtitles_supported: false,
-                authorization: None,
             };
             self.sessions.lock().await.insert(
                 id,
@@ -310,7 +240,8 @@ impl PlaybackManager {
         }
         // Original delivery is opt-in, uses inspected tracks, and keeps the
         // provider reservation owned by this session and in-flight reads.
-        if !force && caps.direct_play && std::env::var("PLAYBACK_DIRECT_PLAY").as_deref() != Ok("0") {
+        if !force && caps.direct_play && std::env::var("PLAYBACK_DIRECT_PLAY").as_deref() != Ok("0")
+        {
             if let Some(format) = direct_format(&probe, &caps, selected_input, &selection) {
                 if let Ok(transport) =
                     direct::Direct::prepare(validated.clone(), &headers, format, permits.clone())
@@ -352,7 +283,6 @@ impl PlaybackManager {
                         subtitle_tracks,
                         selected_audio,
                         selected_subtitle: None,
-                        authorization: None,
                     };
                     self.sessions.lock().await.insert(
                         id,
@@ -798,7 +728,6 @@ impl PlaybackManager {
                     selected_audio,
                     selected_subtitle: None,
                     subtitles_supported: false,
-                    authorization: None,
                 });
             }
             if let Some(subtitle) = &selected_subtitle {
@@ -966,7 +895,6 @@ impl PlaybackManager {
             subtitle_tracks,
             selected_audio,
             selected_subtitle,
-            authorization: None,
         })
     }
 }

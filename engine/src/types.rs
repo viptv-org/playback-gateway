@@ -11,7 +11,7 @@ pub struct Config {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Capabilities {
     pub browser: Option<BrowserCapabilities>,
     pub max_width: u32,
@@ -30,10 +30,6 @@ pub struct Capabilities {
     pub direct_files: Option<bool>,
     pub direct_video_codecs: Option<Vec<String>>,
     pub direct_audio_codecs: Option<Vec<String>>,
-    /// A native client (the Tauri engine) fetches sources itself. When set, the
-    /// original URL is delivered with the server's upstream authorization
-    /// instead of a proxy: no transcoding and no server-side media path.
-    pub direct_urls: Option<bool>,
     pub hevc_sdr: bool,
 }
 impl Default for Capabilities {
@@ -51,7 +47,6 @@ impl Default for Capabilities {
             direct_files: None,
             direct_video_codecs: None,
             direct_audio_codecs: None,
-            direct_urls: None,
             hevc_sdr: false,
         }
     }
@@ -199,19 +194,6 @@ pub struct SelectedSubtitle {
     pub disposition: Option<TrackDisposition>,
 }
 
-/// Upstream authorization for a delivered original URL. The client applies it
-/// to its own engine's requests; browser deliveries never carry one.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct PlaybackAuthorization {
-    pub cookie: Option<String>,
-    pub user_agent: Option<String>,
-    /// Every other upstream header the client's engine may need to fetch the
-    /// source itself (Referer and friends); cookie and user agent are excluded
-    /// because they ride in the dedicated fields.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub headers: Option<HashMap<String, String>>,
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PlaybackResponse {
     pub id: String,
@@ -232,10 +214,6 @@ pub struct PlaybackResponse {
     pub selected_audio: Option<SelectedAudio>,
     pub subtitles_supported: bool,
     pub selected_subtitle: Option<SelectedSubtitle>,
-    /// Present only when the original URL is delivered for a client that
-    /// fetches it itself: the headers that client must present upstream.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub authorization: Option<PlaybackAuthorization>,
 }
 
 pub(super) type CleanupTasks = Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>;

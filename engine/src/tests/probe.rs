@@ -68,72 +68,12 @@ printf '#EXTM3U\n#EXTINF:1,\nsegment-000000000.ts\n' > "$last"
     manager.shutdown().await;
 }
 
-#[cfg(unix)]
-#[tokio::test]
-async fn direct_url_clients_receive_the_original_source_instead_of_a_session() {
-    let root = tempfile::tempdir().unwrap();
-    // HDR HEVC with Dolby audio in Matroska: the declared envelope refuses
-    // to hand this over, so anything but direct-url delivery would
-    // transcode it. A native client fetches the source itself instead.
-    let probe_marker = root.path().join("unexpected-probe");
-    let manager = scripted_probe(
-        root.path(),
-        &format!("touch '{}'; exit 77", probe_marker.display()),
-    );
-    let caps: Capabilities = serde_json::from_value(serde_json::json!({
-        "h264": false, "aac": false, "max_width": 0, "max_height": 0,
-        "direct_play": false, "direct_urls": true
+#[test]
+fn gateway_rejects_direct_url_credential_handoff() {
+    assert!(serde_json::from_value::<Capabilities>(serde_json::json!({
+        "direct_urls": true
     }))
-    .unwrap();
-    let mut headers = HashMap::new();
-    headers.insert("Cookie".to_owned(), "session=opaque".to_owned());
-    headers.insert("user-agent".to_owned(), "viptv-native/1".to_owned());
-    headers.insert(
-        "Referer".to_owned(),
-        "https://provider.example/watch".to_owned(),
-    );
-    let response = manager
-        .start(
-            "http://example.com/video".to_owned(),
-            headers,
-            0.0,
-            Some(caps),
-            false,
-        )
-        .await
-        .unwrap();
-    // The client's own engine fetches the original URL: no proxy session,
-    // no transcode, and no codec-policy refusal.
-    assert_eq!(response.url, "http://example.com/video");
-    assert_eq!(response.mode, "direct");
-    assert_eq!(response.video_mode, "copy");
-    assert_eq!(response.audio_mode, "copy");
-    assert!(
-        !probe_marker.exists(),
-        "Native playback must never start server inspection"
-    );
-    assert_eq!(response.format, "file");
-    assert_eq!(response.duration, 0.0);
-    assert!(response.audio_tracks.is_empty());
-    let authorization = response.authorization.expect("upstream authorization");
-    assert_eq!(authorization.cookie.as_deref(), Some("session=opaque"));
-    assert_eq!(authorization.user_agent.as_deref(), Some("viptv-native/1"));
-    let forwarded = authorization.headers.expect("upstream header set");
-    assert_eq!(
-        forwarded.get("Referer").map(String::as_str),
-        Some("https://provider.example/watch")
-    );
-    assert!(!forwarded.contains_key("Cookie"));
-    assert!(!forwarded.contains_key("user-agent"));
-    // The transport-less session still answers heartbeats.
-    assert!(manager.heartbeat(&response.id).await);
-    // The reaper must not retire a transport-less direct-URL session: it
-    // owns no directory and no encoder, so only its TTL ends it, and
-    // every heartbeat renews that TTL.
-    manager.reap().await;
-    assert!(manager.heartbeat(&response.id).await);
-    assert_eq!(manager.active_count().await, 1);
-    manager.shutdown().await;
+    .is_err());
 }
 
 #[cfg(unix)]

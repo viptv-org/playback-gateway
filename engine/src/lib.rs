@@ -23,7 +23,7 @@ mod types;
 
 pub use manager::{PlaybackManager, SampleLimits};
 pub use types::{
-    Capabilities, Config, MediaTrack, PlaybackAuthorization, PlaybackResponse, SelectedAudio,
+    Capabilities, Config, MediaTrack, PlaybackResponse, SelectedAudio,
     SelectedSubtitle, TrackDisposition, TrackSelection,
 };
 
@@ -32,7 +32,7 @@ use compat::{
 };
 #[cfg(test)]
 use direct_gate::direct_file_extension;
-use direct_gate::{direct_format, source_authorization};
+use direct_gate::direct_format;
 use hls::{
     cache_safe, dimensions, hdr_filter, media_type, playback_ready, scale_filter,
     stable_hls_target_duration, Throttle, HLS_DELETE_GRACE_SECONDS, HLS_INITIAL_SEGMENT_SECONDS,

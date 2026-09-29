@@ -135,6 +135,47 @@ fn a_webcodecs_client_gets_the_original_container_it_declares() {
 }
 
 #[test]
+fn original_delivery_uses_declared_dimensions_without_a_product_quality_cap() {
+    for (width, height) in [(3840, 2160), (7680, 4320)] {
+        let probe: Probe = serde_json::from_value(serde_json::json!({
+            "streams": [
+                {"codec_type":"video", "codec_name":"hevc", "width":width, "height":height,
+                 "pix_fmt":"yuv420p10le", "profile":"Main 10", "level":186,
+                 "avg_frame_rate":"24/1", "r_frame_rate":"24/1"},
+                {"codec_type":"audio", "codec_name":"eac3", "channels":6}
+            ], "format":{"format_name":"matroska,webm"}
+        }))
+        .unwrap();
+        let mut caps: Capabilities = serde_json::from_value(serde_json::json!({
+            "direct_play":true, "direct_files":true, "h264":true, "aac":true,
+            "max_width":width, "max_height":height,
+            "direct_video_codecs":["hevc"], "direct_audio_codecs":["eac3"]
+        }))
+        .unwrap();
+        assert_eq!(
+            direct_format(
+                &probe,
+                &caps,
+                probe.streams.get(1),
+                &TrackSelection::default()
+            ),
+            Some("mkv")
+        );
+        caps.max_width = width / 2;
+        caps.max_height = height / 2;
+        assert_eq!(
+            direct_format(
+                &probe,
+                &caps,
+                probe.streams.get(1),
+                &TrackSelection::default()
+            ),
+            None
+        );
+    }
+}
+
+#[test]
 fn original_file_containers_cover_the_observed_catalogue() {
     // Every container in the WebCodecs demuxer's format set must have a
     // direct path; a missing entry silently costs the raw-file rung.
