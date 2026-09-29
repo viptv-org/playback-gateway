@@ -1,0 +1,8 @@
+.git
+target
+**/target
+data
+.env
+*.sqlite*
+*.log
+.codebase-memory

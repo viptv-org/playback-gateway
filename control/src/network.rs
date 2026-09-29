@@ -20,6 +20,12 @@ pub struct NetworkPolicy {
     fixture_loopback: bool,
 }
 impl NetworkPolicy {
+    #[cfg(test)]
+    pub(crate) fn loopback_fixture() -> Self {
+        Self {
+            fixture_loopback: true,
+        }
+    }
     pub fn permits(&self, address: IpAddr) -> bool {
         #[cfg(test)]
         if self.fixture_loopback && address.is_loopback() {

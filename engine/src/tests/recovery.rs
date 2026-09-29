@@ -1,6 +1,199 @@
 use super::*;
 
 #[tokio::test]
+#[ignore = "requires real FFmpeg/ffprobe and openssl; isolated TLS fixtures"]
+async fn real_https_rejects_untrusted_certificates_and_wrong_hostnames() {
+    let root = tempfile::tempdir().unwrap();
+    let certificate = root.path().join("certificate.pem");
+    let key = root.path().join("key.pem");
+    let generated = timeout(
+        Duration::from_secs(10),
+        Command::new("openssl")
+            .kill_on_drop(true)
+            .args([
+                "req",
+                "-x509",
+                "-newkey",
+                "rsa:2048",
+                "-nodes",
+                "-days",
+                "1",
+                "-subj",
+                "/CN=localhost",
+                "-addext",
+                "subjectAltName=DNS:localhost",
+                "-keyout",
+            ])
+            .arg(&key)
+            .arg("-out")
+            .arg(&certificate)
+            .output(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(generated.status.success());
+    let fixture = timeout(
+        Duration::from_secs(10),
+        Command::new(std::env::var("PLAYBACK_TEST_FFMPEG").unwrap())
+            .kill_on_drop(true)
+            .args([
+                "-v",
+                "error",
+                "-nostdin",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=160x90:rate=25",
+                "-t",
+                "1",
+                "-an",
+                "-c:v",
+                "libx264",
+                "-threads",
+                "2",
+                "-preset",
+                "ultrafast",
+                "-movflags",
+                "+faststart",
+                "-f",
+                "mp4",
+            ])
+            .arg(root.path().join("good.mp4"))
+            .output(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(fixture.status.success());
+    let media = std::fs::read(root.path().join("good.mp4")).unwrap();
+    let mut response = format!("HTTP/1.1 200 OK\r\nContent-Type: video/mp4\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", media.len()).into_bytes();
+    response.extend_from_slice(&media);
+    std::fs::write(root.path().join("good.http"), response).unwrap();
+    let reservation = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = reservation.local_addr().unwrap();
+    drop(reservation);
+    let mut server = Command::new("openssl")
+        .kill_on_drop(true)
+        .args(["s_server", "-quiet", "-HTTP", "-accept"])
+        .current_dir(root.path())
+        .arg(address.to_string())
+        .arg("-cert")
+        .arg(&certificate)
+        .arg("-key")
+        .arg(&key)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    timeout(Duration::from_secs(3), async {
+        while tokio::net::TcpStream::connect(address).await.is_err() {
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let http = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let http_address = http.local_addr().unwrap();
+    let playlist = format!("#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nhttps://{address}/segment.ts\n#EXT-X-ENDLIST\n");
+    let router = axum::Router::new().route(
+        "/index.m3u8",
+        axum::routing::get(move || {
+            let playlist = playlist.clone();
+            async move { playlist }
+        }),
+    );
+    let http_server = tokio::spawn(async move {
+        axum::serve(http, router).await.unwrap();
+    });
+    for variable in ["PLAYBACK_TEST_FFPROBE", "PLAYBACK_TEST_FFMPEG"] {
+        let binary = std::env::var(variable).unwrap();
+        for case in ["untrusted", "hostname", "nested", "valid"] {
+            let mut command = Command::new(&binary);
+            command.kill_on_drop(true).args(["-v", "error"]);
+            input_args(&mut command, "");
+            if case == "valid" {
+                command.args(["-probesize", "4096", "-analyzeduration", "100000"]);
+                if variable == "PLAYBACK_TEST_FFPROBE" {
+                    command.args(["-read_intervals", "%+0.1"]);
+                }
+            }
+            if matches!(case, "hostname" | "valid") {
+                command.arg("-ca_file").arg(&certificate);
+            }
+            let url = if case == "valid" {
+                format!("https://localhost:{}/good.http", address.port())
+            } else if case == "nested" {
+                format!("http://{http_address}/index.m3u8")
+            } else {
+                format!("https://{address}/stream.ts")
+            };
+            command.arg("-i").arg(url);
+            if variable == "PLAYBACK_TEST_FFMPEG" {
+                command.args(["-t", "0.1", "-f", "null", "-"]);
+            }
+            let mut child = command
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let mut stderr = child.stderr.take().unwrap();
+            let diagnostics = tokio::spawn(async move {
+                let mut bytes = Vec::new();
+                let _ = stderr.read_to_end(&mut bytes).await;
+                bytes
+            });
+            let outcome = timeout(Duration::from_secs(8), child.wait()).await;
+            if outcome.is_err() {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+            }
+            let bytes = diagnostics.await.unwrap();
+            let diagnostic = String::from_utf8_lossy(&bytes).to_ascii_lowercase();
+            let safe = diagnostic
+                .lines()
+                .filter(|line| {
+                    !line.contains("://") && !line.contains("/tmp/") && !line.contains("headers")
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                outcome.is_ok(),
+                "TLS fixture timed out ({variable}, {case}): {safe}"
+            );
+            let status = outcome.unwrap().unwrap();
+            if case == "valid" {
+                assert!(
+                    status.success(),
+                    "a trusted, matching HTTPS source must play: {safe}"
+                );
+                continue;
+            }
+            assert!(!status.success());
+            let rejected_certificate = diagnostic.contains("certificate")
+                && (diagnostic.contains("verif")
+                    || diagnostic.contains("not trusted")
+                    || diagnostic.contains("does not match hostname"));
+            assert!(
+                rejected_certificate,
+                "TLS must fail before media parsing ({variable}, {case}): {diagnostic}"
+            );
+            if case == "hostname" {
+                assert!(
+                    diagnostic.contains("does not match hostname"),
+                    "trusted issuer must still fail hostname validation"
+                );
+            }
+        }
+    }
+    http_server.abort();
+    let _ = http_server.await;
+    server.kill().await.unwrap();
+    let _ = server.wait().await;
+}
+
+#[tokio::test]
 #[ignore = "requires real FFmpeg/ffprobe; local proxy/forbidden destination fixtures"]
 async fn real_egress_proxy_covers_root_redirects_nested_segments_and_keys() {
     use tokio::io::AsyncWriteExt;

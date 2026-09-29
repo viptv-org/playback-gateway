@@ -53,6 +53,7 @@ struct OwnedViewer {
     request_hash: [u8; 32],
     idempotency: String,
     media_hash: Option<[u8; 32]>,
+    media_token: Option<String>,
 }
 
 /// Returned only on issuance. Never include this capability in logs or a
@@ -251,6 +252,7 @@ impl Sessions {
                 request_hash,
                 idempotency: idempotency.into(),
                 media_hash: None,
+                media_token: None,
             },
         );
         Ok(Reservation {
@@ -314,6 +316,47 @@ impl Sessions {
             .get_mut(id)
             .ok_or("session_not_found")?
             .media_hash = Some(hash(&token));
+        self.viewers
+            .get_mut(id)
+            .ok_or("session_not_found")?
+            .media_token = Some(token.clone());
+        Ok(MediaCredential { token })
+    }
+    /// Stable capability for idempotent create responses and polling. Explicit
+    /// issue_media remains the rotation operation. Tokens exist only in memory.
+    pub(crate) fn ensure_media(
+        &mut self,
+        principal: &Principal,
+        id: &str,
+        now: u64,
+    ) -> Result<MediaCredential, &'static str> {
+        if !principal
+            .key
+            .spec
+            .scopes
+            .iter()
+            .any(|scope| matches!(scope, Scope::Create | Scope::Read | Scope::Renew))
+        {
+            return Err("forbidden");
+        }
+        let viewer = self
+            .viewers
+            .get_mut(id)
+            .filter(|viewer| viewer.owner == principal.key.id)
+            .ok_or("session_not_found")?;
+        if viewer.view.expires_at <= now
+            || !matches!(viewer.view.status, Status::Starting | Status::Ready)
+        {
+            return Err("session_expired");
+        }
+        if let Some(token) = &viewer.media_token {
+            return Ok(MediaCredential {
+                token: token.clone(),
+            });
+        }
+        let token = format!("pgm_{}", random_hex(32));
+        viewer.media_hash = Some(hash(&token));
+        viewer.media_token = Some(token.clone());
         Ok(MediaCredential { token })
     }
     /// Every media resource (including child playlists, keys and subtitles)
@@ -429,6 +472,8 @@ impl Sessions {
             return;
         }
         viewer.view.status = status;
+        viewer.media_token = None;
+        viewer.media_hash = None;
         viewer.view.expires_at = now;
         let job_id = viewer.view.job_id.clone();
         let owner = viewer.owner.clone();

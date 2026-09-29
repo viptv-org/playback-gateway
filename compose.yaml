@@ -1,0 +1,21 @@
+services:
+  gateway:
+    build: .
+    environment:
+      API_KEY: ${API_KEY:?Set a unique bootstrap key of at least 32 characters}
+      MAX_OUTPUTS: ${MAX_OUTPUTS:-8}
+      QSV_DEVICE: ${QSV_DEVICE:-}
+      VAAPI_DEVICE: ${VAAPI_DEVICE:-}
+    ports:
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - gateway-data:/var/lib/playback-gateway
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,nosuid,nodev
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 1024
+    stop_grace_period: 45s
+volumes:
+  gateway-data:

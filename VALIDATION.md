@@ -1,55 +1,60 @@
-# Foundation validation
+# Validation checkpoint — 2026-09-29
 
-The extracted engine has 66 passing unit/process-fixture tests and 17
-opt-in media/hardware tests. Its 1080p clamp is removed; the dimension test now
-checks 3840x2160 while retaining even dimensions and no-upscale filters.
+## Verified locally
 
-Control tests cover source redaction and structural validation; hashed persistent
-integration keys; namespace/scope/expiry/revocation; idempotent viewer allocation;
-five logical viewers sharing one logical job; cleanup retaining key capacity;
-startup deadline/late completion; private/reserved IP denial; and proxy forwarding
-to an explicit test-only loopback origin without proxy credentials leaking.
+- cargo test --workspace --locked: 66 engine tests, 19 control/API tests and one
+  service-storage test pass. Eighteen engine fixtures, one real-worker fixture
+  and one standalone-service fixture are opt-in and excluded from that count.
+- HTTP route tests cover key issuance, redacted listing, revocation, operation
+  scopes, foreign session IDs, stable idempotent media URLs, viewer-only media
+  credentials, child segments, HEAD, renewal/release, readiness, bounded JSON
+  bodies and no secret echo. Credential-store reads use blocking-task offload.
+- Engine preparation exposes an inspected output plan before starting a worker.
+  Equivalent capability headroom shares a plan. The control bridge uses the
+  engine plan directly and keeps quota until cancellation cleanup completes.
+- Original delivery accepts 4K/8K within declared dimensions without product
+  quality clamps. These are plan tests, not a complete real 4K encoder audit.
+- With installed FFmpeg/ffprobe, the real remux/transcode/cleanup fixture passes
+  and verifies prepared-plan versus started-response consistency.
+- The real HTTP live fixture proves five compatible viewers share one active
+  upstream connection; adding the next four viewers opens no additional source
+  connection. A distinct authorization namespace creates another input. Releasing
+  one viewer preserves the others; releasing all viewers closes their input.
+- Real subprocess fixtures exercise proxy use for root URLs, redirects, HLS
+  segments and AES keys, including hostile inherited proxy variables. Raw TCP/TLS
+  HLS segment attempts do not contact the protected destination.
+- Real TLS fixtures accept a matching, explicitly trusted HTTPS media source,
+  reject untrusted certificates and trusted-but-wrong hostnames, and reject
+  untrusted HTTPS segments nested inside plain-HTTP HLS. Both FFmpeg and ffprobe
+  are exercised. The same TLS fixture also passes with the container's binaries.
+- The standalone binary serves health/readiness over TCP, rejects unauthenticated
+  control access, refuses a second owner of its data directory, handles SIGTERM
+  and releases the OS-held storage lock. Existing data directories must be private.
+- Docker image playback-gateway:development built successfully (local image
+  2551a1586f24). FFmpeg 9.0.2's release signature is verified during the build.
+  The image reports healthy as UID/GID 10001 with a read-only root, dropped Linux
+  capabilities and no-new-privileges. Temporary smoke containers/data were removed.
+  The real HTTP five-viewer fixture also passes using this image's media binaries.
 
-The control crate now has 17 passing tests. Additional coverage verifies
-per-viewer hashed media capabilities, rotation, exact lease expiry, revocation
-before background cleanup, credential-type separation and safe shared-job failure
-codes while retaining admission until teardown. Bootstrap-only HTTP key routes
-are tested for issuance, redacted listing, idempotent revocation, authentication
-before body parsing, bounded bodies and non-cacheable responses. SQLite work is
-offloaded from the asynchronous HTTP executor.
+HTTP IPTV inputs remain supported. Public gateway endpoints require operator
+HTTPS ingress; the HTTP provider hop is not encrypted by the gateway.
+The service rejects media binaries that do not enable TLS verification by
+default or do not use the currently qualified GnuTLS backend. An unconditional
+TLS-verification input option was rejected during testing because it breaks plain
+HTTP inputs; default-enabled verification avoids that regression.
 
-One opt-in real-media test was additionally run with `/usr/bin/ffmpeg` and
-`/usr/bin/ffprobe`: `real_ffmpeg_remux_transcode_and_cleanup` passed. This checks
-the extracted engine's real remux/transcode and cleanup path, not gateway HTTP
-integration or hardware acceleration.
+## Remaining acceptance work
 
-The real `real_egress_proxy_covers_root_redirects_nested_segments_and_keys` test
-also passes for both FFmpeg and ffprobe. It overrides child-process proxy
-environment variables, then verifies root URLs, redirects, HLS segments and AES
-keys reach an explicit denying proxy without contacting a protected local
-listener. Raw TCP/TLS segment URLs fail without bypassing that proxy. This does
-not yet certify all network paths or HTTPS certificate/hostname validation.
-An unconditional `-tls_verify 1` was tested and rejected because FFmpeg fails
-ordinary HTTP inputs with that unused option; TLS acceptance remains required.
+This is not approval for public deployment or VIPTV cutover. Pending work includes
+pending-inspection quota/rate admission, detailed upstream failure classification,
+all-format/redirect/DNS network enforcement, multi-output single-input fan-out,
+crash/process containment, bounded shutdown with active/stalled media responses,
+real hardware/4K qualification and backend integration.
+The existing continuous fMP4 transport is single-consumer and is not advertised
+as a shareable gateway output. HTTP/TLS checks above cover their named fixtures,
+not every decoder, demuxer, media format or hostile upstream behavior.
 
-The gateway engine no longer contains native direct-URL/credential handoff.
-That product decision belongs in the integrating backend; gateway passthrough
-still serves media through a managed resource. Original-file delivery follows
-declared dimensions without hard-coded 1080p/4K clamps, with tests for 4K/8K and
-rejection above the client-declared envelope. Codec/decoder checks remain.
-
-Preparation now exposes an engine-owned normalized plan before output startup,
-with separately bounded inspection/output admission and cancellation-safe drops.
-Two different capability envelopes yield the same source-sized output plan.
-The real remux/transcode fixture also checks that prepared plans match the actual
-started response. The control worker bridge's scripted-process tests prove five
-viewers use one engine worker, individual media-token authorization, revocation,
-and cancelled-worker teardown before quota release. These do not prove one real
-upstream connection or multiple distinct outputs sharing a single input.
-
-These are not yet end-to-end media-service tests. Public session/media HTTP
-routes, Docker/runtime startup, complete network enforcement and backend
-integration remain incomplete. Worker credential-store reads still need async
-offloading at the HTTP integration boundary.
-The egress proxy alone does not prove engine-wide SSRF protection until all engine
-fetches are verified to traverse it. Do not deploy this checkpoint publicly.
+Run native opt-in checks with PLAYBACK_TEST_FFMPEG and PLAYBACK_TEST_FFPROBE
+pointing to qualified binaries. TLS fixtures additionally require openssl.
+Source URLs, headers, API keys, media URLs and test/production databases must never
+be committed. Fixture loopback exceptions are compiled only under cfg(test).

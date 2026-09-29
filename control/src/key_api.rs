@@ -33,7 +33,7 @@ pub fn router(state: KeyApi) -> Router {
         .with_state(state)
 }
 
-fn bearer(headers: &HeaderMap) -> Result<String, ApiError> {
+pub(crate) fn bearer(headers: &HeaderMap) -> Result<String, ApiError> {
     if headers.get_all(header::AUTHORIZATION).iter().count() != 1 {
         return Err(ApiError("unauthorized"));
     }
@@ -59,7 +59,7 @@ async fn authenticate(State(state): State<KeyApi>, request: Request, next: Next)
     }
 }
 
-async fn private_response(mut response: Response) -> Response {
+pub(crate) async fn private_response(mut response: Response) -> Response {
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
@@ -72,7 +72,7 @@ async fn private_response(mut response: Response) -> Response {
     response
 }
 
-fn now() -> Result<i64, ApiError> {
+pub(crate) fn now() -> Result<i64, ApiError> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .ok()
@@ -81,12 +81,32 @@ fn now() -> Result<i64, ApiError> {
 }
 
 #[derive(Debug)]
-struct ApiError(&'static str);
+pub(crate) struct ApiError(pub(crate) &'static str);
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = match self.0 {
-            "unauthorized" => StatusCode::UNAUTHORIZED,
-            "invalid_key_configuration" | "invalid_request" => StatusCode::BAD_REQUEST,
+            "unauthorized" | "media_unauthorized" => StatusCode::UNAUTHORIZED,
+            "forbidden" => StatusCode::FORBIDDEN,
+            "session_not_found" | "media_not_found" | "not_found" => StatusCode::NOT_FOUND,
+            "method_not_allowed" => StatusCode::METHOD_NOT_ALLOWED,
+            "session_expired" => StatusCode::GONE,
+            "idempotency_conflict" | "input_cleanup_pending" => StatusCode::CONFLICT,
+            "invalid_key_configuration"
+            | "invalid_request"
+            | "invalid_input"
+            | "invalid_headers"
+            | "invalid_output"
+            | "invalid_position"
+            | "invalid_namespace"
+            | "invalid_idempotency_key" => StatusCode::BAD_REQUEST,
+            "unsupported_output" => StatusCode::UNPROCESSABLE_ENTITY,
+            "viewer_capacity" | "input_capacity" | "output_capacity" => {
+                StatusCode::TOO_MANY_REQUESTS
+            }
+            "startup_timeout" => StatusCode::GATEWAY_TIMEOUT,
+            "source_preparation_failed" | "processing_failed" | "media_unavailable" => {
+                StatusCode::BAD_GATEWAY
+            }
             "request_too_large" => StatusCode::PAYLOAD_TOO_LARGE,
             _ => StatusCode::SERVICE_UNAVAILABLE,
         };

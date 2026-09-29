@@ -114,7 +114,7 @@ impl PlaybackManager {
         }
     }
 
-    pub(super) async fn initialize(&self) -> Result<(), String> {
+    pub async fn initialize(&self) -> Result<(), String> {
         self.initialized
             .get_or_try_init(|| cleanup_orphans(&self.config.root))
             .await
