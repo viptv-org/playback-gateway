@@ -1,5 +1,25 @@
 # Local container and runtime qualification
 
+## Exact committed-source evidence — 2026-09-30
+
+Runtime source `f69adb00c09828121d5479243d337472be7aa87f` was built from a
+Git archive as local image `playback-gateway:qualification-f69adb0`, content ID
+`sha256:3f2a6affeba84ad8e2ec56fb0ecc18c4c53cf93bd73048726d6aa9e1f17f7ada`.
+Both committed-source scripts passed against that exact image: all three named
+runtime tests executed exactly once, and the separate non-root envelope passed.
+The runtime fixture image content ID is recorded by its digest-derived local tag
+and Docker build output. Runtime execution used the resolved local image; no
+registry push or production deployment occurred.
+
+The exact image's FFmpeg/ffprobe plus GnuTLS, libc and x264 content hashes match
+the original image runtime used by the named extracted-binary HTTP/HLS fixtures.
+The direct service tests additionally use the exact image's in-container binary
+and media executables. Stopped envelope data was archived privately at
+`/tmp/pgw-qualified-volume.FVp4r8/fixture-data.tar` before its named volume was
+removed. That is fixture data, not production backup material. Runtime containers
+and anonymous test volumes were removed; images, logs and private stopped-data
+archives remain for reproduction/recovery.
+
 This is acceptance evidence for named disposable fixtures, not deployment or
 universal playback approval. No production data, developer env, device or real
 provider is used. Build dependencies may be downloaded; runtime networking is

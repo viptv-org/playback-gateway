@@ -28,6 +28,12 @@ See [container qualification](docs/CONTAINER_QUALIFICATION.md) for reproducible
 committed-source scripts, exact fixture semantics, isolated public-address setup,
 recoverable cleanup and unqualified cases. Final reviewed-source image content
 IDs are reported separately after rebuilding; no image push/deployment is claimed.
+The committed `f69adb0` runtime was subsequently rebuilt from a Git archive as
+`sha256:3f2a6affeba84ad8e2ec56fb0ecc18c4c53cf93bd73048726d6aa9e1f17f7ada`.
+Both committed-source qualification scripts passed against that exact image,
+including all three named real service fixtures and the separate non-root
+envelope. The corresponding stopped fixture volume was privately archived before
+removal. This documentation-only evidence record does not change that runtime.
 This does not close universal sharing or the hard storage-bound gate.
 
 ## Physical input accounting, trusted TLS and small 4K copy
