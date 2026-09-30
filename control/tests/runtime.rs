@@ -585,8 +585,11 @@ impl Fixture {
         .expect("service readiness deadline");
     }
     async fn start(&self, idempotency: &str, width: u32) -> Value {
+        self.start_with_captions(idempotency, width, true).await
+    }
+    async fn start_with_captions(&self, idempotency: &str, width: u32, enabled: bool) -> Value {
         let captions = std::env::var("PLAYBACK_TEST_SUBTITLES").as_deref() == Ok("1");
-        let response=self.client.post(format!("{}/v1/sessions",self.base)).bearer_auth(&self.key).header("Idempotency-Key",idempotency).json(&json!({"namespace":"fixture","input":{"url":self.source.url,"headers":{},"live":true},"output":{"protocol":"hls","video_codecs":["h264"],"audio_codecs":["aac"],"max_width":width,"max_height":width/16*9,"subtitle_track":if captions {Some(4)}else{None},"audio_track":if captions {Some(3)}else{None}},"position_seconds":0})).send().await.map_err(|_|"session request failed").unwrap();
+        let response=self.client.post(format!("{}/v1/sessions",self.base)).bearer_auth(&self.key).header("Idempotency-Key",idempotency).json(&json!({"namespace":"fixture","input":{"url":self.source.url,"headers":{},"live":true},"output":{"protocol":"hls","video_codecs":["h264"],"audio_codecs":["aac"],"max_width":width,"max_height":width/16*9,"subtitle_track":if captions && enabled {Some(4)}else{None},"subtitles_off":!enabled,"audio_track":if captions {Some(3)}else{None}},"position_seconds":0})).send().await.map_err(|_|"session request failed").unwrap();
         assert!(response.status().is_success(), "session must start");
         response
             .json()
@@ -746,9 +749,40 @@ async fn real_shared_caption_budget_overflow_fails_safely_and_reclaims_admission
     );
     let mut fixture = Fixture::new().await;
     let response=fixture.client.post(format!("{}/v1/sessions",fixture.base)).bearer_auth(&fixture.key).header("Idempotency-Key","caption-overflow").json(&json!({"namespace":"fixture","input":{"url":fixture.source.url,"headers":{},"live":true},"output":{"protocol":"hls","video_codecs":["h264"],"audio_codecs":["aac"],"max_width":128,"max_height":72,"audio_track":3,"subtitle_track":4}})).send().await.unwrap();
-    assert_eq!(response.status().as_u16(), 502);
-    let error: Value = response.json().await.unwrap();
-    assert_eq!(error, json!({"error":{"code":"processing_failed"}}));
+    let status = response.status().as_u16();
+    assert!(status == 201 || status == 502);
+    let value: Value = response.json().await.unwrap();
+    if status == 502 {
+        assert_eq!(value, json!({"error":{"code":"processing_failed"}}));
+    } else {
+        // Overflow may occur just after first-segment readiness; it must fail
+        // the admitted viewer safely instead of publishing incomplete captions.
+        tokio::time::timeout(Duration::from_secs(8), async {
+            loop {
+                let state: Value = fixture
+                    .client
+                    .get(format!(
+                        "{}/v1/sessions/{}",
+                        fixture.base,
+                        value["id"].as_str().unwrap()
+                    ))
+                    .bearer_auth(&fixture.key)
+                    .send()
+                    .await
+                    .unwrap()
+                    .json()
+                    .await
+                    .unwrap();
+                if state["status"] == "failed" {
+                    assert_eq!(state["error_code"], "processing_failed");
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .expect("caption cache overflow must terminate affected playback");
+    }
     connections(&fixture.source, 0).await;
     tokio::time::timeout(Duration::from_secs(8), async {
         loop {
@@ -787,8 +821,13 @@ async fn real_shared_caption_budget_overflow_fails_safely_and_reclaims_admission
 async fn real_late_shared_subtitle_output_retains_overlapping_cues_after_eviction() {
     assert_eq!(std::env::var("PLAYBACK_TEST_SUBTITLES").as_deref(), Ok("1"));
     let mut fixture = Fixture::new().await;
-    let first = fixture.start("captions-original", 128).await;
-    let expiring = fixture.start("captions-expiring", 128).await;
+    let first = fixture
+        .start_with_captions("captions-original", 128, false)
+        .await;
+    assert!(first["playback"]["selected_subtitle"].is_null());
+    let expiring = fixture
+        .start_with_captions("captions-expiring", 128, false)
+        .await;
     assert_eq!(first["job_id"], expiring["job_id"]);
     let source_opens = fixture.source.requests.load(Ordering::SeqCst);
     tokio::time::timeout(Duration::from_secs(60), async {
