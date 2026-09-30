@@ -34,9 +34,12 @@ test_names=(standalone_binary_serves_readiness_locks_storage_and_shuts_down \
   real_service_crash_stops_media_children_and_restart_cleans_storage)
 if [[ "$captions" == 1 ]]; then
   test_names=(real_shared_subtitles_preserve_sparse_identity_and_decoded_stream_index \
-    real_late_shared_subtitle_output_retains_overlapping_cues_after_eviction)
+    real_late_shared_subtitle_output_retains_overlapping_cues_after_eviction \
+    real_shared_caption_budget_overflow_fails_safely_and_reclaims_admission)
 fi
 for test_name in "${test_names[@]}"; do
+  overflow=0
+  if [[ "$test_name" == real_shared_caption_budget_overflow_* ]]; then overflow=1; fi
   entrypoint=/fixtures/runtime-fixture
   if [[ "$test_name" == standalone_* ]]; then entrypoint=/fixtures/service-fixture; fi
   container_id=$(docker run --detach --pull=never --init --user 0:0 --network none --read-only --no-healthcheck \
@@ -44,6 +47,7 @@ for test_name in "${test_names[@]}"; do
     --tmpfs /tmp:rw,nosuid,nodev,size=512m --memory 1g --memory-swap 1g --pids-limit 256 --cpus 2 \
     --env "PLAYBACK_TEST_MATROSKA_AV=$matroska" \
     --env "PLAYBACK_TEST_SUBTITLES=$captions" --env "PLAYBACK_TEST_SUBTITLE_TLS=$tls" \
+    --env "PLAYBACK_TEST_CAPTION_OVERFLOW=$overflow" \
     --entrypoint "$entrypoint" "$fixture_image" "$test_name" --ignored --exact --nocapture)
   [[ "$container_id" =~ ^[0-9a-f]{64}$ ]]
   if ! result=$(timeout --signal=TERM --kill-after=5s 180s docker wait "$container_id"); then
