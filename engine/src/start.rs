@@ -701,7 +701,10 @@ impl PlaybackManager {
                         "-protocol_whitelist",
                         "file",
                         "-allowed_extensions",
-                        "ts",
+                        // FFmpeg 9 applies this allowlist to live playlist
+                        // reloads as well as segments. Both are gateway-owned
+                        // files; network protocols remain disabled above.
+                        "ts,m3u8",
                         "-live_start_index",
                         "-2",
                     ]);

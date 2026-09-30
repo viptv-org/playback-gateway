@@ -77,6 +77,7 @@ fn isolated_address() {
 struct Source {
     url: String,
     active: Arc<AtomicUsize>,
+    requests: Arc<AtomicUsize>,
     task: tokio::task::JoinHandle<()>,
 }
 impl Drop for Source {
@@ -89,22 +90,31 @@ async fn source(bytes: Vec<u8>) -> Source {
     let url = format!("http://{}/live.ts", listener.local_addr().unwrap());
     let active = Arc::new(AtomicUsize::new(0));
     let observed = active.clone();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let opened = requests.clone();
+    let high = std::env::var("PLAYBACK_TEST_CBR_4K").as_deref() == Ok("1");
     let bytes = Arc::new(bytes);
     let task = tokio::spawn(async move {
         let mut peers = tokio::task::JoinSet::new();
         loop {
             tokio::select! {
-                incoming=listener.accept()=>{let Ok((mut socket,_))=incoming else {break};let observed=observed.clone();let bytes=bytes.clone();peers.spawn(async move {
+                incoming=listener.accept()=>{let Ok((mut socket,_))=incoming else {break};let observed=observed.clone();let opened=opened.clone();let bytes=bytes.clone();peers.spawn(async move {
                     struct Count(Arc<AtomicUsize>);impl Drop for Count{fn drop(&mut self){self.0.fetch_sub(1,Ordering::SeqCst);}}
                     observed.fetch_add(1,Ordering::SeqCst);let _count=Count(observed);
+                    opened.fetch_add(1,Ordering::SeqCst);
                     let mut header=Vec::new();while !header.ends_with(b"\r\n\r\n") && header.len()<16384 {match socket.read_u8().await{Ok(byte)=>header.push(byte),Err(_)=>return}}
                     if socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nConnection: close\r\n\r\n").await.is_err(){return}
-                    loop {for chunk in bytes.chunks(188*100){if socket.write_all(chunk).await.is_err(){return}tokio::time::sleep(Duration::from_millis(30)).await;}}
+                    loop {for chunk in bytes.chunks(if high {188*4096}else{188*100}){if socket.write_all(chunk).await.is_err(){return}tokio::time::sleep(Duration::from_millis(if high {150}else{30})).await;}}
                 });}, _=peers.join_next(),if !peers.is_empty()=>{}
             }
         }
     });
-    Source { url, active, task }
+    Source {
+        url,
+        active,
+        requests,
+        task,
+    }
 }
 async fn connections(source: &Source, expected: usize) {
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -161,10 +171,12 @@ impl Fixture {
         let root = tempfile::tempdir().unwrap();
         let input = root.path().join("input.ts");
         let ffmpeg = std::env::var("PLAYBACK_TEST_FFMPEG").unwrap();
+        let high = std::env::var("PLAYBACK_TEST_CBR_4K").as_deref() == Ok("1");
+        let mut generation = Command::new(&ffmpeg);
+        generation.kill_on_drop(true);
         let output = tokio::time::timeout(
             Duration::from_secs(20),
-            Command::new(&ffmpeg)
-                .kill_on_drop(true)
+            generation
                 .args([
                     "-v",
                     "error",
@@ -172,9 +184,13 @@ impl Fixture {
                     "-f",
                     "lavfi",
                     "-i",
-                    "testsrc2=size=320x180:rate=25",
+                    if high {
+                        "color=c=black:size=3840x2160:rate=5"
+                    } else {
+                        "testsrc2=size=320x180:rate=25"
+                    },
                     "-t",
-                    "8",
+                    if high { "24" } else { "8" },
                     "-an",
                     "-c:v",
                     "libx264",
@@ -183,10 +199,30 @@ impl Fixture {
                     "-preset",
                     "ultrafast",
                     "-g",
-                    "25",
+                    if high { "5" } else { "25" },
                     "-f",
                     "mpegts",
                 ])
+                .args(if high {
+                    &[
+                        "-b:v",
+                        "40M",
+                        "-minrate",
+                        "40M",
+                        "-maxrate",
+                        "40M",
+                        "-bufsize",
+                        "40M",
+                        "-x264-params",
+                        "nal-hrd=cbr:force-cfr=1",
+                        "-level:v",
+                        "5.1",
+                        "-bf",
+                        "0",
+                    ][..]
+                } else {
+                    &[]
+                })
                 .arg(&input)
                 .output(),
         )
@@ -194,6 +230,34 @@ impl Fixture {
         .unwrap()
         .unwrap();
         assert!(output.status.success());
+        if high {
+            let facts = Command::new(std::env::var("PLAYBACK_TEST_FFPROBE").unwrap())
+                .args(["-v", "error", "-threads", "2", "-show_streams", "-show_packets", "-show_entries", "packet=size:stream=width,height,profile,pix_fmt,level,avg_frame_rate,r_frame_rate,duration", "-of", "json", "-i"])
+                .arg(&input)
+                .output()
+                .await
+                .unwrap();
+            let facts: Value = serde_json::from_slice(&facts.stdout).unwrap();
+            let video = &facts["streams"][0];
+            let packets = facts["packets"].as_array().unwrap();
+            let packet_bytes: u64 = packets
+                .iter()
+                .map(|packet| packet["size"].as_str().unwrap().parse::<u64>().unwrap())
+                .sum();
+            assert_eq!(packets.len(), 120);
+            assert!(packet_bytes > 64 * 1024 * 1024);
+            println!("CBR encoded frames={} duration={} H264_packet_bytes={packet_bytes} TS_file_bytes={}", packets.len(), video["duration"], std::fs::metadata(&input).unwrap().len());
+            println!(
+                "CBR source width={} height={} profile={} pix_fmt={} level={} avg={} rate={}",
+                video["width"],
+                video["height"],
+                video["profile"],
+                video["pix_fmt"],
+                video["level"],
+                video["avg_frame_rate"],
+                video["r_frame_rate"]
+            );
+        }
         let source = source(std::fs::read(input).unwrap()).await;
         let port = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = port.local_addr().unwrap();
@@ -602,4 +666,173 @@ async fn real_kernel_bounded_media_full_failure_reclaims_capacity_and_restarts()
     fixture.signal("-TERM").await;
     assert!(fixture.child.wait().await.unwrap().success());
     connections(&fixture.source, 0).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires isolated Docker fixture, bounded1 GiB media/256 MiB temp and CBR4K generation"]
+async fn real_cbr_4k_copy_retains_over_old_budget_and_reclaims_spool() {
+    assert_eq!(std::env::var("PLAYBACK_TEST_CBR_4K").as_deref(), Ok("1"));
+    assert_eq!(
+        std::env::var("LIVE_REPLAY_MAX_BYTES").as_deref(),
+        Ok("536870912")
+    );
+    let mut fixture = Fixture::new().await;
+    let first = fixture.start("first", 3840).await;
+    assert_eq!(first["playback"]["video_mode"], "copy");
+    connections(&fixture.source, 1).await;
+    let opened = fixture.source.requests.load(Ordering::SeqCst);
+    let second = fixture.start("headroom", 7680).await;
+    assert_eq!(first["job_id"], second["job_id"]);
+    assert_eq!(fixture.source.requests.load(Ordering::SeqCst), opened);
+    let media = state_root(fixture.root.path()).join("media");
+    assert_eq!(allocation(&media).0, 1024 * 1024 * 1024);
+    let ingest = fixture
+        .media_dirs()
+        .into_iter()
+        .find(|dir| {
+            std::fs::read_to_string(dir.join("index.m3u8"))
+                .is_ok_and(|text| text.contains("#EXT-X-INDEPENDENT-SEGMENTS"))
+        })
+        .unwrap();
+    let start = std::time::Instant::now();
+    let mut retained = 0u64;
+    let mut allocated = 0u64;
+    while start.elapsed() < Duration::from_secs(18) {
+        retained = std::fs::read_dir(&ingest)
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().ends_with(".ts"))
+            .filter_map(|entry| entry.metadata().ok())
+            .map(|metadata| metadata.len())
+            .sum();
+        allocated = allocation(&media).1;
+        assert!(allocated <= 1024 * 1024 * 1024);
+        connections(&fixture.source, 1).await;
+        let status = fixture
+            .client
+            .get(format!(
+                "{}/v1/sessions/{}",
+                fixture.base,
+                first["id"].as_str().unwrap()
+            ))
+            .bearer_auth(&fixture.key)
+            .send()
+            .await
+            .map_err(|_| "status failed")
+            .unwrap();
+        let value: Value = status.json().await.map_err(|_| "status failed").unwrap();
+        assert_eq!(value["status"], "ready");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        retained > 64 * 1024 * 1024,
+        "real replay must exceed prior fixed ceiling"
+    );
+    let segment = std::fs::read_dir(&ingest)
+        .unwrap()
+        .flatten()
+        .find(|entry| entry.file_name().to_string_lossy().ends_with(".ts"))
+        .unwrap()
+        .path();
+    let ffprobe = std::env::var("PLAYBACK_TEST_FFPROBE").unwrap();
+    let inspected = tokio::time::timeout(
+        Duration::from_secs(15),
+        Command::new(&ffprobe)
+            .kill_on_drop(true)
+            .args([
+                "-v",
+                "error",
+                "-show_streams",
+                "-show_packets",
+                "-show_entries",
+                "packet=size:stream=codec_type,width,height",
+                "-of",
+                "json",
+                "-i",
+            ])
+            .arg(&segment)
+            .output(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(inspected.status.success());
+    let facts: Value = serde_json::from_slice(&inspected.stdout).unwrap();
+    let video = &facts["streams"][0];
+    assert_eq!(video["width"], 3840);
+    assert_eq!(video["height"], 2160);
+    let packet_bytes: u64 = facts["packets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|packet| packet["size"].as_str().unwrap().parse::<u64>().unwrap())
+        .sum();
+    assert!(
+        packet_bytes > 4 * 1024 * 1024,
+        "H264 packet bytes must carry filler, not TS null padding"
+    );
+    let output = fixture
+        .media_dirs()
+        .into_iter()
+        .find(|dir| {
+            std::fs::read_to_string(dir.join("index.m3u8"))
+                .is_ok_and(|text| !text.contains("#EXT-X-INDEPENDENT-SEGMENTS"))
+        })
+        .unwrap();
+    let ffmpeg = std::env::var("PLAYBACK_TEST_FFMPEG").unwrap();
+    let decoded = tokio::time::timeout(
+        Duration::from_secs(15),
+        Command::new(ffmpeg)
+            .kill_on_drop(true)
+            .args([
+                "-v",
+                "error",
+                "-threads",
+                "2",
+                "-protocol_whitelist",
+                "file",
+                "-allowed_extensions",
+                "ts",
+                "-i",
+            ])
+            .arg(output.join("index.m3u8"))
+            .args(["-frames:v", "1", "-f", "null", "-"])
+            .output(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(
+        decoded.status.success(),
+        "copied actual4K output must decode"
+    );
+    let pids = children(fixture.child.id().unwrap());
+    for viewer in [first, second] {
+        let response = fixture
+            .client
+            .delete(format!(
+                "{}/v1/sessions/{}",
+                fixture.base,
+                viewer["id"].as_str().unwrap()
+            ))
+            .bearer_auth(&fixture.key)
+            .send()
+            .await
+            .map_err(|_| "release failed")
+            .unwrap();
+        assert!(response.status().is_success());
+    }
+    tokio::time::timeout(Duration::from_secs(25), async {
+        while !fixture.media_dirs().is_empty() {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("release grace must remove retained spool");
+    gone(&pids).await;
+    connections(&fixture.source, 0).await;
+    assert_eq!(allocation(&media).1, 0);
+    println!("CBR4K retained_replay_bytes={retained} allocated_media_bytes={allocated} sample_video_packet_bytes={packet_bytes}; allocation_after_release=0");
+    fixture.signal("-TERM").await;
+    assert!(fixture.child.wait().await.unwrap().success());
 }

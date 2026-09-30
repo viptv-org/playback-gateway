@@ -295,7 +295,7 @@ impl PlaybackManager {
                 "-protocol_whitelist",
                 "file",
                 "-allowed_extensions",
-                "ts",
+                "ts,m3u8",
                 "-show_streams",
                 "-of",
                 "json",
