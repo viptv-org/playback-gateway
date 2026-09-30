@@ -30,6 +30,12 @@ ingest seam, retaining upstream egress checks for every child resource. Late
 outputs start from retained keyframe segments, with verified source-to-replay
 track indices. Releasing or failing one output preserves the other outputs.
 
+Verified FFV1 video or FLAC audio selects private Matroska segments with a rolling
+M3U8 index instead of TS. This is a tested internal FFmpeg adapter, not public
+Matroska HLS: client HLS output remains TS/fMP4. Gateway-owned eviction retains
+12 listed segments, three old segments for active readers and an open new file.
+See [live format qualification](docs/LIVE_SHARING_FORMATS.md).
+
 Sources containing subtitles or other video/audio codecs, and progressive live
 delivery, retain their existing independent execution paths. They are not yet
 qualified for cross-output single-ingest. Different fallback output plans reserve

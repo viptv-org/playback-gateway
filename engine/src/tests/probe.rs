@@ -52,7 +52,7 @@ async fn physical_ingest_eligibility_declines_subtitles_unknown_codec_and_progre
                 .push(serde_json::json!({"index":2,"codec_type":"subtitle","codec_name":"subrip"}));
         }
         if case == "codec" {
-            facts["streams"][0]["codec_name"] = "ffv1".into();
+            facts["streams"][0]["codec_name"] = "mpeg4".into();
         }
         let manager = scripted_probe(root.path(), &format!("printf '%s' '{}'", facts));
         let prepared = manager

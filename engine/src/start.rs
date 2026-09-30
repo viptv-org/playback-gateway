@@ -693,7 +693,7 @@ impl PlaybackManager {
                         cmd.args(["-c:v", decoder]);
                     }
                 }
-                if session.ingest.is_some() {
+                if let Some(ingest) = &session.ingest {
                     contain_media_process(&mut cmd);
                     // Trusted generated playlist only. Provider protocols and
                     // credentials cannot leak into local output readers.
@@ -704,7 +704,7 @@ impl PlaybackManager {
                         // FFmpeg 9 applies this allowlist to live playlist
                         // reloads as well as segments. Both are gateway-owned
                         // files; network protocols remain disabled above.
-                        "ts,m3u8",
+                        ingest.extensions(),
                         "-live_start_index",
                         "-2",
                     ]);

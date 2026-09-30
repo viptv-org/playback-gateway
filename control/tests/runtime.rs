@@ -172,6 +172,8 @@ impl Fixture {
         let input = root.path().join("input.ts");
         let ffmpeg = std::env::var("PLAYBACK_TEST_FFMPEG").unwrap();
         let high = std::env::var("PLAYBACK_TEST_CBR_4K").as_deref() == Ok("1");
+        let matroska = std::env::var("PLAYBACK_TEST_MATROSKA_AV").as_deref() == Ok("1");
+        assert!(!(high && matroska));
         let mut generation = Command::new(&ffmpeg);
         generation.kill_on_drop(true);
         let output = tokio::time::timeout(
@@ -186,6 +188,8 @@ impl Fixture {
                     "-i",
                     if high {
                         "color=c=black:size=3840x2160:rate=5"
+                    } else if matroska {
+                        "testsrc2=size=128x72:rate=10"
                     } else {
                         "testsrc2=size=320x180:rate=25"
                     },
@@ -193,16 +197,19 @@ impl Fixture {
                     if high { "24" } else { "8" },
                     "-an",
                     "-c:v",
-                    "libx264",
+                    if matroska { "ffv1" } else { "libx264" },
                     "-threads",
                     "2",
-                    "-preset",
-                    "ultrafast",
                     "-g",
                     if high { "5" } else { "25" },
                     "-f",
-                    "mpegts",
+                    if matroska { "matroska" } else { "mpegts" },
                 ])
+                .args(if matroska {
+                    &[][..]
+                } else {
+                    &["-preset", "ultrafast"][..]
+                })
                 .args(if high {
                     &[
                         "-b:v",
@@ -557,6 +564,17 @@ async fn real_kernel_bounded_media_full_failure_reclaims_capacity_and_restarts()
     drop(file);
     std::fs::remove_file(sparse).unwrap();
     let viewer = fixture.start("first", 1920).await;
+    if std::env::var("PLAYBACK_TEST_MATROSKA_AV").as_deref() == Ok("1") {
+        assert_eq!(viewer["playback"]["video_mode"], "encode");
+        assert!(
+            fixture
+                .media_dirs()
+                .iter()
+                .any(|dir| std::fs::read_to_string(dir.join("index.m3u8"))
+                    .is_ok_and(|manifest| manifest.contains(".mkv"))),
+            "the small hard mount must exercise actual private Matroska writes"
+        );
+    }
     fixture.segment(&viewer).await;
     connections(&fixture.source, 1).await;
     let pids = children(fixture.child.id().unwrap());

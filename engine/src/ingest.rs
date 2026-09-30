@@ -6,6 +6,98 @@ use std::{collections::BTreeMap, sync::Weak};
 #[cfg(test)]
 const REPLAY_BYTES: u64 = 256 * 1024 * 1024;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReplayKind {
+    Ts,
+    Matroska,
+}
+impl ReplayKind {
+    fn for_probe(probe: &Probe) -> Self {
+        if probe
+            .streams
+            .iter()
+            .find(|s| s.is_video())
+            .is_some_and(|s| s.codec_name.as_deref() == Some("ffv1"))
+            || probe.streams.iter().any(|s| {
+                s.codec_type.as_deref() == Some("audio") && s.codec_name.as_deref() == Some("flac")
+            })
+        {
+            Self::Matroska
+        } else {
+            Self::Ts
+        }
+    }
+    fn extensions(self) -> &'static str {
+        match self {
+            Self::Ts => "ts,m3u8",
+            Self::Matroska => "mkv,m3u8",
+        }
+    }
+}
+
+fn matroska_segment_number(file: &str) -> Option<u64> {
+    let digits = file.strip_prefix("segment-")?.strip_suffix(".mkv")?;
+    (digits.len() >= 9 && digits.len() <= 16 && digits.bytes().all(|b| b.is_ascii_digit()))
+        .then(|| digits.parse().ok())
+        .flatten()
+}
+
+// The segment muxer limits its playlist, not files. Retain three evicted
+// segments for already-reading outputs; never delete an unlisted/open new file.
+async fn matroska_window(dir: &std::path::Path) -> Result<bool, ()> {
+    let text = match tokio::fs::read_to_string(dir.join("index.m3u8")).await {
+        Ok(text) if text.len() <= 16 * 1024 => text,
+        Ok(_) => return Err(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(_) => return Err(()),
+    };
+    let names: Vec<_> = text
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect();
+    if !text.starts_with("#EXTM3U") {
+        return Err(());
+    }
+    if names.is_empty() {
+        return Ok(false);
+    }
+    if names.len() > 12 {
+        return Err(());
+    }
+    let numbers: Vec<_> = names
+        .iter()
+        .map(|name| matroska_segment_number(name).ok_or(()))
+        .collect::<Result<_, _>>()?;
+    if numbers.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(());
+    }
+    let keep = numbers[0].saturating_sub(3);
+    let mut files = tokio::fs::read_dir(dir).await.map_err(|_| ())?;
+    while let Some(file) = files.next_entry().await.map_err(|_| ())? {
+        let name = file.file_name();
+        if name
+            .to_str()
+            .and_then(matroska_segment_number)
+            .is_some_and(|number| number < keep)
+        {
+            match tokio::fs::remove_file(file.path()).await {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => return Err(()),
+            }
+        }
+    }
+    for name in names {
+        if !tokio::fs::metadata(dir.join(name))
+            .await
+            .is_ok_and(|meta| meta.is_file() && meta.len() > 0)
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 async fn within_budget(dir: &std::path::Path, limit: u64) -> bool {
     let Ok(mut files) = tokio::fs::read_dir(dir).await else {
         return false;
@@ -33,12 +125,16 @@ async fn within_budget(dir: &std::path::Path, limit: u64) -> bool {
 pub(super) struct SharedIngest {
     pub(super) playlist: PathBuf,
     indices: BTreeMap<u32, u32>,
+    kind: ReplayKind,
     running: Arc<std::sync::atomic::AtomicBool>,
     cancel: Option<tokio::sync::oneshot::Sender<()>>,
     task: Option<tokio::task::JoinHandle<()>>,
     cleanup_tasks: CleanupTasks,
 }
 impl SharedIngest {
+    pub(super) fn extensions(&self) -> &'static str {
+        self.kind.extensions()
+    }
     pub(super) fn index(&self, original: u32) -> Result<u32, String> {
         self.indices
             .get(&original)
@@ -76,7 +172,7 @@ pub(super) fn replay_indices(probe: &Probe) -> Option<BTreeMap<u32, u32>> {
     let video = probe.streams.iter().find(|s| s.is_video())?;
     if !matches!(
         video.codec_name.as_deref(),
-        Some("h264" | "hevc" | "mpeg2video")
+        Some("h264" | "hevc" | "mpeg2video" | "ffv1")
     ) {
         return None;
     }
@@ -93,7 +189,7 @@ pub(super) fn replay_indices(probe: &Probe) -> Option<BTreeMap<u32, u32>> {
     for (ordinal, stream) in audio.into_iter().enumerate() {
         if !matches!(
             stream.codec_name.as_deref(),
-            Some("aac" | "mp2" | "mp3" | "ac3" | "eac3")
+            Some("aac" | "mp2" | "mp3" | "ac3" | "eac3" | "flac")
         ) {
             return None;
         }
@@ -142,6 +238,7 @@ impl PlaybackManager {
         probe: Arc<Probe>,
     ) -> Result<Arc<SharedIngest>, String> {
         let indices = replay_indices(&probe).ok_or("Source replay unsupported")?;
+        let kind = ReplayKind::for_probe(&probe);
         let replay_max_bytes = self.replay_max_bytes;
         let mut digest = Sha256::new();
         for value in [scope, source, headers] {
@@ -163,7 +260,7 @@ impl PlaybackManager {
         let _flight = flight.lock().await;
         let entry = self.ingests.lock().await.get(&key).cloned();
         if let Some(existing) = entry.as_ref().and_then(|entry| entry.ingest.upgrade()) {
-            if existing.indices != indices || !existing.running() {
+            if existing.indices != indices || existing.kind != kind || !existing.running() {
                 // A dead generation remains owned until every output is reaped.
                 return Err("Input cleanup pending".into());
             }
@@ -248,20 +345,45 @@ impl PlaybackManager {
             "-1",
             "-map_chapters",
             "-1",
-            "-f",
-            "hls",
-            "-hls_time",
-            "2",
-            "-hls_list_size",
-            "12",
-            "-hls_delete_threshold",
-            "3",
-            "-hls_flags",
-            "delete_segments+temp_file+independent_segments",
-            "-hls_segment_filename",
-        ])
-        .arg(dir.join("segment-%09d.ts"))
-        .arg(&playlist);
+        ]);
+        match kind {
+            ReplayKind::Ts => {
+                cmd.args([
+                    "-f",
+                    "hls",
+                    "-hls_time",
+                    "2",
+                    "-hls_list_size",
+                    "12",
+                    "-hls_delete_threshold",
+                    "3",
+                    "-hls_flags",
+                    "delete_segments+temp_file+independent_segments",
+                    "-hls_segment_filename",
+                ])
+                .arg(dir.join("segment-%09d.ts"))
+                .arg(&playlist);
+            }
+            ReplayKind::Matroska => {
+                cmd.args([
+                    "-f",
+                    "segment",
+                    "-segment_format",
+                    "matroska",
+                    "-segment_time",
+                    "2",
+                    "-segment_list_type",
+                    "m3u8",
+                    "-segment_list_size",
+                    "12",
+                    "-segment_list_flags",
+                    "+live",
+                    "-segment_list",
+                ])
+                .arg(&playlist)
+                .arg(dir.join("segment-%09d.mkv"));
+            }
+        }
         session.child = Some(cmd.spawn().map_err(|_| "Playback engine unavailable")?);
         let ready = timeout(Duration::from_secs(20), async {
             loop {
@@ -271,7 +393,14 @@ impl PlaybackManager {
                 if !within_budget(&dir, replay_max_bytes).await {
                     return false;
                 }
-                if playback_ready(&dir, None).await {
+                let ready = match kind {
+                    ReplayKind::Ts => playback_ready(&dir, None).await,
+                    ReplayKind::Matroska => match matroska_window(&dir).await {
+                        Ok(ready) => ready,
+                        Err(()) => return false,
+                    },
+                };
+                if ready {
                     return true;
                 }
                 sleep(Duration::from_millis(100)).await;
@@ -298,7 +427,7 @@ impl PlaybackManager {
                 "-protocol_whitelist",
                 "file",
                 "-allowed_extensions",
-                "ts,m3u8",
+                kind.extensions(),
                 "-show_streams",
                 "-of",
                 "json",
@@ -323,6 +452,7 @@ impl PlaybackManager {
                 result = probe_output(stdout, 1024 * 1024) => result,
                 _ = async {
                     loop {
+                        if kind == ReplayKind::Matroska && matroska_window(&dir).await.is_err() { break; }
                         if !within_budget(&dir,replay_max_bytes).await { break; }
                         sleep(Duration::from_millis(100)).await;
                     }
@@ -368,6 +498,9 @@ impl PlaybackManager {
                 if !matches!(session.child.as_mut().map(|c| c.try_wait()), Some(Ok(None))) {
                     break;
                 }
+                if kind == ReplayKind::Matroska && matroska_window(&session.dir).await.is_err() {
+                    break;
+                }
                 if !within_budget(&session.dir, replay_max_bytes).await {
                     break;
                 }
@@ -379,6 +512,7 @@ impl PlaybackManager {
         let ingest = Arc::new(SharedIngest {
             playlist,
             indices,
+            kind,
             running,
             cancel: Some(cancel),
             task: Some(task),
@@ -421,6 +555,70 @@ mod tests {
         let mut facts = probe();
         facts.streams[1].codec_name = Some("mpeg2video".into());
         assert_eq!(replay_indices(&facts), replay_indices(&probe()));
+    }
+
+    #[test]
+    fn verified_ffv1_or_flac_select_private_matroska_with_the_same_sparse_indices() {
+        let mut facts = probe();
+        assert_eq!(ReplayKind::for_probe(&facts).extensions(), "ts,m3u8");
+        facts.streams[1].codec_name = Some("ffv1".into());
+        assert_eq!(ReplayKind::for_probe(&facts).extensions(), "mkv,m3u8");
+        assert_eq!(replay_indices(&facts), replay_indices(&probe()));
+        facts = probe();
+        facts.streams[0].codec_name = Some("flac".into());
+        assert_eq!(ReplayKind::for_probe(&facts).extensions(), "mkv,m3u8");
+        assert_eq!(replay_indices(&facts), replay_indices(&probe()));
+    }
+
+    #[tokio::test]
+    async fn matroska_cleanup_retains_list_grace_and_open_files_and_rejects_unowned_paths() {
+        let root = tempfile::tempdir().unwrap();
+        for index in 0..20 {
+            tokio::fs::write(
+                root.path().join(format!("segment-{index:09}.mkv")),
+                b"fixture",
+            )
+            .await
+            .unwrap();
+        }
+        let manifest = format!(
+            "#EXTM3U\n{}",
+            (7..19)
+                .map(|index| format!("segment-{index:09}.mkv\n"))
+                .collect::<String>()
+        );
+        tokio::fs::write(root.path().join("index.m3u8"), &manifest)
+            .await
+            .unwrap();
+        assert_eq!(matroska_window(root.path()).await, Ok(true));
+        for index in 0..20 {
+            assert_eq!(
+                root.path().join(format!("segment-{index:09}.mkv")).exists(),
+                index >= 4
+            );
+        }
+        for bad in [
+            "../unowned.mkv",
+            "segment-000000019.mkv\nsegment-000000007.mkv",
+            "https://fixture.invalid/private.mkv",
+        ] {
+            tokio::fs::write(root.path().join("index.m3u8"), format!("#EXTM3U\n{bad}\n"))
+                .await
+                .unwrap();
+            assert_eq!(matroska_window(root.path()).await, Err(()));
+            assert!(root.path().join("segment-000000004.mkv").exists());
+        }
+    }
+
+    #[tokio::test]
+    async fn matroska_logical_budget_counts_an_open_unlisted_segment() {
+        let root = tempfile::tempdir().unwrap();
+        let file = tokio::fs::File::create(root.path().join("segment-000000019.mkv"))
+            .await
+            .unwrap();
+        file.set_len(REPLAY_BYTES + 1).await.unwrap();
+        assert!(!within_budget(root.path(), REPLAY_BYTES).await);
+        assert!(within_budget(root.path(), REPLAY_BYTES + 1).await);
     }
 
     #[test]

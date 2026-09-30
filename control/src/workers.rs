@@ -459,6 +459,9 @@ pub(crate) mod tests {
         }
     }
     async fn http_source(bytes: Vec<u8>) -> HttpSource {
+        http_source_with_interval(bytes, Duration::from_millis(30)).await
+    }
+    async fn http_source_with_interval(bytes: Vec<u8>, delay: Duration) -> HttpSource {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -487,7 +490,7 @@ pub(crate) mod tests {
                             loop {
                                 for chunk in bytes.chunks(188 * 100) {
                                     if socket.write_all(chunk).await.is_err() { return; }
-                                    tokio::time::sleep(Duration::from_millis(30)).await;
+                                    tokio::time::sleep(delay).await;
                                 }
                             }
                         });
@@ -1272,22 +1275,46 @@ pub(crate) mod tests {
         workers.shutdown().await;
     }
     #[tokio::test]
-    #[ignore = "requires real FFmpeg/ffprobe; isolated nonshared FFV1 source fixture"]
+    #[ignore = "requires real FFmpeg/ffprobe; isolated nonshared MPEG4 source fixture"]
     async fn real_fallback_outputs_reserve_each_physical_input_and_share_identical_jobs() {
-        check_live_codec_ingest(false).await;
+        check_live_codec_ingest(false, false, false, None).await;
     }
     #[tokio::test]
     #[ignore = "requires real FFmpeg/ffprobe; isolated shared MPEG2 live source fixture"]
     async fn real_mpeg2_live_differing_encoded_outputs_share_ingest_and_input_quota() {
-        check_live_codec_ingest(true).await;
+        check_live_codec_ingest(true, false, false, None).await;
     }
-    async fn check_live_codec_ingest(shared: bool) {
+    #[tokio::test]
+    #[ignore = "requires real FFmpeg/ffprobe; isolated FFV1/FLAC private Matroska replay"]
+    async fn real_matroska_av_live_outputs_share_indices_late_join_eviction_and_reap() {
+        check_live_codec_ingest(true, true, false, None).await;
+    }
+    #[tokio::test]
+    #[ignore = "requires real FFmpeg/ffprobe; H264 copy and FLAC private replay"]
+    async fn real_matroska_h264_flac_copy_and_encoded_live_outputs_share_ingest() {
+        check_live_codec_ingest(true, true, true, None).await;
+    }
+    #[tokio::test]
+    #[ignore = "requires real FFmpeg/ffprobe; configured private Matroska replay watchdog"]
+    async fn real_matroska_budget_failure_holds_input_until_actual_output_teardown() {
+        check_live_codec_ingest(true, true, false, Some(2 * 1024 * 1024)).await;
+    }
+    async fn check_live_codec_ingest(
+        shared: bool,
+        matroska: bool,
+        copy_source: bool,
+        budget: Option<u64>,
+    ) {
         let ffmpeg = std::env::var("PLAYBACK_TEST_FFMPEG").unwrap();
         let ffprobe = std::env::var("PLAYBACK_TEST_FFPROBE").unwrap();
         let root = tempfile::tempdir().unwrap();
-        let input_file = root
-            .path()
-            .join(if shared { "mpeg2.ts" } else { "fallback.mkv" });
+        let input_file = root.path().join(if matroska {
+            "private-source.mkv"
+        } else if shared {
+            "mpeg2.ts"
+        } else {
+            "fallback.mkv"
+        });
         let generated = tokio::time::timeout(
             Duration::from_secs(20),
             tokio::process::Command::new(&ffmpeg)
@@ -1300,18 +1327,58 @@ pub(crate) mod tests {
                     "lavfi",
                     "-i",
                     "testsrc2=size=320x180:rate=25",
+                ])
+                .args(if matroska {
+                    &[
+                        "-f",
+                        "lavfi",
+                        "-i",
+                        "sine=frequency=880:sample_rate=48000",
+                        "-f",
+                        "lavfi",
+                        "-i",
+                        "sine=frequency=440:sample_rate=48000",
+                        "-map",
+                        "1:a",
+                        "-map",
+                        "0:v",
+                        "-map",
+                        "2:a",
+                        "-c:a",
+                        "flac",
+                        "-metadata:s:a:0",
+                        "language=spa",
+                        "-metadata:s:a:1",
+                        "language=eng",
+                    ][..]
+                } else {
+                    &[][..]
+                })
+                .args([
                     "-t",
-                    "8",
-                    "-an",
+                    if matroska { "40" } else { "8" },
                     "-c:v",
-                    if shared { "mpeg2video" } else { "ffv1" },
+                    if copy_source {
+                        "libx264"
+                    } else if matroska {
+                        "ffv1"
+                    } else if shared {
+                        "mpeg2video"
+                    } else {
+                        "mpeg4"
+                    },
                     "-threads",
                     "2",
                     "-g",
                     "25",
                     "-f",
-                    if shared { "mpegts" } else { "matroska" },
+                    if shared && !matroska {
+                        "mpegts"
+                    } else {
+                        "matroska"
+                    },
                 ])
+                .args(if matroska { &[][..] } else { &["-an"][..] })
                 .arg(&input_file)
                 .output(),
         )
@@ -1319,14 +1386,26 @@ pub(crate) mod tests {
         .unwrap()
         .unwrap();
         assert!(generated.status.success());
-        let source = http_source(std::fs::read(input_file).unwrap()).await;
-        let engine = PlaybackManager::new(playback_engine::Config {
+        let bytes = std::fs::read(input_file).unwrap();
+        let delay = if copy_source {
+            Duration::from_millis((188 * 100 * 10_000u64 / bytes.len() as u64).max(1))
+        } else {
+            Duration::from_millis(30)
+        };
+        let source = http_source_with_interval(bytes, delay).await;
+        let config = playback_engine::Config {
             ffmpeg: ffmpeg.clone().into(),
             ffprobe: ffprobe.clone().into(),
             root: root.path().join("media"),
             max_sessions: 3,
             ttl: Duration::from_secs(120),
-        });
+        };
+        let engine = match budget {
+            Some(bytes) => {
+                PlaybackManager::new_with_hardware_and_replay_budget(config, None, None, bytes)
+            }
+            None => PlaybackManager::new(config),
+        };
         let credentials = Arc::new(
             Credentials::from_connection(
                 rusqlite::Connection::open_in_memory().unwrap(),
@@ -1357,6 +1436,9 @@ pub(crate) mod tests {
             .unwrap();
         let mut input = request(1920);
         input.input.url = source.url.clone();
+        if matroska {
+            input.output.audio_track = Some(2);
+        }
         let first = workers
             .create(&principal, &input, "first", 0)
             .await
@@ -1369,6 +1451,137 @@ pub(crate) mod tests {
             source.requests.load(std::sync::atomic::Ordering::SeqCst),
             opened
         );
+        if budget.is_some() {
+            let engine_id = workers.active.lock().unwrap()[&first.job_id].id.clone();
+            tokio::time::timeout(Duration::from_secs(20), async {
+                while workers.engine.input_running(&engine_id).await {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            })
+            .await
+            .expect("configured replay watchdog must terminate the actual producer");
+            expect_connections(&source, 0).await;
+            assert_eq!(
+                workers.available(&principal, 2).unwrap().inputs,
+                0,
+                "ledger must retain admission while output cleanup has not run"
+            );
+            workers.reap(3).await.unwrap();
+            assert_eq!(workers.available(&principal, 3).unwrap().inputs, 1);
+            assert!(std::fs::read_dir(root.path().join("media"))
+                .unwrap()
+                .next()
+                .is_none());
+            workers.shutdown().await;
+            return;
+        }
+        if matroska {
+            let replay = std::fs::read_dir(root.path().join("media"))
+                .unwrap()
+                .flatten()
+                .map(|entry| entry.path())
+                .find(|dir| {
+                    std::fs::read_to_string(dir.join("index.m3u8"))
+                        .is_ok_and(|text| text.contains(".mkv"))
+                })
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(20), async {
+                loop {
+                    let manifest = std::fs::read_to_string(replay.join("index.m3u8")).unwrap();
+                    let sequence = manifest
+                        .lines()
+                        .find_map(|line| {
+                            line.strip_prefix("#EXT-X-MEDIA-SEQUENCE:")
+                                .and_then(|sequence| sequence.parse::<u64>().ok())
+                        })
+                        .unwrap_or(0);
+                    if sequence >= 4 && !replay.join("segment-000000000.mkv").exists() {
+                        break;
+                    }
+                    let engine_id = workers
+                        .active
+                        .lock()
+                        .unwrap()
+                        .get(&first.job_id)
+                        .unwrap()
+                        .id
+                        .clone();
+                    assert!(workers.engine.input_running(&engine_id).await);
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            })
+            .await
+            .expect("private replay must evict old segments before late join");
+            let count = std::fs::read_dir(&replay)
+                .unwrap()
+                .flatten()
+                .filter(|entry| entry.file_name().to_string_lossy().ends_with(".mkv"))
+                .count();
+            assert!(
+                count <= 16,
+                "playlist, three delete-grace segments and one open file are bounded"
+            );
+            let manifest = std::fs::read_to_string(replay.join("index.m3u8")).unwrap();
+            let completed = manifest
+                .lines()
+                .find(|line| line.ends_with(".mkv"))
+                .unwrap();
+            let inspected = tokio::time::timeout(
+                Duration::from_secs(10),
+                tokio::process::Command::new(&ffprobe)
+                    .kill_on_drop(true)
+                    .args([
+                        "-v",
+                        "error",
+                        "-show_streams",
+                        "-show_packets",
+                        "-show_entries",
+                        "stream=index,codec_name,codec_type:packet=stream_index,pts_time,dts_time",
+                        "-of",
+                        "json",
+                        "-i",
+                    ])
+                    .arg(replay.join(completed))
+                    .output(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert!(inspected.status.success());
+            let facts: serde_json::Value = serde_json::from_slice(&inspected.stdout).unwrap();
+            assert_eq!(
+                facts["streams"][0]["codec_name"],
+                if copy_source { "h264" } else { "ffv1" }
+            );
+            assert_eq!(facts["streams"][1]["codec_name"], "flac");
+            assert_eq!(facts["streams"][2]["codec_name"], "flac");
+            let mut last = [None; 3];
+            for packet in facts["packets"].as_array().unwrap() {
+                let stream = packet["stream_index"].as_u64().unwrap() as usize;
+                let pts = packet["pts_time"].as_str().unwrap().parse::<f64>().unwrap();
+                assert!(
+                    pts >= 7.9,
+                    "private replay must preserve the evicted window's absolute media clock"
+                );
+                if let Some(dts) = packet["dts_time"]
+                    .as_str()
+                    .and_then(|dts| dts.parse::<f64>().ok())
+                {
+                    if let Some(previous) = last[stream] {
+                        assert!(
+                            dts >= previous,
+                            "packet DTS must be monotonic per retained track"
+                        );
+                    }
+                    last[stream] = Some(dts);
+                }
+            }
+            assert!(last.iter().all(Option::is_some));
+            assert_eq!(
+                source.requests.load(std::sync::atomic::Ordering::SeqCst),
+                opened
+            );
+        }
         input.output.max_width = 160;
         input.output.max_height = 90;
         let second = workers
@@ -1388,7 +1601,17 @@ pub(crate) mod tests {
         if shared {
             for (viewer, width, height) in [(&first, 320, 180), (&second, 160, 90)] {
                 let delivery = workers.delivery(&principal, viewer, 2).unwrap().unwrap();
-                assert_eq!(delivery.video_mode, "encode");
+                assert_eq!(
+                    delivery.video_mode,
+                    if copy_source && width == 320 {
+                        "copy"
+                    } else {
+                        "encode"
+                    }
+                );
+                if matroska {
+                    assert_eq!(delivery.selected_audio.as_ref().unwrap().input_index, 2);
+                }
                 let token = delivery.url.split('/').nth(3).unwrap();
                 let playlist = workers
                     .media(
@@ -1409,6 +1632,10 @@ pub(crate) mod tests {
                     .lines()
                     .find(|line| line.ends_with(".ts"))
                     .unwrap();
+                assert!(
+                    !std::str::from_utf8(&playlist).unwrap().contains(".mkv"),
+                    "private Matroska is never a public HLS format"
+                );
                 let segment = workers
                     .media(
                         &viewer.id,
@@ -1441,6 +1668,53 @@ pub(crate) mod tests {
                 assert_eq!(facts["streams"][0]["codec_name"], "h264");
                 assert_eq!(facts["streams"][0]["width"], width);
                 assert_eq!(facts["streams"][0]["height"], height);
+                if matroska {
+                    assert_eq!(facts["streams"][1]["codec_name"], "aac");
+                    let start = |index: usize| {
+                        facts["streams"][index]["start_time"]
+                            .as_str()
+                            .unwrap()
+                            .parse::<f64>()
+                            .unwrap()
+                    };
+                    assert!(
+                        (start(0) - start(1)).abs() < 0.1,
+                        "replayed audio/video must retain their timestamp alignment"
+                    );
+                    let decoded = tokio::time::timeout(
+                        Duration::from_secs(10),
+                        tokio::process::Command::new(&ffmpeg)
+                            .kill_on_drop(true)
+                            .args(["-v", "error", "-threads", "2", "-i"])
+                            .arg(&sample)
+                            .args([
+                                "-map", "0:a:0", "-vn", "-t", "1", "-ac", "1", "-ar", "48000",
+                                "-f", "f32le", "pipe:1",
+                            ])
+                            .output(),
+                    )
+                    .await
+                    .unwrap()
+                    .unwrap();
+                    assert!(decoded.status.success());
+                    let samples: Vec<f32> = decoded
+                        .stdout
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .map(|bytes| f32::from_le_bytes(*bytes))
+                        .collect();
+                    assert!(samples.len() > 24000);
+                    let crossings = samples
+                        .windows(2)
+                        .filter(|pair| pair[0].is_sign_negative() != pair[1].is_sign_negative())
+                        .count();
+                    let frequency = crossings as f64 * 48000.0 / (2.0 * samples.len() as f64);
+                    assert!(
+                        (350.0..550.0).contains(&frequency),
+                        "original audio2 must remain the selected440Hz track, not audio0/880Hz"
+                    );
+                }
                 let decoded = tokio::time::timeout(
                     Duration::from_secs(10),
                     tokio::process::Command::new(&ffmpeg)
