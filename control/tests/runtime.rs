@@ -679,6 +679,27 @@ async fn real_cbr_4k_copy_retains_over_old_budget_and_reclaims_spool() {
     let mut fixture = Fixture::new().await;
     let first = fixture.start("first", 3840).await;
     assert_eq!(first["playback"]["video_mode"], "copy");
+    let output = fixture
+        .media_dirs()
+        .into_iter()
+        .find(|dir| {
+            std::fs::read_to_string(dir.join("index.m3u8"))
+                .is_ok_and(|text| !text.contains("#EXT-X-INDEPENDENT-SEGMENTS"))
+        })
+        .unwrap();
+    let last_sequence = |dir: &Path| -> u64 {
+        std::fs::read_to_string(dir.join("index.m3u8"))
+            .unwrap()
+            .lines()
+            .filter_map(|line| {
+                line.strip_prefix("segment-")
+                    .and_then(|line| line.strip_suffix(".ts"))
+            })
+            .map(|sequence| sequence.parse::<u64>().unwrap())
+            .max()
+            .unwrap()
+    };
+    let initial_sequence = last_sequence(&output);
     connections(&fixture.source, 1).await;
     let opened = fixture.source.requests.load(Ordering::SeqCst);
     let second = fixture.start("headroom", 7680).await;
@@ -728,6 +749,13 @@ async fn real_cbr_4k_copy_retains_over_old_budget_and_reclaims_spool() {
         retained > 64 * 1024 * 1024,
         "real replay must exceed prior fixed ceiling"
     );
+    fixture.segment(&first).await;
+    let final_sequence = last_sequence(&output);
+    assert!(
+        final_sequence >= initial_sequence + 8,
+        "copy output must continue beyond startup segments"
+    );
+    println!("CBR output initial_segment_sequence={initial_sequence} final_segment_sequence={final_sequence}");
     let segment = std::fs::read_dir(&ingest)
         .unwrap()
         .flatten()
