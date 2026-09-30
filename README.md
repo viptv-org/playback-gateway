@@ -36,8 +36,14 @@ Matroska HLS: client HLS output remains TS/fMP4. Gateway-owned eviction retains
 12 listed segments, three old segments for active readers and an open new file.
 See [live format qualification](docs/LIVE_SHARING_FORMATS.md).
 
-Sources containing subtitles or other video/audio codecs, and progressive live
-delivery, retain their existing independent execution paths. They are not yet
+Linux SubRip subtitle inputs now use the private Matroska adapter and bounded
+decoded cue carryover. Long overlapping cues survive original-segment eviction,
+including when captions are enabled only by a late output. Source track identity
+stays absolute; selected WebVTT stream index is zero within its separate rendition.
+See [shared subtitle qualification](docs/SHARED_SUBTITLES.md).
+
+Sources containing unqualified subtitle formats or other video/audio codecs,
+and progressive live delivery, retain their existing independent execution paths. They are not yet
 qualified for cross-output single-ingest. Different fallback output plans reserve
 separate physical input slots; identical plans still share their existing job.
 VOD seek origins remain distinct. The
