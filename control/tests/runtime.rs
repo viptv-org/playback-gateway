@@ -94,6 +94,7 @@ async fn source(bytes: Vec<u8>) -> Source {
     let opened = requests.clone();
     let high = std::env::var("PLAYBACK_TEST_CBR_4K").as_deref() == Ok("1");
     let captions = std::env::var("PLAYBACK_TEST_SUBTITLES").as_deref() == Ok("1");
+    let overflow = std::env::var("PLAYBACK_TEST_CAPTION_OVERFLOW").as_deref() == Ok("1");
     let interval = Duration::from_secs_f64(120.0 * (188 * 100) as f64 / bytes.len() as f64);
     let bytes = Arc::new(bytes);
     let task = tokio::spawn(async move {
@@ -106,7 +107,7 @@ async fn source(bytes: Vec<u8>) -> Source {
                     opened.fetch_add(1,Ordering::SeqCst);
                     let mut header=Vec::new();while !header.ends_with(b"\r\n\r\n") && header.len()<16384 {match socket.read_u8().await{Ok(byte)=>header.push(byte),Err(_)=>return}}
                     if socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nConnection: close\r\n\r\n").await.is_err(){return}
-                    loop {for chunk in bytes.chunks(if high {188*4096}else{188*100}){if socket.write_all(chunk).await.is_err(){return}tokio::time::sleep(if captions {interval}else{Duration::from_millis(if high {150}else{30})}).await;}}
+                    loop {for chunk in bytes.chunks(if high {188*4096}else{188*100}){if socket.write_all(chunk).await.is_err(){return}tokio::time::sleep(if overflow {Duration::from_millis(1)}else if captions {interval}else{Duration::from_millis(if high {150}else{30})}).await;}if overflow {let _=socket.read_u8().await;return;}}
                 });}, _=peers.join_next(),if !peers.is_empty()=>{}
             }
         }
@@ -318,6 +319,18 @@ impl Fixture {
                 "1\n00:00:01,000 --> 00:01:30,000\nWRONG_SPANISH\n",
             )
             .unwrap();
+            if std::env::var("PLAYBACK_TEST_CAPTION_OVERFLOW").as_deref() == Ok("1") {
+                let mut cues = String::new();
+                for index in 0..70 {
+                    cues.push_str(&format!(
+                        "{}\n00:00:01,{:03} --> 00:01:40,000\n{}-{index}\n\n",
+                        index + 1,
+                        index * 10,
+                        "X".repeat(20 * 1024)
+                    ));
+                }
+                std::fs::write(&english, cues).unwrap();
+            }
         }
         let mut generation = Command::new(&ffmpeg);
         generation.kill_on_drop(true);
@@ -722,6 +735,51 @@ async fn real_shared_subtitles_preserve_sparse_identity_and_decoded_stream_index
             .success()
     );
     connections(&fixture.source, 0).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires isolated built-image caption cache budget fixture"]
+async fn real_shared_caption_budget_overflow_fails_safely_and_reclaims_admission() {
+    assert_eq!(
+        std::env::var("PLAYBACK_TEST_CAPTION_OVERFLOW").as_deref(),
+        Ok("1")
+    );
+    let mut fixture = Fixture::new().await;
+    let response=fixture.client.post(format!("{}/v1/sessions",fixture.base)).bearer_auth(&fixture.key).header("Idempotency-Key","caption-overflow").json(&json!({"namespace":"fixture","input":{"url":fixture.source.url,"headers":{},"live":true},"output":{"protocol":"hls","video_codecs":["h264"],"audio_codecs":["aac"],"max_width":128,"max_height":72,"audio_track":3,"subtitle_track":4}})).send().await.unwrap();
+    assert_eq!(response.status().as_u16(), 502);
+    let error: Value = response.json().await.unwrap();
+    assert_eq!(error, json!({"error":{"code":"processing_failed"}}));
+    connections(&fixture.source, 0).await;
+    tokio::time::timeout(Duration::from_secs(8), async {
+        loop {
+            let capabilities: Value = fixture
+                .client
+                .get(format!("{}/v1/capabilities", fixture.base))
+                .bearer_auth(&fixture.key)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            if capabilities["available"]["inputs"] == 1 && capabilities["available"]["outputs"] == 2
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("real terminated caption ingest must reclaim its reservations");
+    fixture.signal("-TERM").await;
+    assert!(
+        tokio::time::timeout(Duration::from_secs(8), fixture.child.wait())
+            .await
+            .unwrap()
+            .unwrap()
+            .success()
+    );
+    assert!(fixture.media_dirs().is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
