@@ -26,6 +26,9 @@ pub struct Workers {
     reaper: tokio::sync::Mutex<()>,
 }
 impl Workers {
+    pub fn media_storage_available(&self) -> bool {
+        self.engine.media_storage_available()
+    }
     pub fn available(
         &self,
         principal: &Principal,
@@ -39,6 +42,9 @@ impl Workers {
         available.outputs = available
             .outputs
             .min(self.engine.available_output_slots() as u32);
+        if !self.media_storage_available() {
+            available.outputs = 0;
+        }
         Ok(available)
     }
     /// Safe control response projection: substitute viewer-scoped media URLs

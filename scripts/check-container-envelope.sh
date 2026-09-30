@@ -25,6 +25,7 @@ trap 'exit 143' TERM
 docker volume create "$fixture_volume" >/dev/null
 container_id=$(API_KEY="$fixture_bootstrap" docker run --detach --pull=never --network none --read-only \
   --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+  --tmpfs /var/lib/playback-gateway/media:rw,size=256m,uid=10001,gid=10001,mode=0700,noexec,nosuid,nodev \
   --pids-limit 1024 --env API_KEY --mount "type=volume,source=$fixture_volume,target=/var/lib/playback-gateway" "$image_id")
 [[ "$container_id" =~ ^[0-9a-f]{64}$ ]]
 ready() {
@@ -35,6 +36,10 @@ ready() {
   echo 'Container readiness deadline exceeded.' >&2; return 1
 }
 ready
+key_response=$(docker exec "$container_id" sh -c 'curl --fail --silent --max-time 5 -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" --data '\''{"label":"persistent-envelope-fixture","namespaces":["fixture"],"scopes":["capabilities"],"quotas":{"inputs":1,"outputs":1,"viewers":1}}'\'' http://127.0.0.1:8090/v1/keys')
+fixture_key=$(printf '%s' "$key_response" | python3 -c 'import json,sys; print(json.load(sys.stdin)["secret"])')
+unset key_response
+docker exec "$container_id" touch /var/lib/playback-gateway/media/.ephemeral-proof
 envelope=$(docker inspect "$container_id" --format '{{.Config.User}}|{{.HostConfig.ReadonlyRootfs}}|{{json .HostConfig.CapDrop}}')
 [[ "$envelope" == '10001:10001|true|["ALL"]' ]]
 docker exec "$container_id" sh -c 'test "$(id -u)" = 10001 && test "$(id -g)" = 10001 && test "$(stat -c %a /var/lib/playback-gateway)" = 700 && grep -q "^NoNewPrivs:[[:space:]]*1$" /proc/self/status && grep -q "^CapEff:[[:space:]]*0000000000000000$" /proc/self/status && ! touch /readonly-root-test 2>/dev/null'
@@ -52,6 +57,9 @@ docker stop --time 10 "$container_id" >/dev/null
 [[ $(docker inspect "$container_id" --format '{{.State.ExitCode}}') == 0 ]]
 docker start "$container_id" >/dev/null
 ready
+docker exec "$container_id" test ! -e /var/lib/playback-gateway/media/.ephemeral-proof
+printf '%s\n' "$fixture_key" | docker exec -i "$container_id" sh -c 'read -r fixture_key; curl --fail --silent --max-time 5 -H "Authorization: Bearer $fixture_key" http://127.0.0.1:8090/v1/capabilities >/dev/null'
+unset fixture_key
 docker stop --time 10 "$container_id" >/dev/null
 [[ $(docker inspect "$container_id" --format '{{.State.ExitCode}}') == 0 ]]
 # Archive only stopped fixture data. The individual writable file bind avoids

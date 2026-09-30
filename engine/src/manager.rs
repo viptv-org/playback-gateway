@@ -10,6 +10,7 @@ pub struct PlaybackManager {
     pub(super) ingests: ingest::IngestRegistry,
     pub(super) ingest_flights: ingest::IngestFlights,
     pub(super) ingest_slots: Arc<Semaphore>,
+    pub(super) replay_max_bytes: u64,
     pub(super) lifecycle: RwLock<()>,
     pub(super) initialized: OnceCell<()>,
     pub(super) filters: OnceCell<HashSet<String>>,
@@ -33,6 +34,34 @@ impl PlaybackManager {
     pub fn available_output_slots(&self) -> usize {
         self.slots.available_permits()
     }
+    /// Existing capacity/readiness projection, not a reservation or hard bound.
+    pub fn media_storage_available(&self) -> bool {
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let mut path = self.config.root.as_path();
+            while !path.exists() {
+                let Some(parent) = path.parent() else {
+                    return false;
+                };
+                path = parent;
+            }
+            let Ok(path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+                return false;
+            };
+            let mut status = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+            if unsafe { libc::statvfs(path.as_ptr(), status.as_mut_ptr()) } != 0 {
+                return false;
+            }
+            let status = unsafe { status.assume_init() };
+            status.f_flag & libc::ST_RDONLY == 0
+                && status.f_bavail.saturating_mul(status.f_frsize) >= 4096
+        }
+        #[cfg(not(unix))]
+        {
+            true
+        }
+    }
 
     pub fn new_with_qsv(config: Config, qsv_device: Option<PathBuf>) -> Arc<Self> {
         Self::new_with_hardware(config, qsv_device, None)
@@ -45,6 +74,21 @@ impl PlaybackManager {
         config: Config,
         qsv_device: Option<PathBuf>,
         vaapi_device: Option<PathBuf>,
+    ) -> Arc<Self> {
+        Self::new_with_hardware_and_replay_budget(
+            config,
+            qsv_device,
+            vaapi_device,
+            256 * 1024 * 1024,
+        )
+    }
+    /// Operator resource budget, never a client quality constraint. The Docker
+    /// filesystem limit remains independent and covers all output writers too.
+    pub fn new_with_hardware_and_replay_budget(
+        config: Config,
+        qsv_device: Option<PathBuf>,
+        vaapi_device: Option<PathBuf>,
+        replay_max_bytes: u64,
     ) -> Arc<Self> {
         let interval = config
             .ttl
@@ -59,6 +103,7 @@ impl PlaybackManager {
             ingests: Mutex::new(HashMap::new()),
             ingest_flights: Mutex::new(HashMap::new()),
             ingest_slots: Arc::new(Semaphore::new(config.max_sessions)),
+            replay_max_bytes,
             config,
             lifecycle: RwLock::new(()),
             initialized: OnceCell::new(),

@@ -17,6 +17,11 @@ use tokio::{
     process::{Child, Command},
 };
 const BOOTSTRAP: &str = "runtime-qualification-bootstrap-fixture-only";
+fn state_root(root: &Path) -> PathBuf {
+    std::env::var_os("PLAYBACK_TEST_DATA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| root.join("state"))
+}
 
 fn isolated_address() {
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -210,7 +215,7 @@ impl Fixture {
             key: String::new(),
         };
         fixture.ready().await;
-        let response=fixture.client.post(format!("{}/v1/keys",fixture.base)).bearer_auth(BOOTSTRAP).json(&json!({"label":"runtime fixture","namespaces":["fixture"],"scopes":["create","read","release"],"quotas":{"inputs":1,"outputs":2,"viewers":3}})).send().await.map_err(|_|"key request failed").unwrap();
+        let response=fixture.client.post(format!("{}/v1/keys",fixture.base)).bearer_auth(BOOTSTRAP).json(&json!({"label":"runtime fixture","namespaces":["fixture"],"scopes":["create","read","release","capabilities"],"quotas":{"inputs":1,"outputs":2,"viewers":3}})).send().await.map_err(|_|"key request failed").unwrap();
         assert!(response.status().is_success());
         let value: Value = response
             .json()
@@ -221,27 +226,30 @@ impl Fixture {
         fixture
     }
     fn spawn(root: &Path, address: std::net::SocketAddr) -> Child {
-        Command::new(
+        let mut command = Command::new(
             std::env::var("PLAYBACK_TEST_SERVICE_BINARY")
                 .unwrap_or_else(|_| env!("CARGO_BIN_EXE_playback-gateway").into()),
-        )
-        .env("API_KEY", BOOTSTRAP)
-        .env("DATA_DIR", root.join("state"))
-        .env("BIND_ADDRESS", address.to_string())
-        .env(
-            "FFMPEG_PATH",
-            std::env::var("PLAYBACK_TEST_FFMPEG").unwrap(),
-        )
-        .env(
-            "FFPROBE_PATH",
-            std::env::var("PLAYBACK_TEST_FFPROBE").unwrap(),
-        )
-        .env("MAX_OUTPUTS", "2")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .kill_on_drop(true)
-        .spawn()
-        .unwrap()
+        );
+        command
+            .env("API_KEY", BOOTSTRAP)
+            .env("DATA_DIR", state_root(root))
+            .env("BIND_ADDRESS", address.to_string())
+            .env(
+                "FFMPEG_PATH",
+                std::env::var("PLAYBACK_TEST_FFMPEG").unwrap(),
+            )
+            .env(
+                "FFPROBE_PATH",
+                std::env::var("PLAYBACK_TEST_FFPROBE").unwrap(),
+            )
+            .env("MAX_OUTPUTS", "2")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        if std::env::var_os("PLAYBACK_TEST_DATA_DIR").is_some() {
+            command.uid(10001).gid(10001);
+        }
+        command.spawn().unwrap()
     }
     async fn ready(&mut self) {
         tokio::time::timeout(Duration::from_secs(10), async {
@@ -319,7 +327,7 @@ impl Fixture {
         );
     }
     fn media_dirs(&self) -> Vec<PathBuf> {
-        std::fs::read_dir(self.root.path().join("state/media"))
+        std::fs::read_dir(state_root(self.root.path()).join("media"))
             .unwrap()
             .flatten()
             .map(|entry| entry.path())
@@ -438,5 +446,160 @@ async fn real_service_crash_stops_media_children_and_restart_cleans_storage() {
             .unwrap()
             .success()
     );
+    connections(&fixture.source, 0).await;
+}
+
+fn allocation(path: &Path) -> (u64, u64) {
+    use std::os::unix::ffi::OsStrExt;
+    let path = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+    let mut status = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    assert_eq!(
+        unsafe { libc::statvfs(path.as_ptr(), status.as_mut_ptr()) },
+        0
+    );
+    let status = unsafe { status.assume_init() };
+    (
+        status.f_blocks * status.f_frsize,
+        (status.f_blocks - status.f_bfree) * status.f_frsize,
+    )
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires isolated Docker fixture with dedicated 2 MiB DATA_DIR/media tmpfs"]
+async fn real_kernel_bounded_media_full_failure_reclaims_capacity_and_restarts() {
+    use std::io::Write;
+    assert_eq!(
+        std::env::var("PLAYBACK_TEST_DATA_DIR").as_deref(),
+        Ok("/var/lib/playback-gateway")
+    );
+    let mut fixture = Fixture::new().await;
+    let media = state_root(fixture.root.path()).join("media");
+    let process_status =
+        std::fs::read_to_string(format!("/proc/{}/status", fixture.child.id().unwrap())).unwrap();
+    assert!(process_status.lines().any(|line| line.starts_with("Uid:")
+        && line.split_whitespace().skip(1).all(|uid| uid == "10001")));
+    assert!(process_status
+        .lines()
+        .any(|line| line.starts_with("CapEff:") && line.ends_with("0000000000000000")));
+    assert_eq!(allocation(&media).0, 2 * 1024 * 1024);
+    let before = allocation(&media).1;
+    let sparse = media.join("sparse-fixture.bin");
+    let file = std::fs::File::create(&sparse).unwrap();
+    file.set_len(1024 * 1024 * 1024).unwrap();
+    assert_eq!(
+        allocation(&media).1,
+        before,
+        "logical length is not allocated bytes"
+    );
+    drop(file);
+    std::fs::remove_file(sparse).unwrap();
+    let viewer = fixture.start("first", 1920).await;
+    fixture.segment(&viewer).await;
+    connections(&fixture.source, 1).await;
+    let pids = children(fixture.child.id().unwrap());
+    assert_eq!(pids.len(), 2);
+    let fill = media.join("capacity-fixture.bin");
+    let mut file = std::fs::File::create(&fill).unwrap();
+    let bytes = vec![0u8; 4096];
+    loop {
+        match file.write_all(&bytes) {
+            Ok(()) => assert!(allocation(&media).1 <= 2 * 1024 * 1024),
+            Err(error) => {
+                assert_eq!(error.raw_os_error(), Some(libc::ENOSPC));
+                break;
+            }
+        }
+    }
+    assert_eq!(allocation(&media).1, 2 * 1024 * 1024);
+    let ready = fixture
+        .client
+        .get(format!("{}/ready", fixture.base))
+        .send()
+        .await
+        .map_err(|_| "ready check failed")
+        .unwrap();
+    assert_eq!(ready.status().as_u16(), 503);
+    let denied=fixture.client.post(format!("{}/v1/sessions",fixture.base)).bearer_auth(&fixture.key).header("Idempotency-Key","full").json(&json!({"namespace":"fixture","input":{"url":fixture.source.url,"headers":{},"live":true},"output":{"protocol":"hls","video_codecs":["h264"],"audio_codecs":["aac"],"max_width":160,"max_height":90}})).send().await.map_err(|_|"full request failed").unwrap();
+    assert!(!denied.status().is_success());
+    let denied: Value = denied
+        .json()
+        .await
+        .map_err(|_| "full response failed")
+        .unwrap();
+    assert_eq!(denied["error"]["code"], "not_ready");
+    assert!(denied.get("playback").is_none());
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let response = fixture
+                .client
+                .get(format!(
+                    "{}/v1/sessions/{}",
+                    fixture.base,
+                    viewer["id"].as_str().unwrap()
+                ))
+                .bearer_auth(&fixture.key)
+                .send()
+                .await
+                .map_err(|_| "status failed")
+                .unwrap();
+            let state: Value = response
+                .json()
+                .await
+                .map_err(|_| "status body failed")
+                .unwrap();
+            if state["status"] == "failed" {
+                assert_eq!(state["error_code"], "processing_failed");
+                assert!(state.get("playback").is_none());
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("filesystem-full producers must fail safely");
+    gone(&pids).await;
+    connections(&fixture.source, 0).await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let response = fixture
+                .client
+                .get(format!("{}/v1/capabilities", fixture.base))
+                .bearer_auth(&fixture.key)
+                .send()
+                .await
+                .map_err(|_| "capacity failed")
+                .unwrap();
+            let caps: Value = response
+                .json()
+                .await
+                .map_err(|_| "capacity body failed")
+                .unwrap();
+            if caps["available"]["inputs"] == 1 && caps["available"]["viewers"] == 3 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("reservations must settle after actual process teardown");
+    drop(file);
+    std::fs::remove_file(fill).unwrap();
+    assert!(allocation(&media).1 < 2 * 1024 * 1024);
+    let fresh = fixture.start("after-full", 1920).await;
+    fixture.segment(&fresh).await;
+    fixture.signal("-TERM").await;
+    assert!(fixture.child.wait().await.unwrap().success());
+    connections(&fixture.source, 0).await;
+    assert!(state_root(fixture.root.path())
+        .join("credentials.sqlite")
+        .exists());
+    assert!(state_root(fixture.root.path())
+        .join("instance.lock")
+        .exists());
+    fixture.child = Fixture::spawn(fixture.root.path(), fixture.address);
+    fixture.ready().await;
+    let fresh = fixture.start("after-storage-restart", 1920).await;
+    fixture.segment(&fresh).await;
+    fixture.signal("-TERM").await;
+    assert!(fixture.child.wait().await.unwrap().success());
     connections(&fixture.source, 0).await;
 }

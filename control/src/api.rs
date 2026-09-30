@@ -121,7 +121,7 @@ async fn create(
     headers: HeaderMap,
     body: Result<Json<CreateSession>, JsonRejection>,
 ) -> Result<Response, ApiError> {
-    if !state.ready.load(Ordering::Acquire) {
+    if !state.ready.load(Ordering::Acquire) || !state.workers.media_storage_available() {
         return Err(ApiError("not_ready"));
     }
     let request = payload(body)?;
@@ -195,13 +195,16 @@ async fn capabilities(
     if !principal.key.spec.scopes.contains(&Scope::Capabilities) {
         return Err(ApiError("forbidden"));
     }
-    let available=state.workers.available(&principal,now()?).map_err(ApiError)?;
+    let available = state
+        .workers
+        .available(&principal, now()?)
+        .map_err(ApiError)?;
     Ok(Json(
-        serde_json::json!({"version":API_VERSION, "ready":state.ready.load(Ordering::Acquire), "protocols":["hls","progressive"], "viewer_lease_seconds":VIEWER_LEASE_SECONDS, "renew_after_seconds":RENEW_AFTER_SECONDS, "namespaces":principal.key.spec.namespaces, "scopes":principal.key.spec.scopes, "limits":principal.key.spec.quotas,"available":available}),
+        serde_json::json!({"version":API_VERSION, "ready":state.ready.load(Ordering::Acquire) && state.workers.media_storage_available(), "protocols":["hls","progressive"], "viewer_lease_seconds":VIEWER_LEASE_SECONDS, "renew_after_seconds":RENEW_AFTER_SECONDS, "namespaces":principal.key.spec.namespaces, "scopes":principal.key.spec.scopes,"limits":principal.key.spec.quotas,"available":available}),
     ))
 }
 async fn ready(State(state): State<Api>) -> Response {
-    if state.ready.load(Ordering::Acquire) {
+    if state.ready.load(Ordering::Acquire) && state.workers.media_storage_available() {
         Json(serde_json::json!({"status":"ready"})).into_response()
     } else {
         ApiError("not_ready").into_response()
@@ -311,10 +314,14 @@ mod tests {
         assert_eq!(status, StatusCode::CREATED);
         let issued: Value = serde_json::from_slice(&issued).unwrap();
         let key = issued["secret"].as_str().unwrap();
-        let (_, _, capabilities) = call(&app, "GET", "/v1/capabilities", key, None, String::new()).await;
+        let (_, _, capabilities) =
+            call(&app, "GET", "/v1/capabilities", key, None, String::new()).await;
         let capabilities: Value = serde_json::from_slice(&capabilities).unwrap();
         for scope in ["capabilities", "create", "read", "renew", "release"] {
-            assert!(capabilities["scopes"].as_array().unwrap().contains(&json!(scope)));
+            assert!(capabilities["scopes"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(scope)));
         }
         assert_eq!(
             call(&app, "GET", "/v1/capabilities", key, None, String::new())

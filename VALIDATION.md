@@ -1,5 +1,37 @@
 # Validation checkpoint — 2026-09-30
 
+## Supported Docker kernel-bounded media spool
+
+The supplied Compose deployment now mounts DATA_DIR/media on its own 256 MiB
+tmpfs, with UID/GID 10001, mode 0700, noexec/nosuid/nodev; /tmp remains separately
+bounded at 64 MiB. Credential SQLite files and instance.lock remain persistent on
+the named parent volume. No runtime/public v1 media-path API changed. Native,
+custom DATA_DIR and Docker runs without that nested mount do not inherit this
+bound. MEDIA_SPOOL_SIZE is operator Compose interpolation, not a client field.
+
+The fixed 64 MiB logical replay watchdog is replaced by LIVE_REPLAY_MAX_BYTES,
+operator default 256 MiB, minimum 1 MiB. The library also accepts an explicit
+resource budget. This sampled logical-file budget is independent of the kernel
+allocation limit; operators must tune both for bitrate/keyframe/concurrency.
+Sustained high-bitrate 4K/long-GOP qualification remains open, not inferred from
+the earlier small 4K copy fixture.
+
+A real 2 MiB mount fixture passes: actual service UID/GID 10001/caps 0, sparse 1 GiB
+logical length distinguished from allocated bytes, active real ingest/output,
+kernel ENOSPC and exact allocation cap, readiness 503, no fake playback on a denied
+start, safe processing_failed on the affected viewer, process/upstream teardown,
+reservation reclamation, successful playback after reclaiming space, persistent
+credential/lock files and authenticated fresh playback after restart. The fixture
+controller has only its explicitly documented isolated/cross-UID test privileges;
+they are not service/deployment privileges. The non-root envelope also passed
+with the nested mount. Final committed-image evidence is recorded separately.
+
+See [bounded media](docs/BOUNDED_MEDIA.md) for the complete write-path audit,
+kernel allocation versus logical size/RSS/swap distinctions, tuning, exact
+qualification and read-only backup/inspection of old media hidden beneath the
+new mount. Existing hidden files are neither deleted nor counted by the child
+mount; no production upgrade or data deletion occurred.
+
 ## Service/container shutdown qualification
 
 The runtime now bounds graceful HTTP draining at five seconds before terminating
@@ -86,7 +118,7 @@ quota charging makes that limitation explicit; it does not replace their future
 shared transport. These fixtures do not qualify stalled direct-response drains,
 all redirects/DNS/keys/subtitles, native devices or a current Docker image.
 
-## Hard storage bound audit — not implemented
+## Historical hard storage audit before the supported Docker mount
 
 FFmpeg writes replay segments, partial files and manifests directly. Sampling
 their sizes after writes cannot enforce a hard byte bound: writes can exceed the

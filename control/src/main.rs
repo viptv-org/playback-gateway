@@ -24,6 +24,7 @@ struct Settings {
     ffmpeg: PathBuf,
     ffprobe: PathBuf,
     outputs: usize,
+    replay_max_bytes: u64,
     qsv: Option<PathBuf>,
     vaapi: Option<PathBuf>,
 }
@@ -42,6 +43,12 @@ impl Settings {
         Ok(Self {
             key,
             outputs,
+            replay_max_bytes: std::env::var("LIVE_REPLAY_MAX_BYTES")
+                .unwrap_or_else(|_| "268435456".into())
+                .parse::<u64>()
+                .ok()
+                .filter(|bytes| *bytes >= 1024 * 1024)
+                .ok_or("invalid LIVE_REPLAY_MAX_BYTES")?,
             qsv: std::env::var_os("QSV_DEVICE")
                 .filter(|value| !value.is_empty())
                 .map(PathBuf::from),
@@ -164,7 +171,7 @@ async fn run(settings: Settings) -> Result<(), &'static str> {
         )
         .map_err(|_| "credential permissions unavailable")?;
     }
-    let engine = PlaybackManager::new_with_hardware(
+    let engine = PlaybackManager::new_with_hardware_and_replay_budget(
         Config {
             ffmpeg: settings.ffmpeg,
             ffprobe: settings.ffprobe,
@@ -174,6 +181,7 @@ async fn run(settings: Settings) -> Result<(), &'static str> {
         },
         settings.qsv,
         settings.vaapi,
+        settings.replay_max_bytes,
     );
     let workers = Arc::new(Workers::new(engine, credentials, NetworkPolicy::default()).await?);
     let ready = Arc::new(AtomicBool::new(true));

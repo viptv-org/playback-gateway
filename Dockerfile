@@ -29,7 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     mesa-va-drivers intel-media-va-driver \
     && apt-get clean \
     && groupadd --gid 10001 gateway && useradd --uid 10001 --gid gateway --no-create-home gateway \
-    && install -d -o gateway -g gateway -m 0700 /var/lib/playback-gateway
+    && install -d -o gateway -g gateway -m 0700 /var/lib/playback-gateway /var/lib/playback-gateway/media
 COPY --from=app-build /src/target/release/playback-gateway /usr/local/bin/playback-gateway
 COPY --from=media-build /opt/ffmpeg /opt/ffmpeg
 COPY --from=media-build /src/ffmpeg.tar.xz /src/ffmpeg.tar.xz.asc /usr/share/doc/playback-gateway/

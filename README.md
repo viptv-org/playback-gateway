@@ -36,8 +36,11 @@ qualified for cross-output single-ingest. Different fallback output plans reserv
 separate physical input slots; identical plans still share their existing job.
 VOD seek origins remain distinct. The
 replay has 12 retained segments plus deletion grace, a 20-second first-segment deadline
-and a 64 MiB sampled storage watchdog. The watchdog can overshoot between checks;
-operators still need a bounded data volume. See VALIDATION.md for exact evidence
+and an operator replay watchdog (LIVE_REPLAY_MAX_BYTES, default 256 MiB). The
+supplied Compose deployment independently bounds media allocation with a nested
+256 MiB tmpfs and /tmp with 64 MiB, preserving credentials on the parent volume.
+See [bounded media](docs/BOUNDED_MEDIA.md) for scope, tuning and upgrade handling.
+The sampled watchdog can overshoot; it is not the filesystem bound. See VALIDATION.md for exact evidence
 and remaining format, TLS, hardware, storage and crash-containment acceptance.
 
 ## Transport policy

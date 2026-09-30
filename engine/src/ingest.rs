@@ -3,9 +3,10 @@
 use super::*;
 use std::{collections::BTreeMap, sync::Weak};
 
-const REPLAY_BYTES: u64 = 64 * 1024 * 1024;
+#[cfg(test)]
+const REPLAY_BYTES: u64 = 256 * 1024 * 1024;
 
-async fn within_budget(dir: &std::path::Path) -> bool {
+async fn within_budget(dir: &std::path::Path, limit: u64) -> bool {
     let Ok(mut files) = tokio::fs::read_dir(dir).await else {
         return false;
     };
@@ -19,7 +20,7 @@ async fn within_budget(dir: &std::path::Path) -> bool {
                     Err(_) => return false,
                 };
                 bytes = bytes.saturating_add(metadata.len());
-                if bytes > REPLAY_BYTES {
+                if bytes > limit {
                     return false;
                 }
             }
@@ -138,6 +139,7 @@ impl PlaybackManager {
         probe: Arc<Probe>,
     ) -> Result<Arc<SharedIngest>, String> {
         let indices = replay_indices(&probe).ok_or("Source replay unsupported")?;
+        let replay_max_bytes = self.replay_max_bytes;
         let mut digest = Sha256::new();
         for value in [scope, source, headers] {
             digest.update((value.len() as u64).to_be_bytes());
@@ -263,7 +265,7 @@ impl PlaybackManager {
                 if !matches!(session.child.as_mut().map(|c| c.try_wait()), Some(Ok(None))) {
                     return false;
                 }
-                if !within_budget(&dir).await {
+                if !within_budget(&dir, replay_max_bytes).await {
                     return false;
                 }
                 if playback_ready(&dir, None).await {
@@ -318,7 +320,7 @@ impl PlaybackManager {
                 result = probe_output(stdout, 1024 * 1024) => result,
                 _ = async {
                     loop {
-                        if !within_budget(&dir).await { break; }
+                        if !within_budget(&dir,replay_max_bytes).await { break; }
                         sleep(Duration::from_millis(100)).await;
                     }
                 } => Err(crate::probe::ProbeFailure::Oversized),
@@ -363,7 +365,7 @@ impl PlaybackManager {
                 if !matches!(session.child.as_mut().map(|c| c.try_wait()), Some(Ok(None))) {
                     break;
                 }
-                if !within_budget(&session.dir).await {
+                if !within_budget(&session.dir, replay_max_bytes).await {
                     break;
                 }
             }
@@ -437,12 +439,13 @@ mod tests {
     #[tokio::test]
     async fn replay_budget_counts_partial_segments_and_fails_closed() {
         let root = tempfile::tempdir().unwrap();
-        assert!(within_budget(root.path()).await);
+        assert!(within_budget(root.path(), REPLAY_BYTES).await);
         let file = tokio::fs::File::create(root.path().join("segment-000000000.ts.tmp"))
             .await
             .unwrap();
         file.set_len(REPLAY_BYTES + 1).await.unwrap();
-        assert!(!within_budget(root.path()).await);
-        assert!(!within_budget(&root.path().join("missing")).await);
+        assert!(!within_budget(root.path(), REPLAY_BYTES).await);
+        assert!(within_budget(root.path(), REPLAY_BYTES + 1).await);
+        assert!(!within_budget(&root.path().join("missing"), REPLAY_BYTES).await);
     }
 }
