@@ -280,6 +280,7 @@ impl PlaybackManager {
         // Inspect the generated replay before trusting original-to-local indices.
         // This is a local read, with provider protocols and headers absent.
         let mut inspect = Command::new(&self.config.ffprobe);
+        contain_media_process(&mut inspect);
         inspect
             .kill_on_drop(true)
             .stdin(Stdio::null())

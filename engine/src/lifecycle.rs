@@ -259,7 +259,9 @@ impl PlaybackManager {
             429 => return Err("rate_limited".into()),
             _ => return Err("network_failed".into()),
         }
-        let mut child=Command::new(&self.config.ffprobe).args(["-v","error","-protocol_whitelist","pipe","-analyzeduration","5000000","-probesize","5000000","-read_intervals",&format!("%+{seconds}"),"-show_frames","-show_streams","-show_entries","frame=media_type,best_effort_timestamp_time:stream=codec_type,codec_name,width,height,channels","-of","json","-i","pipe:0"]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true).spawn().map_err(|_|"decoder_unavailable")?;
+        let mut command = Command::new(&self.config.ffprobe);
+        contain_media_process(&mut command);
+        let mut child=command.args(["-v","error","-protocol_whitelist","pipe","-analyzeduration","5000000","-probesize","5000000","-read_intervals",&format!("%+{seconds}"),"-show_frames","-show_streams","-show_entries","frame=media_type,best_effort_timestamp_time:stream=codec_type,codec_name,width,height,channels","-of","json","-i","pipe:0"]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true).spawn().map_err(|_|"decoder_unavailable")?;
         let mut input = child.stdin.take().unwrap();
         let output = child.stdout.take().unwrap();
         let error = child.stderr.take().unwrap();
@@ -321,6 +323,7 @@ impl PlaybackManager {
     }
     pub async fn ffmpeg_available(&self) -> bool {
         let mut cmd = Command::new(&self.config.ffmpeg);
+        contain_media_process(&mut cmd);
         cmd.arg("-version")
             .kill_on_drop(true)
             .stdin(Stdio::null())

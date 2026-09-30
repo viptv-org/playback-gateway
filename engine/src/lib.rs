@@ -16,6 +16,7 @@ mod lease;
 mod lifecycle;
 mod manager;
 mod probe;
+mod process;
 mod start;
 mod prepared;
 mod subtitles;
@@ -25,6 +26,7 @@ mod types;
 
 pub use manager::{PlaybackManager, SampleLimits};
 pub use prepared::{OutputPlan, PreparedPlayback};
+pub use process::contain_media_process;
 pub use types::{
     Capabilities, Config, MediaTrack, PlaybackResponse, SelectedAudio,
     SelectedSubtitle, TrackDisposition, TrackSelection,

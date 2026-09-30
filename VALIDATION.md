@@ -1,5 +1,35 @@
 # Validation checkpoint — 2026-09-30
 
+## Service/container shutdown qualification
+
+The runtime now bounds graceful HTTP draining at five seconds before terminating
+owned media workers. Linux media commands arm parent-death SIGKILL, including
+network ingestion, local output readers, inspection and capability checks.
+Public v1 JSON is unchanged. The locked workspace suite passes 99 tests with 27
+opt-in fixtures ignored, and strict all-target Clippy passes.
+
+Actual a47 service/container regression: an unread large generated-file response
+kept SIGTERM pending beyond the eight-second fixture deadline while one real
+ingest and two outputs existed. The corrected runtime passes this fixture,
+including child reaping, upstream closure, same-storage restart, persistent key
+authentication, rejection of old viewers and fresh playback. The separate
+SIGKILL/restart fixture passes too; a47 already eventually passed that five-second
+check, so Linux parent-death handling is recorded as additional hardening.
+
+The original current-source image was built locally as `qualification-a47c25c`,
+content ID `1fbc1c6ffac5`; corrected working-image qualification used `d57b9487786c`.
+The actual non-root/read-only envelope passed readiness, Docker health, effective
+zero capabilities, no-new-privileges, private volume mode, duplicate owner lock
+rejection, SIGTERM and restart. Its stopped fixture volume was archived privately
+before removal. Named HTTP/H264-HLS sharing fixtures also passed against exact
+FFmpeg 9.0.2 binaries and Debian runtime libraries extracted from `1fbc1c6ffac5`.
+
+See [container qualification](docs/CONTAINER_QUALIFICATION.md) for reproducible
+committed-source scripts, exact fixture semantics, isolated public-address setup,
+recoverable cleanup and unqualified cases. Final reviewed-source image content
+IDs are reported separately after rebuilding; no image push/deployment is claimed.
+This does not close universal sharing or the hard storage-bound gate.
+
 ## Physical input accounting, trusted TLS and small 4K copy
 
 Inspected plans now carry an internal `shared_ingest` execution fact, skipped by

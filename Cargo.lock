@@ -810,8 +810,10 @@ name = "playback-gateway"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "libc",
  "playback-engine",
  "rand_core 0.6.4",
+ "reqwest",
  "rusqlite",
  "serde",
  "serde_json",

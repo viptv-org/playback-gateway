@@ -163,6 +163,7 @@ pub(super) async fn cleanup_orphans(root: &std::path::Path) -> Result<(), String
 }
 
 pub(super) fn input_args(cmd: &mut Command, headers: &str) {
+    contain_media_process(cmd);
     // The engine's explicit egress policy must not be bypassed by host shell
     // proxy exclusions or silently replaced by an inherited system proxy.
     for variable in [

@@ -71,6 +71,10 @@ specific device and grant the container user the appropriate device-group access
 
 `/health` is liveness; `/ready` reflects startup checks and the reaper. SIGTERM
 and Ctrl-C stop accepting requests, drain in-flight requests and stop workers.
+HTTP draining has a five-second grace bound so an unread response cannot defer
+worker shutdown indefinitely. Linux media children also terminate with their
+creating parent thread after abrupt owner death; other host platforms are not
+crash-qualified. See [container qualification](docs/CONTAINER_QUALIFICATION.md).
 Reverse-proxy access logs must redact `/media` capability paths. Never log
 Authorization headers, request bodies or session response bodies.
 

@@ -32,7 +32,8 @@ async fn standalone_binary_serves_readiness_locks_storage_and_shuts_down() {
     let port = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = port.local_addr().unwrap();
     drop(port);
-    let executable = env!("CARGO_BIN_EXE_playback-gateway");
+    let executable = std::env::var("PLAYBACK_TEST_SERVICE_BINARY")
+        .unwrap_or_else(|_| env!("CARGO_BIN_EXE_playback-gateway").into());
     let configure = |command: &mut Command| {
         command
             .env("API_KEY", "standalone-fixture-bootstrap-not-production")
@@ -44,7 +45,7 @@ async fn standalone_binary_serves_readiness_locks_storage_and_shuts_down() {
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
     };
-    let mut command = Command::new(executable);
+    let mut command = Command::new(&executable);
     configure(&mut command);
     let mut child = command.spawn().unwrap();
     tokio::time::timeout(Duration::from_secs(10), async {
@@ -68,7 +69,7 @@ async fn standalone_binary_serves_readiness_locks_storage_and_shuts_down() {
     assert!(request(address, "/v1/capabilities")
         .await
         .starts_with("HTTP/1.1 401"));
-    let mut duplicate = Command::new(executable);
+    let mut duplicate = Command::new(&executable);
     configure(&mut duplicate);
     let rejected = tokio::time::timeout(Duration::from_secs(5), duplicate.output())
         .await
@@ -76,12 +77,10 @@ async fn standalone_binary_serves_readiness_locks_storage_and_shuts_down() {
         .unwrap();
     assert!(!rejected.status.success());
     assert!(String::from_utf8_lossy(&rejected.stderr).contains("data directory already in use"));
-    let status = Command::new("kill")
-        .args(["-TERM", &child.id().unwrap().to_string()])
-        .status()
-        .await
-        .unwrap();
-    assert!(status.success());
+    assert_eq!(
+        unsafe { libc::kill(child.id().unwrap() as libc::pid_t, libc::SIGTERM) },
+        0
+    );
     assert!(tokio::time::timeout(Duration::from_secs(10), child.wait())
         .await
         .unwrap()

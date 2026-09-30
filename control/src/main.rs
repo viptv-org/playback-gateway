@@ -7,6 +7,7 @@ use playback_gateway::{
 };
 use std::{
     fs::{File, OpenOptions},
+    future::IntoFuture,
     net::SocketAddr,
     path::PathBuf,
     sync::{
@@ -108,9 +109,11 @@ fn lock_storage(data: &PathBuf) -> Result<File, &'static str> {
     Ok(lock)
 }
 async fn verify_media_binary(path: &PathBuf) -> Result<(), &'static str> {
+    let mut command = tokio::process::Command::new(path);
+    playback_engine::contain_media_process(&mut command);
     let output = tokio::time::timeout(
         Duration::from_secs(5),
-        tokio::process::Command::new(path)
+        command
             .kill_on_drop(true)
             .args(["-hide_banner", "-h", "protocol=tls"])
             .output(),
@@ -125,9 +128,11 @@ async fn verify_media_binary(path: &PathBuf) -> Result<(), &'static str> {
     {
         return Err("media binaries must verify TLS by default");
     }
+    let mut command = tokio::process::Command::new(path);
+    playback_engine::contain_media_process(&mut command);
     let output = tokio::time::timeout(
         Duration::from_secs(5),
-        tokio::process::Command::new(path)
+        command
             .kill_on_drop(true)
             .args(["-hide_banner", "-buildconf"])
             .output(),
@@ -197,12 +202,30 @@ async fn run(settings: Settings) -> Result<(), &'static str> {
         })
     };
     let shutdown_ready = ready.clone();
+    let (shutdown_started, mut shutdown_requested) = tokio::sync::watch::channel(false);
     let server = axum::serve(listener, app).with_graceful_shutdown(async move {
         shutdown_signal().await;
         shutdown_ready.store(false, Ordering::Release);
+        let _ = shutdown_started.send(true);
     });
     eprintln!("Playback gateway started");
-    let result = server.await.map_err(|_| "HTTP server failed");
+    let server = server.into_future();
+    tokio::pin!(server);
+    let result = tokio::select! {
+        result = &mut server => result.map_err(|_| "HTTP server failed"),
+        _ = shutdown_requested.changed() => {
+            // A client can stop consuming a media response indefinitely. Finish
+            // graceful HTTP draining within a bound so owned media processes
+            // are terminated/reaped before the runtime and storage lock exit.
+            match tokio::time::timeout(Duration::from_secs(5), &mut server).await {
+                Ok(result) => result.map_err(|_| "HTTP server failed"),
+                Err(_) => {
+                    eprintln!("HTTP drain deadline reached; stopping owned media workers");
+                    Ok(())
+                }
+            }
+        }
+    };
     let _ = stop.send(true);
     let _ = reaper.await;
     workers.shutdown().await;

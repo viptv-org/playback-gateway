@@ -694,6 +694,7 @@ impl PlaybackManager {
                     }
                 }
                 if session.ingest.is_some() {
+                    contain_media_process(&mut cmd);
                     // Trusted generated playlist only. Provider protocols and
                     // credentials cannot leak into local output readers.
                     cmd.args([

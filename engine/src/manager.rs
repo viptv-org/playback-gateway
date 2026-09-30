@@ -304,7 +304,9 @@ impl PlaybackManager {
     pub(super) async fn available_filters(&self) -> Result<&HashSet<String>, String> {
         self.filters
             .get_or_try_init(|| async {
-                let mut child = Command::new(&self.config.ffmpeg)
+                let mut command = Command::new(&self.config.ffmpeg);
+                contain_media_process(&mut command);
+                let mut child = command
                     .args(["-hide_banner", "-filters"])
                     .kill_on_drop(true)
                     .stdin(Stdio::null())

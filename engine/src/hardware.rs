@@ -242,6 +242,7 @@ fn valid_device(device: &std::path::Path) -> bool {
 async fn probe(ffmpeg: &std::path::Path, args: &[&str], input: Option<&'static [u8]>) -> bool {
     use tokio::io::AsyncWriteExt;
     let mut cmd = Command::new(ffmpeg);
+    crate::contain_media_process(&mut cmd);
     cmd.kill_on_drop(true)
         .stdin(if input.is_some() {
             Stdio::piped()
