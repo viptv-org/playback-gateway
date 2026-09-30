@@ -93,6 +93,26 @@ files prevent deletion, and `.mkv` remains rejected by public `media_type`.
 The unit regression verifies both cleanup and preservation; the runtime script
 supports the same actual source kind for crash and active/stalled response tests.
 
+### Exact-image AV checkpoint
+
+2026-09-30: committed runtime source
+`3b53c84407e4bb2cd08d1e7e3d9940a98d6d0def`, image
+`sha256:caecba4a56298346ccf839229b8b4ddbdea9ab63e4eb961cce2bed51a7748d5d`.
+The image passed all three named runtime fixtures exactly once in Matroska mode:
+readiness/lock/shutdown; one ingest/two outputs with active and unread/stalled
+HTTP response shutdown (11.15 seconds); SIGKILL child reap/orphan cleanup/restart
+and fresh playback (6.01 seconds). The same exact image passed real 2 MiB tmpfs
+ENOSPC/safe failure/process teardown/reclamation/persistent-key/restart in
+Matroska mode (10.01 seconds), and the production non-root/read-only/no-caps,
+private-volume lock and stop/start credential-persistence envelope.
+
+The scripts remove only their newly returned container IDs and anonymous fixture
+volumes. The envelope preserves a private stopped-data archive before removing
+its own named test volume. No provider, production data, deployment, Android or
+hardware access is involved. These AV checks do not close subtitle/progressive
+or all-codec sharing, long-run/high-bitrate Matroska, TLS-to-Matroska source,
+physical decoder or hardware acceptance.
+
 ## Remaining transport seams
 
 - Unlisted video/audio codecs still require lossless replay that supports their
@@ -106,15 +126,16 @@ supports the same actual source kind for crash and active/stalled response tests
 A bounded local experiment with the same FFmpeg 9 binaries verified that the
 official segment-muxer Matroska/M3U8 seam retains H264, FLAC and subrip as indices
 0/1/2 and is readable with only `file` protocols and explicit `mkv,m3u8`
-extensions. This is **not** a production implementation or full qualification.
+extensions. This subtitle experiment is **not** a runtime implementation or full qualification.
 The implemented AV-only path deliberately still excludes this subtitle case.
 The experiment exposed an active-cue late-join issue: a subtitle packet begins
 in an evicted segment but its display interval extends into the retained window.
 Plain segment replacement loses that still-active cue. A subtitle implementation
 must preserve carryover, timestamp alignment, sparse-track metadata and bounded
 storage/cancellation, not simply add `.mkv` to the reader list. The segment muxer
-also needs gateway-owned old-file deletion; list size alone does not delete files.
+requires gateway-owned old-file deletion (now implemented for AV); list size
+alone does not delete files.
 
 [Current official FFmpeg segment documentation](https://ffmpeg.org/ffmpeg-all.html#segment_002c-stream_005fsegment_002c-ssegment)
 documents Matroska segments with a live M3U8 list. Real cue, track, reload and
-teardown tests remain required before claiming this path shares live inputs.
+teardown tests remain required before claiming the subtitle path shares live inputs.
