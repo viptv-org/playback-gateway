@@ -74,7 +74,11 @@ image `sha256:212af567feefbba9160d5e4dd616ededddf228df4349b7500341c9f7580b36cb`:
   media children or upstream left. Exactly one named test passed, in 37 seconds.
 
 The default suite passed 99 tests (29 opt-in ignored); strict all-target Clippy,
-diff and shell syntax checks passed. The script emits the exact committed source
+diff and shell syntax checks passed. The same exact image also passed the three
+named crash/active-response/stalled-response service fixtures, the real 2 MiB
+ENOSPC/reap/reclamation/persistent-key/restart fixture, and the non-root,
+read-only, no-capabilities production envelope/volume-lock/restart checks.
+The script emits the exact committed source
 revision and image digest for each independent run; retain that output with the
 handoff. The source commit adds only test assertions beyond the runtime fix at
 `c51a314`; both commits independently built the identical image above.
