@@ -24,6 +24,10 @@ The default workspace suite passes 104 tests/36 opt-in ignored and strict
 all-target Clippy. ASS/SSA/WebVTT, bitmap/teletext, other unqualified source
 formats and non-Linux subtitle replay retain independent paths; no silent
 discard, new live origin, UI, public deployment or native renderer is claimed.
+Later mechanical formatting passes scoped checks for all changed Rust files;
+the workspace formatter still reports five untouched baseline files listed in
+the qualification document. The exact image proof above predates that
+formatting-only commit; runtime behavior did not change.
 
 ## Supported Docker kernel-bounded media spool
 

@@ -36,7 +36,9 @@ this contract document alone does not claim deployment.
 Runtime source `f056a0dd31d6443c45706ac35dc08406d28a710b` was built from a Git
 archive as image
 `sha256:5efbd97e78573879a696f4bd3c4c22165c3a65e500bf5695e1cb4881ca95eed8`.
-Runtime code is unchanged by the subsequent fixture/documentation commits.
+Subsequent commits change fixtures, documentation and mechanical Rust formatting;
+runtime behavior is unchanged. Image evidence remains tied to this exact source
+and image, not a claim that an image was rebuilt after the formatting commit.
 The source-pinned fixture `44c7449181e39e9dabc5ab21029aba0bdf92da4f` exercises the real service binary and
 its exact FFmpeg 9.0.2/runtime libraries inside disposable network-none Docker.
 
@@ -95,6 +97,12 @@ sudo -n bash scripts/check-bounded-media-container.sh LOCAL_GATEWAY_IMAGE subtit
 ```
 
 The default suite passes 104 tests with 36 explicit opt-in fixtures ignored;
-strict all-target Clippy passes. This qualifies Linux SubRip with the tested
+strict all-target Clippy passes. Scoped `rustfmt --check` with `skip_children=true`
+passes for all twelve Rust files changed by this ticket. Whole-workspace
+`cargo fmt --all --check` still fails on five untouched baseline files:
+`control/src/lib.rs`, `engine/examples/browser_check.rs`,
+`engine/src/direct/tests.rs`, `engine/src/tests/throttle.rs` and
+`engine/src/tests/vaapi.rs`. They remain byte-identical to `fb15c39`; no overall
+workspace-format pass is claimed. This qualifies Linux SubRip with the tested
 H264/AAC source, not ASS/SSA/WebVTT/bitmap sharing, arbitrary encodings/styles,
 all AV combinations, native device rendering, universal formats or deployment.
