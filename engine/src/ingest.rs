@@ -211,10 +211,7 @@ pub(super) fn replay_indices(probe: &Probe) -> Option<BTreeMap<u32, u32>> {
     }
     subtitles.sort_by_key(|s| s.index);
     for stream in subtitles {
-        if !matches!(
-            stream.codec_name.as_deref(),
-            Some("subrip" | "ass" | "ssa" | "webvtt")
-        ) {
+        if stream.codec_name.as_deref()!=Some("subrip") {
             return None;
         }
         let index = stream.index.filter(|index| *index <= 65535)?;
