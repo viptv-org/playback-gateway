@@ -252,7 +252,7 @@ async fn tls_proxy(upstream: std::net::SocketAddr) -> (String, Child) {
     drop(reservation);
     let script = r#"import socket, socketserver, ssl, sys, select
 context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-context.load_cert_chain('/fixtures/subtitle-ca.pem','/fixtures/subtitle-key.pem')
+context.load_cert_chain('/fixtures/subtitle-server.pem','/fixtures/subtitle-key.pem')
 class Handler(socketserver.BaseRequestHandler):
  def handle(self):
   try:
