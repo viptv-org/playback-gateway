@@ -1099,14 +1099,6 @@ async fn real_service_active_and_stalled_media_shutdown_reaps_workers() {
 async fn real_service_crash_stops_media_children_and_restart_cleans_storage() {
     let mut fixture = Fixture::new().await;
     let viewer = fixture.start("first", 1920).await;
-    if std::env::var("PLAYBACK_TEST_SUBTITLES").as_deref() == Ok("1") {
-        assert_eq!(viewer["playback"]["selected_subtitle"]["input_index"], 4);
-        assert!(fixture
-            .media_dirs()
-            .iter()
-            .any(|dir| std::fs::read_to_string(dir.join("index.m3u8"))
-                .is_ok_and(|text| text.contains(".mkv"))));
-    }
     fixture.segment(&viewer).await;
     connections(&fixture.source, 1).await;
     let pids = children(fixture.child.id().unwrap());
@@ -1179,6 +1171,17 @@ async fn real_kernel_bounded_media_full_failure_reclaims_capacity_and_restarts()
     drop(file);
     std::fs::remove_file(sparse).unwrap();
     let viewer = fixture.start("first", 1920).await;
+    if std::env::var("PLAYBACK_TEST_SUBTITLES").as_deref() == Ok("1") {
+        assert_eq!(viewer["playback"]["selected_subtitle"]["input_index"], 4);
+        assert!(
+            fixture
+                .media_dirs()
+                .iter()
+                .any(|dir| std::fs::read_to_string(dir.join("index.m3u8"))
+                    .is_ok_and(|text| text.contains(".mkv"))),
+            "hard mount must contain actual subtitle replay writes"
+        );
+    }
     if std::env::var("PLAYBACK_TEST_MATROSKA_AV").as_deref() == Ok("1") {
         assert_eq!(viewer["playback"]["video_mode"], "encode");
         assert!(
