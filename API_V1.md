@@ -105,7 +105,7 @@ subtitle is a separate WebVTT rendition: `output_index` and
 track IDs or indices in the AV segment. This corrects the earlier combined-map
 stream index; clients must resolve native tracks through their player.
 
-The Linux shared replay adapter qualifies SubRip, ASS/SSA and WebVTT alongside
+The Linux shared replay adapter qualifies SubRip alongside
 the eligible AV codecs listed in `docs/LIVE_SHARING_FORMATS.md`. All eligible
 caption tracks are retained even when the first output disables subtitles.
 Compatible viewers and differing HLS output plans share one input. Caption
@@ -122,7 +122,7 @@ Caption blocks are bounded at 32 KiB and the shared cue cache at 1 MiB/8192 cues
 completed cues retain 180 seconds of reader grace, while still-active cues remain
 until their end. Overflow or invalid caption timing fails the affected ingest
 safely, rather than silently dropping captions. The supported Docker media
-tmpfs bound also remains required. Bitmap, DVB/PGS/teletext, mov_text/text,
+tmpfs bound also remains required. ASS/SSA/WebVTT, bitmap, DVB/PGS/teletext, mov_text/text,
 unqualified codecs and non-Linux subtitle replay keep the independent path.
 These are qualification boundaries, not a universal subtitle-format promise.
 

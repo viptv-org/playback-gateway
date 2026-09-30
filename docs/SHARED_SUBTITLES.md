@@ -14,8 +14,8 @@ let players recognize a cue repeated across consecutive HLS subtitle segments;
 there is one copy of each cue per segment. Public caption stream index is zero
 within the actual separate WebVTT rendition.
 
-Qualified candidates are SubRip, ASS/SSA and WebVTT on Linux with already
-eligible AV codecs. Unsupported bitmap/DVB/PGS/teletext, mov_text/text, unlisted
+Qualified shared captions are SubRip on Linux with already
+eligible AV codecs. ASS/SSA/WebVTT, bitmap/DVB/PGS/teletext, mov_text/text, unlisted
 AV codecs and other platforms retain independent execution. Plain WebVTT
 conversion has the existing styling limitations. At most 32 subtitle tracks,
 32 KiB per decoded block and 1 MiB/8192 cached cues are accepted. Completed cues
