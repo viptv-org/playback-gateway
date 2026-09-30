@@ -484,6 +484,57 @@ async fn real_shared_subtitles_preserve_sparse_identity_and_decoded_stream_index
         0
     );
     assert_eq!(first["playback"]["selected_audio"]["input_index"], 3);
+    let url = first["playback"]["url"].as_str().unwrap();
+    let path = url.rsplit_once('/').unwrap().0;
+    let playlist = fixture
+        .client
+        .get(format!("{}{path}/index_vtt.m3u8", fixture.base))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let file = playlist
+        .lines()
+        .find(|line| line.ends_with(".vtt"))
+        .unwrap();
+    let vtt = fixture
+        .client
+        .get(format!("{}{path}/{file}", fixture.base))
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    let mut decoder = Command::new(std::env::var("PLAYBACK_TEST_FFPROBE").unwrap())
+        .args([
+            "-v",
+            "error",
+            "-f",
+            "webvtt",
+            "-show_streams",
+            "-of",
+            "json",
+            "-i",
+            "pipe:0",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    decoder.stdin.take().unwrap().write_all(&vtt).await.unwrap();
+    let output = decoder.wait_with_output().await.unwrap();
+    assert!(output.status.success());
+    let facts: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        facts["streams"][0]["index"],
+        first["playback"]["selected_subtitle"]["output_stream_index"]
+    );
+    assert_eq!(facts["streams"][0]["codec_name"], "webvtt");
     connections(&fixture.source, 1).await;
     fixture.signal("-TERM").await;
     assert!(
