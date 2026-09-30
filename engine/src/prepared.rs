@@ -23,6 +23,10 @@ pub struct OutputPlan {
     /// Streaming fMP4 has a single-consumer transport. Do not share it until
     /// that transport is replaced by a multi-reader implementation.
     pub shareable: bool,
+    /// Internal physical execution fact, never part of the public protocol.
+    /// Only eligible live outputs read one independently owned source ingest.
+    #[serde(skip)]
+    pub shared_ingest: bool,
 }
 
 pub struct PreparedPlayback<'a> {

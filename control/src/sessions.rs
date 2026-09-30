@@ -229,7 +229,13 @@ impl Sessions {
                 plan.position_micros
             }
         ]);
-        let input = hex(&hash(&identity.to_string()));
+        // Without a physical shared ingest, each distinct normalized output
+        // starts another upstream pipeline. Identical plans still join a job.
+        let input = if request.input.live && plan.shared_ingest {
+            hex(&hash(&identity.to_string()))
+        } else {
+            hex(&hash(&serde_json::json!([identity, plan]).to_string()))
+        };
         let fingerprint = hex(&hash(&serde_json::json!([input, plan]).to_string()));
         let existing = self.jobs.values().find(|j| j.fingerprint == fingerprint);
         if existing.is_some_and(|job| job.state == JobState::Stopping) {
@@ -684,6 +690,7 @@ mod tests {
             position_micros: 0,
             segmentation: "mpegts:split".into(),
             shareable: true,
+            shared_ingest: true,
         }
     }
     #[test]
@@ -837,6 +844,68 @@ mod tests {
                 .error_code
                 .as_deref(),
             Some("startup_timeout")
+        );
+    }
+    #[test]
+    fn fallback_plans_charge_physical_inputs_and_hold_them_until_teardown() {
+        let p = principal("one", "family");
+        let mut sessions = Sessions::default();
+        let source = request("family");
+        let mut fallback = plan();
+        fallback.shared_ingest = false;
+        let first = sessions.reserve(&p, &source, &fallback, "one", 0).unwrap();
+        let same = sessions.reserve(&p, &source, &fallback, "same", 0).unwrap();
+        assert!(!same.start_job);
+        assert_eq!(same.viewer.job_id, first.viewer.job_id);
+        let mut distinct = fallback.clone();
+        distinct.video_mode = "encode".into();
+        distinct.mode = "transcode".into();
+        let second = sessions.reserve(&p, &source, &distinct, "two", 0).unwrap();
+        assert!(second.start_job);
+        assert_eq!(sessions.available(&p, 0).inputs, 0);
+        let mut third = distinct.clone();
+        third.width = 640;
+        assert_eq!(
+            sessions
+                .reserve(&p, &source, &third, "three", 1)
+                .unwrap_err(),
+            "input_capacity"
+        );
+        sessions.release(&p, &first.viewer.id, 1).unwrap();
+        sessions.release(&p, &same.viewer.id, 1).unwrap();
+        sessions.reap(16);
+        assert_eq!(
+            sessions
+                .reserve(&p, &source, &third, "three", 16)
+                .unwrap_err(),
+            "input_capacity"
+        );
+        sessions.finish_stop(&first.viewer.job_id);
+        assert!(
+            sessions
+                .reserve(&p, &source, &third, "three", 17)
+                .unwrap()
+                .start_job
+        );
+        let serialized = serde_json::to_string(&fallback).unwrap();
+        assert!(!serialized.contains("shared_ingest"));
+    }
+    #[test]
+    fn vod_output_pipelines_cannot_claim_realtime_input_sharing() {
+        let mut p = principal("one", "family");
+        p.key.spec.quotas.inputs = 1;
+        let mut source = request("family");
+        source.input.live = false;
+        let mut sessions = Sessions::default();
+        sessions.reserve(&p, &source, &plan(), "first", 0).unwrap();
+        let mut other = plan();
+        other.width = 640;
+        other.video_mode = "encode".into();
+        assert_eq!(
+            sessions
+                .reserve(&p, &source, &other, "second", 1)
+                .unwrap_err(),
+            "input_capacity"
         );
     }
     #[test]

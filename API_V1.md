@@ -92,6 +92,10 @@ changing the body under that key returns `409`.
 Leases last 60 seconds; renew every 20. Media reads do not renew leases. Shared
 workers have 15 seconds of zero-viewer grace. Startup and cleanup retain quota
 until workers stop. Expired/released sessions cannot be revived by renewal.
+Eligible live replay outputs share one input across differing normalized plans.
+Independent fallback or VOD output pipelines each consume an input reservation;
+viewers joining an identical existing job do not reserve another input. This
+accounting does not promise universal single-ingest for every source/transport.
 
 ## Media and errors
 

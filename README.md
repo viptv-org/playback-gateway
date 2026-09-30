@@ -32,7 +32,9 @@ track indices. Releasing or failing one output preserves the other outputs.
 
 Sources containing subtitles or other video/audio codecs, and progressive live
 delivery, retain their existing independent execution paths. They are not yet
-qualified for cross-output single-ingest. VOD seek origins remain distinct. The
+qualified for cross-output single-ingest. Different fallback output plans reserve
+separate physical input slots; identical plans still share their existing job.
+VOD seek origins remain distinct. The
 replay has 12 retained segments plus deletion grace, a 20-second first-segment deadline
 and a 64 MiB sampled storage watchdog. The watchdog can overshoot between checks;
 operators still need a bounded data volume. See VALIDATION.md for exact evidence

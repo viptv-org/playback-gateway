@@ -1,4 +1,72 @@
-# Validation checkpoint — 2026-09-29
+# Validation checkpoint — 2026-09-30
+
+## Physical input accounting, trusted TLS and small 4K copy
+
+Inspected plans now carry an internal `shared_ingest` execution fact, skipped by
+serialization. Only eligible live replay plans deduplicate input admission across
+different output plans. Fallback execution and VOD bind input admission to the
+normalized output plan as well as namespace/source/credential identity. Identical
+fallback plans still join one existing output; distinct physical pipelines consume
+distinct input reservations. The public v1 request/response JSON is unchanged.
+
+The locked workspace suite passes 98 tests, with 25 opt-in fixtures ignored;
+strict all-target Clippy passes. Engine fixtures explicitly decline shared replay
+for subtitle-bearing sources, unlisted codecs and progressive live requests.
+Ledger fixtures prove fallback input limits remain charged while stopping and
+restore only after confirmed teardown. Three additional real fixtures pass:
+
+- An isolated HTTP MPEG2 source: identical plans use one job/upstream; a smaller
+  normalized output creates another connection and consumes a second input. A
+  third plan is denied with `input_capacity`. Reaping each released job closes
+  its real upstream connection before its capacity becomes available.
+- Trusted HTTPS HLS and plain-HTTP HLS containing HTTPS children: differing
+  output plans use one remote-reading FFmpeg ingest per cohort, and fetched
+  encoded output decodes. Untrusted root certificates, untrusted HTTPS children
+  and trusted-but-wrong root hostnames fail with the safe public code
+  `source_preparation_failed`, without allocating a viewer job. The existing
+  scoped egress proxy remains active for every root/child connection.
+- A software-only 3840x2160 H264 source: four constant-color frames at 1 fps,
+  generated with two encoder threads. Shared copy delivery preserves actual
+  3840x2160 demux dimensions, and one fetched output frame decodes. Declared 8K
+  headroom normalizes to the same 4K job without another source connection. This
+  qualifies small 4K demux/copy, not 4K encoding, hardware, native renderers, HDR,
+  sustained high bitrate or visual parity.
+
+The TLS fixture generates its own one-day localhost CA/key with openssl and uses
+a threaded Python standard-library TLS server for concurrent HLS resources. On
+the tested Linux/GnuTLS installation, a root `ca_file` option did not establish
+trust for nested HLS children. The fixture therefore supplies its anchor and CA
+bundle only in per-process bwrap mount namespaces, keeps verification enabled,
+uses `--die-with-parent`, and verifies the host trust bundle is unchanged. No host
+CA installation, production trust change or public network access occurs. This
+fixture requires python3, openssl, bwrap, user namespaces and the documented Linux
+trust-store paths in its executable wrapper; it is not a new runtime dependency.
+[FFmpeg's TLS documentation](https://ffmpeg.org/ffmpeg-all.html#tls) describes CA
+files and default verification, including hostname verification with GnuTLS.
+
+Universal input sharing remains unfinished: subtitle-bearing sources, other
+codecs and progressive live transports still execute independently. Truthful
+quota charging makes that limitation explicit; it does not replace their future
+shared transport. These fixtures do not qualify stalled direct-response drains,
+all redirects/DNS/keys/subtitles, native devices or a current Docker image.
+
+## Hard storage bound audit — not implemented
+
+FFmpeg writes replay segments, partial files and manifests directly. Sampling
+their sizes after writes cannot enforce a hard byte bound: writes can exceed the
+threshold between polls, while scans run or while scheduling/I/O stalls. Segment
+count and duration bounds do not bound bytes or keyframe-starved partial files.
+The replay watchdog also does not cover separate output workers or every file in
+the shared data volume. No maximum overshoot is certified.
+
+A hard bound requires either an independently tested filesystem/volume quota
+covering every write path (including partial/orphan files and separate outputs),
+or a transport in which the gateway owns writes and reserves bytes before they
+are admitted to a bounded replay. Both require defined full-capacity behavior,
+slow-reader eviction/backpressure, timeline/metadata preservation, and teardown
+evidence. A per-file process limit or an unqualified FFmpeg CLI flag is not proof
+of a total HLS spool bound. No host filesystem quota was configured here. This
+remains an acceptance gate and separate implementation work.
 
 ## Shared live ingest implementation
 
@@ -52,9 +120,10 @@ decoder qualification.
 
 This is compatible AV replay, not complete all-format single-ingest acceptance.
 Subtitle-bearing sources, unlisted video/audio codecs and progressive live paths
-still use independent original execution. HEVC Main10/HDR, MP2/MP3/AC3/EAC3 and HTTPS inputs use the
-same seam but need new real fixtures; inherited TLS/SSRF fixtures do not certify
-this new replay path. Real 4K/hardware, keyframe-starved/high-bitrate storage,
+still use independent original execution. HEVC Main10/HDR and MP2/MP3/AC3/EAC3
+use the same seam but need new real fixtures. HTTPS and small 4K copy qualification
+are recorded above; inherited TLS/SSRF fixtures do not certify every replay path.
+Real 4K conversion/hardware, keyframe-starved/high-bitrate storage,
 long-lived slow-reader behavior, host crash/process containment and a current
 Docker image remain acceptance gaps. No public deployment or client cutover is
 claimed by these local tests.

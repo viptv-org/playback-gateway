@@ -361,6 +361,7 @@ impl PlaybackManager {
                         position_micros: (position * 1_000_000.0).round() as u64,
                         segmentation: "original".into(),
                         shareable: true,
+                        shared_ingest: false,
                     };
                     let id = Uuid::new_v4().to_string();
                     let capability =
@@ -608,6 +609,7 @@ impl PlaybackManager {
                 }
             ),
             shareable: !continuous_output,
+            shared_ingest: shared_scope.is_some(),
         };
         let hdr_transfer = hdr_transfer.map(str::to_owned);
         Ok(PreparedPlayback::new(Some(plan), async move {

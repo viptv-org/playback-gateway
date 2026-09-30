@@ -39,6 +39,54 @@ async fn shared_live_hls_preserves_the_existing_native_hevc_copy_gate() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn physical_ingest_eligibility_declines_subtitles_unknown_codec_and_progressive() {
+    for case in ["subtitle", "codec", "progressive"] {
+        let root = tempfile::tempdir().unwrap();
+        let mut facts = serde_json::json!({"streams":[
+            {"index":0,"codec_type":"video","codec_name":"h264","width":640,"height":360,"pix_fmt":"yuv420p","profile":"High","level":31,"avg_frame_rate":"25/1","r_frame_rate":"25/1","field_order":"progressive"},
+            {"index":1,"codec_type":"audio","codec_name":"aac","profile":"LC","channels":2}],"format":{"format_name":"mpegts"}});
+        if case == "subtitle" {
+            facts["streams"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!({"index":2,"codec_type":"subtitle","codec_name":"subrip"}));
+        }
+        if case == "codec" {
+            facts["streams"][0]["codec_name"] = "mpeg2video".into();
+        }
+        let manager = scripted_probe(root.path(), &format!("printf '%s' '{}'", facts));
+        let prepared = manager
+            .prepare_shared_with_selection(
+                "https://fixture.invalid/source".into(),
+                HashMap::new(),
+                0.0,
+                Some(Capabilities {
+                    direct_play: false,
+                    direct_hls: Some(case != "progressive"),
+                    ..Capabilities::default()
+                }),
+                false,
+                true,
+                TrackSelection::default(),
+                "fixture".into(),
+            )
+            .await
+            .unwrap();
+        let plan = prepared.plan.as_ref().unwrap();
+        assert!(
+            !plan.shared_ingest,
+            "ineligible source must retain physical input accounting"
+        );
+        assert!(!serde_json::to_string(plan)
+            .unwrap()
+            .contains("shared_ingest"));
+        drop(prepared);
+        manager.shutdown().await;
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn preparation_normalizes_output_and_does_not_start_a_worker() {
     let root = tempfile::tempdir().unwrap();
     let manager = scripted_probe(

@@ -12,6 +12,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(all(test, unix))]
+#[path = "workers_tls_tests.rs"]
+mod tls_tests;
+
 pub struct Workers {
     pub sessions: Arc<Mutex<Sessions>>,
     pub credentials: Arc<Credentials>,
@@ -1071,6 +1075,324 @@ pub(crate) mod tests {
     }
 
     pub(crate) const BOOTSTRAP: &str = "gateway-worker-fixture-bootstrap-key";
+    #[tokio::test]
+    #[ignore = "requires real FFmpeg/ffprobe; small software-only 4K copy fixture"]
+    async fn real_shared_4k_copy_keeps_declared_dimensions_without_a_quality_clamp() {
+        let ffmpeg = std::env::var("PLAYBACK_TEST_FFMPEG").unwrap();
+        let ffprobe = std::env::var("PLAYBACK_TEST_FFPROBE").unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let input_file = root.path().join("input-4k.ts");
+        let generated = tokio::time::timeout(
+            Duration::from_secs(30),
+            tokio::process::Command::new(&ffmpeg)
+                .kill_on_drop(true)
+                .args([
+                    "-v",
+                    "error",
+                    "-nostdin",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=black:size=3840x2160:rate=1",
+                    "-t",
+                    "4",
+                    "-an",
+                    "-c:v",
+                    "libx264",
+                    "-threads",
+                    "2",
+                    "-preset",
+                    "ultrafast",
+                    "-level:v",
+                    "5.1",
+                    "-g",
+                    "1",
+                    "-bf",
+                    "0",
+                    "-f",
+                    "mpegts",
+                ])
+                .arg(&input_file)
+                .output(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(generated.status.success());
+        let source = http_source(std::fs::read(input_file).unwrap()).await;
+        let engine = PlaybackManager::new(playback_engine::Config {
+            ffmpeg: ffmpeg.clone().into(),
+            ffprobe: ffprobe.clone().into(),
+            root: root.path().join("media"),
+            max_sessions: 1,
+            ttl: Duration::from_secs(120),
+        });
+        let credentials = Arc::new(
+            Credentials::from_connection(
+                rusqlite::Connection::open_in_memory().unwrap(),
+                BOOTSTRAP,
+            )
+            .unwrap(),
+        );
+        let key = credentials
+            .issue(
+                BOOTSTRAP,
+                KeySpec {
+                    label: "4K fixture".into(),
+                    namespaces: vec!["fixture".into()],
+                    scopes: vec![Scope::Create, Scope::Read, Scope::Release],
+                    quotas: Quotas {
+                        inputs: 1,
+                        outputs: 1,
+                        viewers: 2,
+                    },
+                    expires_at: None,
+                },
+                0,
+            )
+            .unwrap();
+        let principal = credentials.authenticate(&key.secret, 0).unwrap();
+        let workers = Workers::new(engine, credentials, NetworkPolicy::loopback_fixture())
+            .await
+            .unwrap();
+        let mut input = request(3840);
+        input.input.url = source.url.clone();
+        let first = workers
+            .create(&principal, &input, "first", 0)
+            .await
+            .unwrap();
+        expect_connections(&source, 1).await;
+        let opened = source.requests.load(std::sync::atomic::Ordering::SeqCst);
+        input.output.max_width = 7680;
+        input.output.max_height = 4320;
+        let second = workers
+            .create(&principal, &input, "headroom", 5)
+            .await
+            .unwrap();
+        assert_eq!(first.job_id, second.job_id);
+        assert_eq!(
+            source.requests.load(std::sync::atomic::Ordering::SeqCst),
+            opened
+        );
+        let delivery = workers.delivery(&principal, &second, 5).unwrap().unwrap();
+        assert_eq!(delivery.video_mode, "copy");
+        assert_eq!(delivery.mode, "remux");
+        let token = delivery.url.split('/').nth(3).unwrap();
+        let response = workers
+            .media(
+                &second.id,
+                token,
+                "index.m3u8",
+                5,
+                axum::http::Method::GET,
+                axum::http::HeaderMap::new(),
+            )
+            .await
+            .unwrap();
+        let playlist = axum::body::to_bytes(response.into_body(), 128 * 1024)
+            .await
+            .unwrap();
+        let segment = std::str::from_utf8(&playlist)
+            .unwrap()
+            .lines()
+            .find(|line| line.ends_with(".ts"))
+            .unwrap();
+        let response = workers
+            .media(
+                &second.id,
+                token,
+                segment,
+                5,
+                axum::http::Method::GET,
+                axum::http::HeaderMap::new(),
+            )
+            .await
+            .unwrap();
+        let sample = root.path().join("output-4k.ts");
+        std::fs::write(
+            &sample,
+            axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        let inspected = tokio::time::timeout(
+            Duration::from_secs(10),
+            tokio::process::Command::new(&ffprobe)
+                .kill_on_drop(true)
+                .args(["-v", "error", "-show_streams", "-of", "json", "-i"])
+                .arg(&sample)
+                .output(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(inspected.status.success());
+        let facts: serde_json::Value = serde_json::from_slice(&inspected.stdout).unwrap();
+        let video = facts["streams"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|stream| stream["codec_type"] == "video")
+            .unwrap();
+        assert_eq!(video["width"], 3840);
+        assert_eq!(video["height"], 2160);
+        let decoded = tokio::time::timeout(
+            Duration::from_secs(15),
+            tokio::process::Command::new(&ffmpeg)
+                .kill_on_drop(true)
+                .args(["-v", "error", "-threads", "2", "-i"])
+                .arg(&sample)
+                .args(["-frames:v", "1", "-f", "null", "-"])
+                .output(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(
+            decoded.status.success(),
+            "copied 4K output must decode a frame"
+        );
+        for viewer in [first, second] {
+            workers
+                .sessions
+                .lock()
+                .unwrap()
+                .release(&principal, &viewer.id, 10)
+                .unwrap();
+        }
+        workers.reap(26).await.unwrap();
+        expect_connections(&source, 0).await;
+        workers.shutdown().await;
+    }
+    #[tokio::test]
+    #[ignore = "requires real FFmpeg/ffprobe; isolated nonshared MPEG2 source fixture"]
+    async fn real_fallback_outputs_reserve_each_physical_input_and_share_identical_jobs() {
+        let ffmpeg = std::env::var("PLAYBACK_TEST_FFMPEG").unwrap();
+        let ffprobe = std::env::var("PLAYBACK_TEST_FFPROBE").unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let input_file = root.path().join("fallback.ts");
+        let generated = tokio::time::timeout(
+            Duration::from_secs(20),
+            tokio::process::Command::new(&ffmpeg)
+                .kill_on_drop(true)
+                .args([
+                    "-v",
+                    "error",
+                    "-nostdin",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc2=size=320x180:rate=25",
+                    "-t",
+                    "8",
+                    "-an",
+                    "-c:v",
+                    "mpeg2video",
+                    "-threads",
+                    "2",
+                    "-g",
+                    "25",
+                    "-f",
+                    "mpegts",
+                ])
+                .arg(&input_file)
+                .output(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(generated.status.success());
+        let source = http_source(std::fs::read(input_file).unwrap()).await;
+        let engine = PlaybackManager::new(playback_engine::Config {
+            ffmpeg: ffmpeg.into(),
+            ffprobe: ffprobe.into(),
+            root: root.path().join("media"),
+            max_sessions: 3,
+            ttl: Duration::from_secs(120),
+        });
+        let credentials = Arc::new(
+            Credentials::from_connection(
+                rusqlite::Connection::open_in_memory().unwrap(),
+                BOOTSTRAP,
+            )
+            .unwrap(),
+        );
+        let key = credentials
+            .issue(
+                BOOTSTRAP,
+                KeySpec {
+                    label: "fallback fixture".into(),
+                    namespaces: vec!["fixture".into()],
+                    scopes: vec![Scope::Create, Scope::Read, Scope::Release],
+                    quotas: Quotas {
+                        inputs: 2,
+                        outputs: 3,
+                        viewers: 4,
+                    },
+                    expires_at: None,
+                },
+                0,
+            )
+            .unwrap();
+        let principal = credentials.authenticate(&key.secret, 0).unwrap();
+        let workers = Workers::new(engine, credentials, NetworkPolicy::loopback_fixture())
+            .await
+            .unwrap();
+        let mut input = request(1920);
+        input.input.url = source.url.clone();
+        let first = workers
+            .create(&principal, &input, "first", 0)
+            .await
+            .unwrap();
+        expect_connections(&source, 1).await;
+        let opened = source.requests.load(std::sync::atomic::Ordering::SeqCst);
+        let same = workers.create(&principal, &input, "same", 1).await.unwrap();
+        assert_eq!(same.job_id, first.job_id);
+        assert_eq!(
+            source.requests.load(std::sync::atomic::Ordering::SeqCst),
+            opened
+        );
+        input.output.max_width = 160;
+        input.output.max_height = 90;
+        let second = workers
+            .create(&principal, &input, "second", 1)
+            .await
+            .unwrap();
+        assert_ne!(first.job_id, second.job_id);
+        expect_connections(&source, 2).await;
+        assert_eq!(workers.available(&principal, 1).unwrap().inputs, 0);
+        input.output.max_width = 80;
+        input.output.max_height = 44;
+        assert_eq!(
+            workers
+                .create(&principal, &input, "third", 1)
+                .await
+                .unwrap_err(),
+            "input_capacity"
+        );
+        for viewer in [first, same] {
+            workers
+                .sessions
+                .lock()
+                .unwrap()
+                .release(&principal, &viewer.id, 10)
+                .unwrap();
+        }
+        workers.reap(26).await.unwrap();
+        expect_connections(&source, 1).await;
+        assert_eq!(workers.available(&principal, 26).unwrap().inputs, 1);
+        workers
+            .sessions
+            .lock()
+            .unwrap()
+            .release(&principal, &second.id, 26)
+            .unwrap();
+        workers.reap(41).await.unwrap();
+        expect_connections(&source, 0).await;
+        assert_eq!(workers.available(&principal, 41).unwrap().inputs, 2);
+        workers.shutdown().await;
+    }
     pub(crate) async fn fixture(stall: bool) -> (tempfile::TempDir, Arc<Workers>, Principal) {
         fixture_with_outputs(stall, 1).await
     }
