@@ -272,8 +272,10 @@ async fn decoded_audio_frequency(bytes: &[u8]) -> f64 {
     assert!(output.status.success());
     let samples = output
         .stdout
-        .chunks_exact(4)
-        .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|bytes| f32::from_le_bytes(*bytes))
         .collect::<Vec<_>>();
     assert!(samples.len() > 4800, "selected audio must actually decode");
     samples
