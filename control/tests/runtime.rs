@@ -93,6 +93,8 @@ async fn source(bytes: Vec<u8>) -> Source {
     let requests = Arc::new(AtomicUsize::new(0));
     let opened = requests.clone();
     let high = std::env::var("PLAYBACK_TEST_CBR_4K").as_deref() == Ok("1");
+    let captions = std::env::var("PLAYBACK_TEST_SUBTITLES").as_deref() == Ok("1");
+    let interval = Duration::from_secs_f64(120.0 * (188 * 100) as f64 / bytes.len() as f64);
     let bytes = Arc::new(bytes);
     let task = tokio::spawn(async move {
         let mut peers = tokio::task::JoinSet::new();
@@ -104,7 +106,7 @@ async fn source(bytes: Vec<u8>) -> Source {
                     opened.fetch_add(1,Ordering::SeqCst);
                     let mut header=Vec::new();while !header.ends_with(b"\r\n\r\n") && header.len()<16384 {match socket.read_u8().await{Ok(byte)=>header.push(byte),Err(_)=>return}}
                     if socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nConnection: close\r\n\r\n").await.is_err(){return}
-                    loop {for chunk in bytes.chunks(if high {188*4096}else{188*100}){if socket.write_all(chunk).await.is_err(){return}tokio::time::sleep(Duration::from_millis(if high {150}else{30})).await;}}
+                    loop {for chunk in bytes.chunks(if high {188*4096}else{188*100}){if socket.write_all(chunk).await.is_err(){return}tokio::time::sleep(if captions {interval}else{Duration::from_millis(if high {150}else{30})}).await;}}
                 });}, _=peers.join_next(),if !peers.is_empty()=>{}
             }
         }
@@ -173,29 +175,88 @@ impl Fixture {
         let ffmpeg = std::env::var("PLAYBACK_TEST_FFMPEG").unwrap();
         let high = std::env::var("PLAYBACK_TEST_CBR_4K").as_deref() == Ok("1");
         let matroska = std::env::var("PLAYBACK_TEST_MATROSKA_AV").as_deref() == Ok("1");
+        let captions = std::env::var("PLAYBACK_TEST_SUBTITLES").as_deref() == Ok("1");
         assert!(!(high && matroska));
+        let english = root.path().join("english.srt");
+        let spanish = root.path().join("spanish.srt");
+        if captions {
+            std::fs::write(&english, "1\n00:00:01,000 --> 00:01:15,000\nLONG_ENGLISH\n\n2\n00:00:02,000 --> 00:01:05,000\nOVERLAPPING_ENGLISH\n\n3\n00:00:04,000 --> 00:00:06,000\nEXPIRED_ENGLISH\n\n4\n00:00:40,000 --> 00:00:48,000\nLATER_ENGLISH\n").unwrap();
+            std::fs::write(
+                &spanish,
+                "1\n00:00:01,000 --> 00:01:30,000\nWRONG_SPANISH\n",
+            )
+            .unwrap();
+        }
         let mut generation = Command::new(&ffmpeg);
         generation.kill_on_drop(true);
+        generation.args([
+            "-v",
+            "error",
+            "-nostdin",
+            "-f",
+            "lavfi",
+            "-i",
+            if captions {
+                "testsrc2=size=128x72:rate=10"
+            } else if high {
+                "color=c=black:size=3840x2160:rate=5"
+            } else if matroska {
+                "testsrc2=size=128x72:rate=10"
+            } else {
+                "testsrc2=size=320x180:rate=25"
+            },
+        ]);
+        if captions {
+            generation
+                .args([
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=frequency=880:sample_rate=48000",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=frequency=440:sample_rate=48000",
+                    "-i",
+                ])
+                .arg(&spanish)
+                .arg("-i")
+                .arg(&english)
+                .args([
+                    "-map",
+                    "1:a",
+                    "-map",
+                    "3:s",
+                    "-map",
+                    "0:v",
+                    "-map",
+                    "2:a",
+                    "-map",
+                    "4:s",
+                    "-c:a",
+                    "aac",
+                    "-c:s",
+                    "srt",
+                    "-metadata:s:s:0",
+                    "language=spa",
+                    "-metadata:s:s:1",
+                    "language=eng",
+                ]);
+        } else {
+            generation.arg("-an");
+        }
         let output = tokio::time::timeout(
             Duration::from_secs(20),
             generation
                 .args([
-                    "-v",
-                    "error",
-                    "-nostdin",
-                    "-f",
-                    "lavfi",
-                    "-i",
-                    if high {
-                        "color=c=black:size=3840x2160:rate=5"
-                    } else if matroska {
-                        "testsrc2=size=128x72:rate=10"
-                    } else {
-                        "testsrc2=size=320x180:rate=25"
-                    },
                     "-t",
-                    if high { "24" } else { "8" },
-                    "-an",
+                    if captions {
+                        "120"
+                    } else if high {
+                        "24"
+                    } else {
+                        "8"
+                    },
                     "-c:v",
                     if matroska { "ffv1" } else { "libx264" },
                     "-threads",
@@ -203,7 +264,11 @@ impl Fixture {
                     "-g",
                     if high { "5" } else { "25" },
                     "-f",
-                    if matroska { "matroska" } else { "mpegts" },
+                    if matroska || captions {
+                        "matroska"
+                    } else {
+                        "mpegts"
+                    },
                 ])
                 .args(if matroska {
                     &[][..]
@@ -286,7 +351,7 @@ impl Fixture {
             key: String::new(),
         };
         fixture.ready().await;
-        let response=fixture.client.post(format!("{}/v1/keys",fixture.base)).bearer_auth(BOOTSTRAP).json(&json!({"label":"runtime fixture","namespaces":["fixture"],"scopes":["create","read","release","capabilities"],"quotas":{"inputs":1,"outputs":2,"viewers":3}})).send().await.map_err(|_|"key request failed").unwrap();
+        let response=fixture.client.post(format!("{}/v1/keys",fixture.base)).bearer_auth(BOOTSTRAP).json(&json!({"label":"runtime fixture","namespaces":["fixture"],"scopes":["create","read","renew","release","capabilities"],"quotas":{"inputs":1,"outputs":2,"viewers":3}})).send().await.map_err(|_|"key request failed").unwrap();
         assert!(response.status().is_success());
         let value: Value = response
             .json()
@@ -345,7 +410,8 @@ impl Fixture {
         .expect("service readiness deadline");
     }
     async fn start(&self, idempotency: &str, width: u32) -> Value {
-        let response=self.client.post(format!("{}/v1/sessions",self.base)).bearer_auth(&self.key).header("Idempotency-Key",idempotency).json(&json!({"namespace":"fixture","input":{"url":self.source.url,"headers":{},"live":true},"output":{"protocol":"hls","video_codecs":["h264"],"audio_codecs":["aac"],"max_width":width,"max_height":width/16*9},"position_seconds":0})).send().await.map_err(|_|"session request failed").unwrap();
+        let captions = std::env::var("PLAYBACK_TEST_SUBTITLES").as_deref() == Ok("1");
+        let response=self.client.post(format!("{}/v1/sessions",self.base)).bearer_auth(&self.key).header("Idempotency-Key",idempotency).json(&json!({"namespace":"fixture","input":{"url":self.source.url,"headers":{},"live":true},"output":{"protocol":"hls","video_codecs":["h264"],"audio_codecs":["aac"],"max_width":width,"max_height":width/16*9,"subtitle_track":if captions {Some(4)}else{None},"audio_track":if captions {Some(3)}else{None}},"position_seconds":0})).send().await.map_err(|_|"session request failed").unwrap();
         assert!(response.status().is_success(), "session must start");
         response
             .json()
@@ -404,6 +470,32 @@ impl Fixture {
             .map(|entry| entry.path())
             .collect()
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires isolated built-image subtitle HTTP/media fixture"]
+async fn real_shared_subtitles_preserve_sparse_identity_and_decoded_stream_index() {
+    assert_eq!(std::env::var("PLAYBACK_TEST_SUBTITLES").as_deref(), Ok("1"));
+    let mut fixture = Fixture::new().await;
+    let first = fixture.start("captions-first", 128).await;
+    assert_eq!(first["playback"]["selected_subtitle"]["input_index"], 4);
+    assert_eq!(
+        first["playback"]["selected_subtitle"]["output_stream_index"],
+        0
+    );
+    assert_eq!(first["playback"]["selected_audio"]["input_index"], 3);
+    let second = fixture.start("captions-second", 64).await;
+    assert_ne!(first["job_id"], second["job_id"]);
+    connections(&fixture.source, 1).await;
+    fixture.signal("-TERM").await;
+    assert!(
+        tokio::time::timeout(Duration::from_secs(8), fixture.child.wait())
+            .await
+            .unwrap()
+            .unwrap()
+            .success()
+    );
+    connections(&fixture.source, 0).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
