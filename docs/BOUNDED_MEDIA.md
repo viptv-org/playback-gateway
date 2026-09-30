@@ -1,5 +1,20 @@
 # Supported Docker media-spool allocation bound
 
+## Exact committed-image qualification — 2026-09-30
+
+Runtime/deployment commit `eb669161dda0ded8011abfcad2bb7a607767d767` was built
+from a Git archive as `playback-gateway:bounded-spool-committed`, content ID
+`sha256:9258fd82bd1dff31b1739e03ade1e7706ec0d699971ea45c9887980b0b8c8b61`.
+The committed-source bounded-media harness executed its named real test exactly
+once and passed against this image. The separate actual non-root envelope passed,
+including an integration key that remained authorized after Docker stop/start
+and a media marker that disappeared when the tmpfs was recreated. The persistent
+fixture volume was stopped and privately archived before removal; container/test
+data cleanup targets only newly created IDs. No registry push/deployment occurred.
+The default workspace suite passes 99 tests with 28 opt-in fixtures ignored, and
+strict all-target Clippy passes. Sustained/high-bitrate qualification remains open
+as specified below.
+
 The supplied Compose deployment mounts a dedicated tmpfs at the existing
 `/var/lib/playback-gateway/media` path, inside the persistent named data volume.
 Its default data-page allocation limit is 256 MiB. `/tmp` has a separate 64 MiB

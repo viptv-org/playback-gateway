@@ -25,6 +25,11 @@ credential/lock files and authenticated fresh playback after restart. The fixtur
 controller has only its explicitly documented isolated/cross-UID test privileges;
 they are not service/deployment privileges. The non-root envelope also passed
 with the nested mount. Final committed-image evidence is recorded separately.
+The committed eb66916 image is
+`sha256:9258fd82bd1dff31b1739e03ade1e7706ec0d699971ea45c9887980b0b8c8b61`.
+Both committed-source scripts passed against that exact image, including the
+non-root key-persistence/media-disappearance Docker restart checks. The default
+suite passes 99 tests with 28 opt-in ignored; strict all-target Clippy passes.
 
 See [bounded media](docs/BOUNDED_MEDIA.md) for the complete write-path audit,
 kernel allocation versus logical size/RSS/swap distinctions, tuning, exact
@@ -134,7 +139,9 @@ are admitted to a bounded replay. Both require defined full-capacity behavior,
 slow-reader eviction/backpressure, timeline/metadata preservation, and teardown
 evidence. A per-file process limit or an unqualified FFmpeg CLI flag is not proof
 of a total HLS spool bound. No host filesystem quota was configured here. This
-remains an acceptance gate and separate implementation work.
+remained an acceptance gate at that historical checkpoint. The supported Docker
+child tmpfs implementation and its exact limits are recorded above; native/custom
+unbounded-volume guarantees and gateway-owned universal replay remain open.
 
 ## Shared live ingest implementation
 
