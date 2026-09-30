@@ -24,6 +24,7 @@ impl InputPermits {
 }
 
 pub(super) struct Session {
+    pub(super) caption_track: Option<u32>,
     pub(super) ingest: Option<Arc<ingest::SharedIngest>>,
     pub(super) stream: Option<Arc<fmp4::Stream>>,
     // Keep inspected VOD facts alive while this input is in use.

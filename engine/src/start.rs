@@ -193,6 +193,7 @@ impl PlaybackManager {
                 self.sessions.lock().await.insert(
                     id,
                     Session {
+                        caption_track: None,
                         ingest: None,
                         stream: None,
                         _source_probe: None,
@@ -407,6 +408,7 @@ impl PlaybackManager {
                         self.sessions.lock().await.insert(
                             id,
                             Session {
+                                caption_track: None,
                                 ingest: None,
                                 stream: None,
                                 _source_probe: Some(probe.clone()),
@@ -628,6 +630,9 @@ impl PlaybackManager {
                 .map_err(|_| "Media storage unavailable".to_owned())?;
             let dir = root.join(&id);
             let mut session = Session {
+                caption_track: selected_subtitle
+                    .as_ref()
+                    .map(|subtitle| subtitle.input_index),
                 ingest: None,
                 stream: None,
                 _source_probe: Some(probe.clone()),
@@ -672,6 +677,14 @@ impl PlaybackManager {
                     .stdout(Stdio::null())
                     .stderr(Stdio::null());
                 cmd.args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y"]);
+                let shared_captions = session
+                    .ingest
+                    .as_ref()
+                    .is_some_and(|ingest| ingest.captions.is_some());
+                if shared_captions {
+                    cmd.arg("-copyts")
+                        .args(["-hls_segment_options", "mpegts_copyts=1"]);
+                }
                 if pipeline.vaapi() {
                     hardware::vaapi_device_args(
                         &mut cmd,
@@ -735,7 +748,7 @@ impl PlaybackManager {
                     };
                     cmd.arg("-map").arg(format!("0:{index}"));
                 }
-                if let Some(subtitle) = &selected_subtitle {
+                if let Some(subtitle) = selected_subtitle.as_ref().filter(|_| !shared_captions) {
                     cmd.arg("-map").arg(format!("0:{}", subtitle.input_index));
                     cmd.args(["-c:s", "webvtt", "-max_interleave_delta", "1000000"]);
                 } else {
@@ -963,7 +976,7 @@ impl PlaybackManager {
                         subtitles_supported: false,
                     });
                 }
-                if let Some(subtitle) = &selected_subtitle {
+                if let Some(subtitle) = selected_subtitle.as_ref().filter(|_| !shared_captions) {
                     let language = subtitle.language.as_deref().unwrap_or("und");
                     let audio_map = if selected_audio.is_some() { "a:0," } else { "" };
                     // Keep AV and WebVTT on the same post-seek timestamp clock. Without
@@ -1038,10 +1051,10 @@ impl PlaybackManager {
                             tracing::warn!(exit_code = ?status.code(), "Playback engine startup failed");
                             return false;
                         }
-                        return playback_ready(&dir, selected_subtitle.as_ref()).await;
+                        return if shared_captions {hls::shared_caption_ready(&dir,selected_subtitle.as_ref()).await} else {playback_ready(&dir, selected_subtitle.as_ref()).await};
                     }
                 }
-                if playback_ready(&dir, selected_subtitle.as_ref()).await {
+                if if shared_captions {hls::shared_caption_ready(&dir,selected_subtitle.as_ref()).await} else {playback_ready(&dir, selected_subtitle.as_ref()).await} {
                     return true;
                 }
                 sleep(Duration::from_millis(150)).await;

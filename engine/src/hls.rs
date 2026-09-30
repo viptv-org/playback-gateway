@@ -330,6 +330,18 @@ pub(super) async fn playback_ready(
     if !caption_ready {
         return false;
     }
+    subtitle_master(dir,subtitle).await
+}
+
+pub(super) async fn shared_caption_ready(dir: &std::path::Path,subtitle: Option<&SelectedSubtitle>) -> bool {
+    if !playlist_ready(dir).await {return false;}
+    match subtitle {
+        Some(subtitle)=>subtitle_master(dir,subtitle).await,
+        None=>true,
+    }
+}
+
+async fn subtitle_master(dir: &std::path::Path,subtitle: &SelectedSubtitle) -> bool {
     let Ok(av) = tokio::fs::read_to_string(dir.join("index.m3u8")).await else {
         return false;
     };

@@ -21,6 +21,10 @@ impl ReplayKind {
             || probe.streams.iter().any(|s| {
                 s.codec_type.as_deref() == Some("audio") && s.codec_name.as_deref() == Some("flac")
             })
+            || probe
+                .streams
+                .iter()
+                .any(|s| s.codec_type.as_deref() == Some("subtitle"))
         {
             Self::Matroska
         } else {
@@ -132,6 +136,7 @@ pub(super) struct SharedIngest {
     pub(super) playlist: PathBuf,
     indices: BTreeMap<u32, u32>,
     kind: ReplayKind,
+    pub(super) captions: Option<Arc<captions::Captions>>,
     running: Arc<std::sync::atomic::AtomicBool>,
     cancel: Option<tokio::sync::oneshot::Sender<()>>,
     task: Option<tokio::task::JoinHandle<()>>,
@@ -165,16 +170,9 @@ impl Drop for SharedIngest {
 }
 
 /// Replay retains the first real video and every audio track in a deterministic
-/// order. Subtitles currently require the original source pipeline; they must
-/// not be silently discarded or have their original indices guessed.
+/// order. Qualified text subtitles follow the audio tracks; every original
+/// index is verified against the actual replay, never guessed by a caller.
 pub(super) fn replay_indices(probe: &Probe) -> Option<BTreeMap<u32, u32>> {
-    if probe
-        .streams
-        .iter()
-        .any(|s| s.codec_type.as_deref() == Some("subtitle"))
-    {
-        return None;
-    }
     let video = probe.streams.iter().find(|s| s.is_video())?;
     if !matches!(
         video.codec_name.as_deref(),
@@ -200,6 +198,27 @@ pub(super) fn replay_indices(probe: &Probe) -> Option<BTreeMap<u32, u32>> {
             return None;
         }
         if indices.insert(stream.index?, ordinal as u32 + 1).is_some() {
+            return None;
+        }
+    }
+    let mut subtitles: Vec<_> = probe
+        .streams
+        .iter()
+        .filter(|s| s.codec_type.as_deref() == Some("subtitle"))
+        .collect();
+    if subtitles.len() > 32 || !subtitles.is_empty() && !cfg!(target_os = "linux") {
+        return None;
+    }
+    subtitles.sort_by_key(|s| s.index);
+    for stream in subtitles {
+        if !matches!(
+            stream.codec_name.as_deref(),
+            Some("subrip" | "ass" | "ssa" | "webvtt")
+        ) {
+            return None;
+        }
+        let index = stream.index.filter(|index| *index <= 65535)?;
+        if indices.insert(index, indices.len() as u32).is_some() {
             return None;
         }
     }
@@ -245,6 +264,11 @@ impl PlaybackManager {
     ) -> Result<Arc<SharedIngest>, String> {
         let indices = replay_indices(&probe).ok_or("Source replay unsupported")?;
         let kind = ReplayKind::for_probe(&probe);
+        let captions = probe
+            .streams
+            .iter()
+            .any(|s| s.codec_type.as_deref() == Some("subtitle"))
+            .then(|| Arc::new(captions::Captions::default()));
         let replay_max_bytes = self.replay_max_bytes;
         let mut digest = Sha256::new();
         for value in [scope, source, headers] {
@@ -293,6 +317,7 @@ impl PlaybackManager {
             .map_err(|_| "Media storage unavailable")?;
         let playlist = dir.join("index.m3u8");
         let session = Session {
+            caption_track: None,
             stream: None,
             _source_probe: Some(probe.clone()),
             direct: None,
@@ -335,6 +360,9 @@ impl PlaybackManager {
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         cmd.args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y"]);
+        if captions.is_some() {
+            cmd.arg("-copyts");
+        }
         input_args(&mut cmd, headers);
         cmd.arg("-i").arg(source);
         let mut ordered: Vec<_> = indices.iter().collect();
@@ -345,13 +373,13 @@ impl PlaybackManager {
         cmd.args([
             "-c",
             "copy",
-            "-sn",
             "-dn",
             "-map_metadata",
             "-1",
             "-map_chapters",
             "-1",
         ]);
+        if captions.is_some() {cmd.args(["-max_interleave_delta","1000000"]);}
         match kind {
             ReplayKind::Ts => {
                 cmd.args([
@@ -390,13 +418,25 @@ impl PlaybackManager {
                 .arg(dir.join("segment-%09d.mkv"));
             }
         }
+        #[cfg(target_os = "linux")]
+        let mut caption_pipes = match &captions {
+            Some(cache) => Some(captions::Pipes::attach(&mut cmd, &probe, cache.clone())?),
+            None => None,
+        };
         session.child = Some(cmd.spawn().map_err(|_| "Playback engine unavailable")?);
+        #[cfg(target_os = "linux")]
+        if let Some(pipes) = &mut caption_pipes {
+            pipes.spawned();
+        }
         let ready = timeout(Duration::from_secs(20), async {
             loop {
                 if !matches!(session.child.as_mut().map(|c| c.try_wait()), Some(Ok(None))) {
                     return false;
                 }
                 if !within_budget(&dir, replay_max_bytes).await {
+                    return false;
+                }
+                if captions.as_ref().is_some_and(|cache| !cache.healthy()) {
                     return false;
                 }
                 let ready = match kind {
@@ -493,9 +533,12 @@ impl PlaybackManager {
         let alive = running.clone();
         let (cancel, mut cancelled) = tokio::sync::oneshot::channel();
         let mut session = startup.session.take().expect("prepared ingest session");
+        let active_captions = captions.clone();
         // Count bytes as well as segments: a hostile source with rare keyframes
         // must not grow a nominally time-bounded replay without a storage limit.
         let task = tokio::spawn(async move {
+            #[cfg(target_os = "linux")]
+            let _caption_pipes = caption_pipes;
             loop {
                 tokio::select! {
                     _ = &mut cancelled => break,
@@ -510,6 +553,12 @@ impl PlaybackManager {
                 if !within_budget(&session.dir, replay_max_bytes).await {
                     break;
                 }
+                if active_captions
+                    .as_ref()
+                    .is_some_and(|cache| !cache.healthy())
+                {
+                    break;
+                }
             }
             alive.store(false, std::sync::atomic::Ordering::Release);
             session.cleanup().await;
@@ -519,6 +568,7 @@ impl PlaybackManager {
             playlist,
             indices,
             kind,
+            captions,
             running,
             cancel: Some(cancel),
             task: Some(task),

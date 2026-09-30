@@ -39,7 +39,7 @@ async fn shared_live_hls_preserves_the_existing_native_hevc_copy_gate() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn physical_ingest_eligibility_declines_subtitles_unknown_codec_and_progressive() {
+async fn physical_ingest_eligibility_declines_bitmap_subtitles_unknown_codec_and_progressive() {
     for case in ["subtitle", "codec", "progressive"] {
         let root = tempfile::tempdir().unwrap();
         let mut facts = serde_json::json!({"streams":[
@@ -49,7 +49,7 @@ async fn physical_ingest_eligibility_declines_subtitles_unknown_codec_and_progre
             facts["streams"]
                 .as_array_mut()
                 .unwrap()
-                .push(serde_json::json!({"index":2,"codec_type":"subtitle","codec_name":"subrip"}));
+                .push(serde_json::json!({"index":2,"codec_type":"subtitle","codec_name":"hdmv_pgs_subtitle"}));
         }
         if case == "codec" {
             facts["streams"][0]["codec_name"] = "mpeg4".into();

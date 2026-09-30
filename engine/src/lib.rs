@@ -6,6 +6,7 @@
 //! and policy — the audit that motivated this crate confirmed zero database
 //! and no account dependencies beyond the three seams below.
 mod compat;
+mod captions;
 mod direct;
 mod direct_gate;
 mod fmp4;
