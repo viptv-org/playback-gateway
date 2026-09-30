@@ -2,6 +2,16 @@
 
 ## Conversion and track contract extension
 
+VOD input admission now includes the inspected plan's normalized timeline origin.
+Different seeks consume different input reservations, including while the prior
+worker is stopping; admission is released only after confirmed teardown. Focused
+ledger fixtures cover that boundary, different live output plans sharing input
+admission, and source header credential changes reserving distinct inputs. These
+fixtures verify accounting only: live output workers still open separate source
+connections when their normalized plans differ. Multi-output single-ingest remains
+incomplete, and no new media/container/device qualification is claimed. The full
+locked workspace suite passes: 89 passed, 20 opt-in fixtures ignored.
+
 Generic output conversion now exposes auto/audio/video/audio_video; the worker
 passes its force/reason pair to the existing inspected planner. Explicit tracks,
 language preferences and subtitle-off validation reach that same planner.

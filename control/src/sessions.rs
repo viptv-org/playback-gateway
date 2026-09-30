@@ -220,7 +220,14 @@ impl Sessions {
             request.namespace,
             request.input.url,
             headers,
-            request.input.live
+            request.input.live,
+            // A seek starts another provider pipeline. Only live outputs have
+            // a common realtime origin independent of the output plan.
+            if request.input.live {
+                0
+            } else {
+                plan.position_micros
+            }
         ]);
         let input = hex(&hash(&identity.to_string()));
         let fingerprint = hex(&hash(&serde_json::json!([input, plan]).to_string()));
@@ -747,6 +754,70 @@ mod tests {
         assert_eq!(
             sessions.get(&other, &second.viewer.id, 3).unwrap().status,
             Status::Ready
+        );
+    }
+    #[test]
+    fn distinct_vod_origins_reserve_distinct_inputs_until_actual_teardown() {
+        let mut p = principal("one", "family");
+        p.key.spec.quotas.inputs = 1;
+        let mut sessions = Sessions::default();
+        let mut source = request("family");
+        source.input.live = false;
+        let first = sessions.reserve(&p, &source, &plan(), "first", 0).unwrap();
+        source.position_seconds = 30.0;
+        let mut sought = plan();
+        sought.position_micros = 30_000_000;
+        assert_eq!(
+            sessions
+                .reserve(&p, &source, &sought, "sought", 1)
+                .unwrap_err(),
+            "input_capacity"
+        );
+        sessions.release(&p, &first.viewer.id, 1).unwrap();
+        assert_eq!(sessions.reap(16), vec![first.viewer.job_id.clone()]);
+        assert_eq!(
+            sessions
+                .reserve(&p, &source, &sought, "sought", 16)
+                .unwrap_err(),
+            "input_capacity"
+        );
+        sessions.finish_stop(&first.viewer.job_id);
+        assert!(
+            sessions
+                .reserve(&p, &source, &sought, "sought", 17)
+                .unwrap()
+                .start_job
+        );
+    }
+
+    #[test]
+    fn different_live_outputs_share_input_admission_but_credential_changes_do_not() {
+        let mut p = principal("one", "family");
+        p.key.spec.quotas.inputs = 1;
+        let mut sessions = Sessions::default();
+        let mut source = request("family");
+        source
+            .input
+            .headers
+            .insert("Authorization".into(), "Bearer fixture-a".into());
+        sessions.reserve(&p, &source, &plan(), "first", 0).unwrap();
+        let mut encoded = plan();
+        encoded.video_mode = "encode".into();
+        encoded.mode = "transcode".into();
+        let second = sessions
+            .reserve(&p, &source, &encoded, "second", 1)
+            .unwrap();
+        assert!(second.start_job);
+        assert_eq!(sessions.available(&p, 1).inputs, 0);
+        source
+            .input
+            .headers
+            .insert("Authorization".into(), "Bearer fixture-b".into());
+        assert_eq!(
+            sessions
+                .reserve(&p, &source, &encoded, "rotated", 2)
+                .unwrap_err(),
+            "input_capacity"
         );
     }
     #[test]
