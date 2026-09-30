@@ -548,6 +548,84 @@ async fn real_shared_subtitles_preserve_sparse_identity_and_decoded_stream_index
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires isolated built-image subtitle HTTP/media fixture"]
+async fn real_late_shared_subtitle_output_retains_overlapping_cues_after_eviction() {
+    assert_eq!(std::env::var("PLAYBACK_TEST_SUBTITLES").as_deref(), Ok("1"));
+    let mut fixture = Fixture::new().await;
+    let first = fixture.start("captions-original", 128).await;
+    let source_opens = fixture.source.requests.load(Ordering::SeqCst);
+    tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let evicted = fixture.media_dirs().iter().any(|dir| {
+                let Ok(text) = std::fs::read_to_string(dir.join("index.m3u8")) else {
+                    return false;
+                };
+                let Some(name) = text.lines().find(|line| line.ends_with(".mkv")) else {
+                    return false;
+                };
+                name != "segment-000000000.mkv" && !dir.join("segment-000000000.mkv").exists()
+            });
+            if evicted {
+                break;
+            }
+            let response = fixture
+                .client
+                .post(format!(
+                    "{}/v1/sessions/{}/renew",
+                    fixture.base,
+                    first["id"].as_str().unwrap()
+                ))
+                .bearer_auth(&fixture.key)
+                .send()
+                .await
+                .unwrap();
+            assert!(response.status().is_success());
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    })
+    .await
+    .expect("original cue segment must be actually evicted");
+    let second = fixture.start("captions-late", 64).await;
+    assert_ne!(first["job_id"], second["job_id"]);
+    connections(&fixture.source, 1).await;
+    assert_eq!(fixture.source.requests.load(Ordering::SeqCst), source_opens);
+    let url = second["playback"]["url"].as_str().unwrap();
+    let path = url.rsplit_once('/').unwrap().0;
+    let playlist = fixture
+        .client
+        .get(format!("{}{path}/index_vtt.m3u8", fixture.base))
+        .send()
+        .await
+        .unwrap();
+    assert!(playlist.status().is_success());
+    let playlist = playlist.text().await.unwrap();
+    let caption = playlist
+        .lines()
+        .find(|line| line.ends_with(".vtt"))
+        .unwrap();
+    let vtt = fixture
+        .client
+        .get(format!("{}{path}/{caption}", fixture.base))
+        .send()
+        .await
+        .unwrap();
+    assert!(vtt.status().is_success());
+    let vtt = vtt.text().await.unwrap();
+    assert_eq!(vtt.matches("LONG_ENGLISH").count(), 1);
+    assert_eq!(vtt.matches("OVERLAPPING_ENGLISH").count(), 1);
+    assert!(!vtt.contains("EXPIRED_ENGLISH") && !vtt.contains("WRONG_SPANISH"));
+    fixture.signal("-TERM").await;
+    assert!(
+        tokio::time::timeout(Duration::from_secs(8), fixture.child.wait())
+            .await
+            .unwrap()
+            .unwrap()
+            .success()
+    );
+    connections(&fixture.source, 0).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires isolated Docker network-none, NET_ADMIN and current real service/media binaries"]
 async fn real_service_active_and_stalled_media_shutdown_reaps_workers() {
     let mut fixture = Fixture::new().await;
