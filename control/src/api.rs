@@ -337,7 +337,7 @@ mod tests {
         assert_eq!(replay["playback"]["url"], url);
         assert_eq!(
             std::fs::read_to_string(root.path().join("encoder.count")).unwrap(),
-            "x"
+            "xx"
         );
         let (status, headers, playlist) = call(&app, "GET", url, "", None, String::new()).await;
         assert_eq!(status, StatusCode::OK);

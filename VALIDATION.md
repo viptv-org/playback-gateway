@@ -1,5 +1,64 @@
 # Validation checkpoint — 2026-09-29
 
+## Shared live ingest implementation
+
+An engine-owned ingest now survives independently of individual output workers.
+Its identity includes authorized namespace, source URL, normalized credential
+headers and the internal egress route. A single-flight registry retains stopping
+generation tombstones until process reap; separate ingest/output slots and
+cleanup tasks preserve admission during cancellation. A dead ingest fails every
+dependent output; a dead output releases its own slot while the ingest continues.
+Integration keys authorized for the same namespace retain intentional sharing.
+VOD origins and the public v1 JSON protocol remain unchanged.
+
+The copied replay contains the first real H.264/HEVC video and all eligible audio
+tracks in deterministic order. A local-only ffprobe inspection checks replay
+indices, codecs, dimensions and channels before outputs start. Selected-track
+responses retain original source indices, while FFmpeg maps verified local
+indices. Only the ingest can use HTTP(S); output readers are restricted to the
+private generated file playlist and segments. It retains 12 keyframe segments
+plus three segments of deletion grace. Startup/running storage checks stop the
+ingest above 64 MiB, including partial segment files. This sampled watchdog may
+overshoot and is not a filesystem hard quota. Late readers can fail if they fall
+behind the retained replay; the other outputs continue.
+
+With installed /usr/bin/ffmpeg and /usr/bin/ffprobe, three opt-in fixtures pass:
+
+- A continuous plain-HTTP MPEG-TS source: five compatible viewers share a remux
+  output; a late 160x90 encoded output creates another job without increasing
+  source connections or source-open count. Releasing the complete original output
+  leaves the encoded output alive and its fetched segment decodes. A separate
+  namespace creates another input, and final releases close both inputs.
+- A plain-HTTP rolling HLS source with two AAC audio tracks: different output
+  plans share one ingest. After initial inspection, adding another output neither
+  refetches retained provider segments nor fetches new segments more than once;
+  original audio index 2 remains selected, and the second output survives release
+  of the first. Decoded output contains track 2's 880Hz tone rather than track 1's
+  440Hz tone. This exercises HTTP child playlists/segments through the proxy.
+- A plain-HTTP HEVC Main/AAC HLS source: native-compatible output retains HEVC
+  copy and its fetched local playlist decodes; a smaller H264 encoded output
+  shares the same ingest without duplicate provider segment requests. Selected
+  audio content is also decoded and checked. The fixture bounds libx265's pool
+  and frame threads; it does not certify a native device renderer or hardware.
+
+The locked workspace suite passes 95 tests, with 22 opt-in fixtures ignored;
+strict all-target Clippy passes. Unit fixtures cover sparse stream indices,
+ineligible subtitles/codecs, partial-file storage accounting, cancelled startup,
+ingest crash affecting all outputs, and individual output crash preserving the
+other output and releasing only its output reservation.
+An inspected-plan regression also preserves the existing native HEVC HLS copy
+gate when original delivery is replaced by shared replay; this is not real HEVC
+decoder qualification.
+
+This is compatible AV replay, not complete all-format single-ingest acceptance.
+Subtitle-bearing sources, unlisted video/audio codecs and progressive live paths
+still use independent original execution. HEVC Main10/HDR, MP2/MP3/AC3/EAC3 and HTTPS inputs use the
+same seam but need new real fixtures; inherited TLS/SSRF fixtures do not certify
+this new replay path. Real 4K/hardware, keyframe-starved/high-bitrate storage,
+long-lived slow-reader behavior, host crash/process containment and a current
+Docker image remain acceptance gaps. No public deployment or client cutover is
+claimed by these local tests.
+
 ## Conversion and track contract extension
 
 VOD input admission now includes the inspected plan's normalized timeline origin.
@@ -7,9 +66,9 @@ Different seeks consume different input reservations, including while the prior
 worker is stopping; admission is released only after confirmed teardown. Focused
 ledger fixtures cover that boundary, different live output plans sharing input
 admission, and source header credential changes reserving distinct inputs. These
-fixtures verify accounting only: live output workers still open separate source
-connections when their normalized plans differ. Multi-output single-ingest remains
-incomplete, and no new media/container/device qualification is claimed. The full
+fixtures verify accounting only; physical ingest sharing is covered separately
+above. All-format multi-output single-ingest remains incomplete, and no new
+container/device qualification is claimed. At that checkpoint the full
 locked workspace suite passes: 89 passed, 20 opt-in fixtures ignored.
 
 Generic output conversion now exposes auto/audio/video/audio_video; the worker
@@ -81,7 +140,7 @@ container-only address alias; no production policy override or deployment occurr
 
 This is not approval for public deployment or VIPTV cutover. Pending work includes
 pending-inspection quota/rate admission, detailed upstream failure classification,
-all-format/redirect/DNS network enforcement, multi-output single-input fan-out,
+all-format/redirect/DNS network enforcement, the remaining single-ingest formats,
 crash/process containment, bounded shutdown with active/stalled media responses,
 real hardware/4K qualification and backend integration.
 The existing continuous fMP4 transport is single-consumer and is not advertised

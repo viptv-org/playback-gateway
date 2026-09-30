@@ -2,6 +2,43 @@ use super::*;
 
 #[cfg(unix)]
 #[tokio::test]
+async fn shared_live_hls_preserves_the_existing_native_hevc_copy_gate() {
+    let root = tempfile::tempdir().unwrap();
+    let manager = scripted_probe(
+        root.path(),
+        r#"printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"hevc","width":320,"height":180,"pix_fmt":"yuv420p","profile":"Main","level":90,"avg_frame_rate":"25/1","r_frame_rate":"25/1","field_order":"progressive"},{"index":1,"codec_type":"audio","codec_name":"aac","profile":"LC","channels":2}],"format":{"format_name":"hls"}}'"#,
+    );
+    let prepared = manager
+        .prepare_shared_with_selection(
+            "https://fixture.invalid/live.m3u8".into(),
+            HashMap::new(),
+            0.0,
+            Some(Capabilities {
+                hevc: true,
+                hevc_sdr: true,
+                direct_play: true,
+                direct_hls: Some(true),
+                direct_files: Some(false),
+                ..Capabilities::default()
+            }),
+            false,
+            true,
+            TrackSelection::default(),
+            "fixture".into(),
+        )
+        .await
+        .unwrap();
+    let plan = prepared.plan.as_ref().unwrap();
+    assert_eq!(plan.video_codec, "hevc");
+    assert_eq!(plan.video_mode, "copy");
+    assert_eq!(plan.mode, "remux");
+    assert!(plan.shareable);
+    drop(prepared);
+    manager.shutdown().await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn preparation_normalizes_output_and_does_not_start_a_worker() {
     let root = tempfile::tempdir().unwrap();
     let manager = scripted_probe(

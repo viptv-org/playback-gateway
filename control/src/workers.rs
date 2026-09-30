@@ -141,14 +141,13 @@ impl Workers {
         headers.insert("x-playback-egress-proxy".into(), self.proxy.url());
         let prepared = tokio::time::timeout(
             deadline,
-            self.engine.prepare_with_selection(
+            self.engine.prepare_shared_with_selection(
                 request.input.url.clone(),
                 headers,
                 request.position_seconds,
                 Some(caps),
                 request.output.conversion != crate::protocol::Conversion::Auto,
                 request.input.live,
-                None,
                 TrackSelection {
                     conversion_reason: match request.output.conversion {
                         crate::protocol::Conversion::Audio => Some("audio-codec".into()),
@@ -161,6 +160,7 @@ impl Workers {
                     preferred_audio_language: request.output.preferred_audio_language.clone(),
                     preferred_subtitle_language: request.output.preferred_subtitle_language.clone(),
                 },
+                request.namespace.clone(),
             ),
         )
         .await
@@ -503,6 +503,349 @@ pub(crate) mod tests {
         .expect("upstream connection count must settle");
     }
 
+    async fn http_hls_source(
+        parts: Vec<Vec<u8>>,
+    ) -> (HttpSource, Arc<Mutex<BTreeMap<String, usize>>>) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/index.m3u8", listener.local_addr().unwrap());
+        let active = Arc::new(AtomicUsize::new(0));
+        let requests = Arc::new(AtomicUsize::new(0));
+        let records = Arc::new(Mutex::new(BTreeMap::<String, usize>::new()));
+        let observed = active.clone();
+        let opened = requests.clone();
+        let fetched = records.clone();
+        let parts = Arc::new(parts);
+        let started = Instant::now();
+        let server = tokio::spawn(async move {
+            let mut clients = tokio::task::JoinSet::new();
+            loop {
+                tokio::select! {
+                    accepted = listener.accept() => {
+                        let Ok((mut socket, _)) = accepted else { break };
+                        let observed = observed.clone(); let opened = opened.clone();
+                        let fetched = fetched.clone(); let parts = parts.clone();
+                        clients.spawn(async move {
+                            observed.fetch_add(1, Ordering::SeqCst);
+                            opened.fetch_add(1, Ordering::SeqCst);
+                            let _count = ConnectionCount(observed);
+                            let mut request = Vec::new();
+                            while !request.ends_with(b"\r\n\r\n") && request.len() < 16384 {
+                                match socket.read_u8().await { Ok(byte) => request.push(byte), Err(_) => return }
+                            }
+                            let text = String::from_utf8_lossy(&request);
+                            let path = text.split_whitespace().nth(1).unwrap_or("").to_owned();
+                            let (mime, body) = if path == "/index.m3u8" {
+                                let sequence = started.elapsed().as_millis() as u64 / 500;
+                                let mut playlist = format!("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:{sequence}\n");
+                                for part in sequence..sequence + 3 {
+                                    playlist.push_str(&format!("#EXT-X-DISCONTINUITY\n#EXTINF:2,\npart-{part}.ts\n"));
+                                }
+                                ("application/vnd.apple.mpegurl", playlist.into_bytes())
+                            } else if let Some(index) = path.strip_prefix("/part-").and_then(|p| p.strip_suffix(".ts")).and_then(|p| p.parse::<usize>().ok()) {
+                                *fetched.lock().unwrap().entry(path).or_default() += 1;
+                                ("video/mp2t", parts[index % parts.len()].clone())
+                            } else { return };
+                            let header = format!("HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+                            let _ = socket.write_all(header.as_bytes()).await;
+                            let _ = socket.write_all(&body).await;
+                        });
+                    },
+                    _ = clients.join_next(), if !clients.is_empty() => {}
+                }
+            }
+        });
+        (
+            HttpSource {
+                url,
+                active,
+                requests,
+                server,
+            },
+            records,
+        )
+    }
+
+    #[tokio::test]
+    #[ignore = "requires real FFmpeg/ffprobe; isolated HTTP HLS live fixture"]
+    async fn real_hls_multi_output_reuses_ingest_without_duplicate_child_fetches() {
+        check_real_hls_outputs(false).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires real FFmpeg/libx265/ffprobe; isolated HTTP HLS live fixture"]
+    async fn real_hevc_hls_copy_and_encode_share_ingest_without_forced_copy_conversion() {
+        check_real_hls_outputs(true).await;
+    }
+
+    async fn check_real_hls_outputs(native_hevc: bool) {
+        let ffmpeg = std::env::var("PLAYBACK_TEST_FFMPEG").unwrap();
+        let ffprobe = std::env::var("PLAYBACK_TEST_FFPROBE").unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let generated = root.path().join("input.m3u8");
+        let mut generation = tokio::process::Command::new(&ffmpeg);
+        generation.kill_on_drop(true).args([
+            "-v",
+            "error",
+            "-nostdin",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=320x180:rate=25",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=48000",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=880:sample_rate=48000",
+            "-map",
+            "0:v",
+            "-map",
+            "1:a",
+        ]);
+        if !native_hevc {
+            generation.args(["-map", "2:a"]);
+        }
+        if native_hevc {
+            generation.args([
+                "-x265-params",
+                "pools=1:frame-threads=1:log-level=error:open-gop=0",
+            ]);
+        }
+        generation
+            .args([
+                "-t",
+                "8",
+                "-c:v",
+                if native_hevc { "libx265" } else { "libx264" },
+                "-threads",
+                "2",
+                "-preset",
+                "ultrafast",
+                "-g",
+                "50",
+                "-c:a",
+                "aac",
+                "-f",
+                "hls",
+                "-hls_time",
+                "2",
+                "-hls_list_size",
+                "0",
+            ])
+            .arg(&generated);
+        let result = tokio::time::timeout(Duration::from_secs(20), generation.output())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(result.status.success());
+        let manifest = std::fs::read_to_string(generated).unwrap();
+        let parts = manifest
+            .lines()
+            .filter(|line| line.ends_with(".ts"))
+            .map(|line| std::fs::read(root.path().join(line)).unwrap())
+            .collect();
+        let (source, records) = http_hls_source(parts).await;
+        let engine = PlaybackManager::new(playback_engine::Config {
+            ffmpeg: ffmpeg.clone().into(),
+            ffprobe: ffprobe.into(),
+            root: root.path().join("media"),
+            max_sessions: 2,
+            ttl: Duration::from_secs(120),
+        });
+        let credentials = Arc::new(
+            Credentials::from_connection(
+                rusqlite::Connection::open_in_memory().unwrap(),
+                BOOTSTRAP,
+            )
+            .unwrap(),
+        );
+        let key = credentials
+            .issue(
+                BOOTSTRAP,
+                KeySpec {
+                    label: "HLS fixture".into(),
+                    namespaces: vec!["fixture".into()],
+                    scopes: vec![Scope::Create, Scope::Read, Scope::Release],
+                    quotas: Quotas {
+                        inputs: 1,
+                        outputs: 2,
+                        viewers: 2,
+                    },
+                    expires_at: None,
+                },
+                0,
+            )
+            .unwrap();
+        let principal = credentials.authenticate(&key.secret, 0).unwrap();
+        let workers = Workers::new(engine, credentials, NetworkPolicy::loopback_fixture())
+            .await
+            .unwrap();
+        let mut input = request(1920);
+        input.input.url = source.url.clone();
+        if native_hevc {
+            input.output.video_codecs.push("hevc".into());
+        }
+        input.output.audio_track = Some(1);
+        let first = workers
+            .create(&principal, &input, "first", 0)
+            .await
+            .unwrap();
+        let before = records.lock().unwrap().clone();
+        if native_hevc {
+            assert_eq!(
+                workers
+                    .delivery(&principal, &first, 5)
+                    .unwrap()
+                    .unwrap()
+                    .video_mode,
+                "copy"
+            );
+            let engine_id = workers.active.lock().unwrap()[&first.job_id].id.clone();
+            let copy_playlist = root.path().join("media").join(engine_id).join("index.m3u8");
+            let decoded = tokio::time::timeout(
+                Duration::from_secs(10),
+                tokio::process::Command::new(&ffmpeg)
+                    .kill_on_drop(true)
+                    .args([
+                        "-v",
+                        "error",
+                        "-protocol_whitelist",
+                        "file",
+                        "-allowed_extensions",
+                        "ts",
+                        "-i",
+                    ])
+                    .arg(copy_playlist)
+                    .args(["-t", "1", "-f", "null", "-"])
+                    .output(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert!(
+                decoded.status.success(),
+                "native HEVC copy output must decode"
+            );
+        }
+        input.output.max_width = 160;
+        input.output.max_height = 90;
+        let selected_audio = if native_hevc { 1 } else { 2 };
+        input.output.audio_track = Some(selected_audio);
+        let second = workers
+            .create(&principal, &input, "second", 5)
+            .await
+            .unwrap();
+        assert_ne!(first.job_id, second.job_id);
+        let delivery = workers.delivery(&principal, &second, 5).unwrap().unwrap();
+        assert_eq!(delivery.selected_audio.unwrap().input_index, selected_audio);
+        assert_eq!(delivery.video_mode, "encode");
+        let token = delivery.url.split('/').nth(3).unwrap();
+        let playlist = workers
+            .media(
+                &second.id,
+                token,
+                "index.m3u8",
+                5,
+                axum::http::Method::GET,
+                axum::http::HeaderMap::new(),
+            )
+            .await
+            .unwrap();
+        let playlist = axum::body::to_bytes(playlist.into_body(), 128 * 1024)
+            .await
+            .unwrap();
+        let segment = std::str::from_utf8(&playlist)
+            .unwrap()
+            .lines()
+            .find(|line| line.ends_with(".ts"))
+            .unwrap();
+        let body = workers
+            .media(
+                &second.id,
+                token,
+                segment,
+                5,
+                axum::http::Method::GET,
+                axum::http::HeaderMap::new(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(body.into_body(), 4 * 1024 * 1024)
+            .await
+            .unwrap();
+        let sample = root.path().join("selected-audio.ts");
+        std::fs::write(&sample, body).unwrap();
+        let audio = tokio::time::timeout(
+            Duration::from_secs(10),
+            tokio::process::Command::new(&ffmpeg)
+                .kill_on_drop(true)
+                .args(["-v", "error", "-i"])
+                .arg(&sample)
+                .args([
+                    "-map", "0:a:0", "-vn", "-t", "1", "-ac", "1", "-ar", "48000", "-f", "f32le",
+                    "pipe:1",
+                ])
+                .output(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(audio.status.success(), "selected replay audio must decode");
+        let samples: Vec<_> = audio
+            .stdout
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|bytes| f32::from_le_bytes(*bytes))
+            .collect();
+        assert!(samples.len() > 24000);
+        let crossings = samples
+            .windows(2)
+            .filter(|pair| pair[0].is_sign_negative() != pair[1].is_sign_negative())
+            .count();
+        let frequency = crossings as f64 * 48000.0 / (2.0 * samples.len() as f64);
+        let expected = if native_hevc {
+            350.0..550.0
+        } else {
+            750.0..1000.0
+        };
+        assert!(
+            expected.contains(&frequency),
+            "replay must retain the selected original audio content"
+        );
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+        let after = records.lock().unwrap().clone();
+        for (path, count) in &after {
+            assert_eq!(
+                *count,
+                before.get(path).copied().unwrap_or(1),
+                "another output must not refetch a provider segment"
+            );
+        }
+        workers
+            .sessions
+            .lock()
+            .unwrap()
+            .release(&principal, &first.id, 10)
+            .unwrap();
+        workers.reap(26).await.unwrap();
+        let surviving_engine_id = workers.active.lock().unwrap()[&second.job_id].id.clone();
+        assert!(workers.engine.input_running(&surviving_engine_id).await);
+        workers
+            .sessions
+            .lock()
+            .unwrap()
+            .release(&principal, &second.id, 26)
+            .unwrap();
+        workers.reap(41).await.unwrap();
+        assert_eq!(workers.sessions.lock().unwrap().job_count(), 0);
+        workers.shutdown().await;
+    }
+
     #[tokio::test]
     #[ignore = "requires real FFmpeg/ffprobe; isolated plain-HTTP live fixture"]
     async fn real_http_live_five_viewers_share_one_upstream_and_scopes_remain_isolated() {
@@ -545,10 +888,10 @@ pub(crate) mod tests {
         assert!(output.status.success(), "fixture generation must succeed");
         let source = http_source(std::fs::read(input).unwrap()).await;
         let engine = PlaybackManager::new(playback_engine::Config {
-            ffmpeg: ffmpeg.into(),
-            ffprobe: ffprobe.into(),
+            ffmpeg: ffmpeg.clone().into(),
+            ffprobe: ffprobe.clone().into(),
             root: root.path().join("media"),
-            max_sessions: 2,
+            max_sessions: 3,
             ttl: Duration::from_secs(120),
         });
         let credentials = Arc::new(
@@ -564,8 +907,8 @@ pub(crate) mod tests {
             scopes: vec![Scope::Create, Scope::Read, Scope::Renew, Scope::Release],
             quotas: Quotas {
                 inputs: 2,
-                outputs: 2,
-                viewers: 6,
+                outputs: 3,
+                viewers: 7,
             },
             expires_at: None,
         };
@@ -622,9 +965,87 @@ pub(crate) mod tests {
             .await
             .unwrap();
         assert!(String::from_utf8_lossy(&playlist).contains(".ts"));
+        // A late viewer requests a genuinely different normalized output.
+        // It reads replay keyframes, not another provider stream.
+        input.output.max_width = 160;
+        input.output.max_height = 90;
+        let resized = workers
+            .create(&principal, &input, "resized", 5)
+            .await
+            .unwrap();
+        assert_ne!(resized.job_id, viewers[0].job_id);
+        let resized_delivery = workers.delivery(&principal, &resized, 5).unwrap().unwrap();
+        assert_eq!(resized_delivery.video_mode, "encode");
+        expect_connections(&source, 1).await;
+        assert_eq!(
+            source.requests.load(std::sync::atomic::Ordering::SeqCst),
+            opened,
+            "different output plan must not open the provider again"
+        );
+        // Releasing the entire first output must not stop the ingest still
+        // owned by the resized output.
+        for viewer in &viewers {
+            workers
+                .sessions
+                .lock()
+                .unwrap()
+                .release(&principal, &viewer.id, 10)
+                .unwrap();
+        }
+        workers.reap(26).await.unwrap();
+        expect_connections(&source, 1).await;
+        let token = resized_delivery.url.split('/').nth(3).unwrap();
+        let playlist = workers
+            .media(
+                &resized.id,
+                token,
+                "index.m3u8",
+                26,
+                axum::http::Method::GET,
+                axum::http::HeaderMap::new(),
+            )
+            .await
+            .unwrap();
+        let playlist = axum::body::to_bytes(playlist.into_body(), 128 * 1024)
+            .await
+            .unwrap();
+        let text = std::str::from_utf8(&playlist).unwrap();
+        let segment = text.lines().find(|line| line.ends_with(".ts")).unwrap();
+        let bytes = workers
+            .media(
+                &resized.id,
+                token,
+                segment,
+                26,
+                axum::http::Method::GET,
+                axum::http::HeaderMap::new(),
+            )
+            .await
+            .unwrap();
+        let bytes = axum::body::to_bytes(bytes.into_body(), 4 * 1024 * 1024)
+            .await
+            .unwrap();
+        let decoded = root.path().join("resized.ts");
+        std::fs::write(&decoded, bytes).unwrap();
+        let decode = tokio::time::timeout(
+            Duration::from_secs(10),
+            tokio::process::Command::new(&ffmpeg)
+                .kill_on_drop(true)
+                .args(["-v", "error", "-i"])
+                .arg(&decoded)
+                .args(["-f", "null", "-"])
+                .output(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(
+            decode.status.success(),
+            "late replay output must decode after first-output teardown"
+        );
         input.namespace = "separate".into();
         let separate = workers
-            .create(&principal, &input, "separate", 5)
+            .create(&principal, &input, "separate", 26)
             .await
             .unwrap();
         assert_ne!(separate.job_id, viewers[0].job_id);
@@ -633,18 +1054,8 @@ pub(crate) mod tests {
             .sessions
             .lock()
             .unwrap()
-            .release(&principal, &viewers[0].id, 10)
+            .release(&principal, &resized.id, 26)
             .unwrap();
-        workers.reap(26).await.unwrap();
-        expect_connections(&source, 2).await;
-        for viewer in &viewers[1..] {
-            workers
-                .sessions
-                .lock()
-                .unwrap()
-                .release(&principal, &viewer.id, 26)
-                .unwrap();
-        }
         workers.reap(41).await.unwrap();
         expect_connections(&source, 1).await;
         workers
@@ -661,6 +1072,12 @@ pub(crate) mod tests {
 
     pub(crate) const BOOTSTRAP: &str = "gateway-worker-fixture-bootstrap-key";
     pub(crate) async fn fixture(stall: bool) -> (tempfile::TempDir, Arc<Workers>, Principal) {
+        fixture_with_outputs(stall, 1).await
+    }
+    async fn fixture_with_outputs(
+        stall: bool,
+        outputs: usize,
+    ) -> (tempfile::TempDir, Arc<Workers>, Principal) {
         let root = tempfile::tempdir().unwrap();
         let probe = root.path().join("probe");
         std::fs::write(&probe, r#"#!/bin/sh
@@ -670,7 +1087,7 @@ printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","wi
         let script = if stall {
             "#!/bin/sh\nprintf x >> \"$0.count\"\nexec sleep 30\n"
         } else {
-            "#!/bin/sh\nprintf x >> \"$0.count\"\nfor last do :; done\ndir=${last%/*}\nprintf 'fixture' > \"$dir/segment-000000000.ts\"\nprintf '#EXTM3U\\n#EXTINF:1,\\nsegment-000000000.ts\\n' > \"$last\"\n"
+            "#!/bin/sh\nprintf x >> \"$0.count\"\nprintf '%s\\n' \"$$\" >> \"$0.pids\"\nfor arg do case \"$arg\" in *independent_segments*) printf '%s' \"$$\" > \"$0.ingest-pid\" ;; esac; done\nfor last do :; done\ndir=${last%/*}\nprintf 'fixture' > \"$dir/segment-000000000.ts\"\nprintf '#EXTM3U\\n#EXTINF:1,\\nsegment-000000000.ts\\n' > \"$last\"\nexec sleep 30\n"
         };
         std::fs::write(&encoder, script).unwrap();
         for file in [&probe, &encoder] {
@@ -680,7 +1097,7 @@ printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","wi
             ffmpeg: encoder,
             ffprobe: probe,
             root: root.path().join("media"),
-            max_sessions: 1,
+            max_sessions: outputs,
             ttl: Duration::from_secs(60),
         });
         let credentials = Arc::new(
@@ -699,7 +1116,7 @@ printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","wi
                     scopes: vec![Scope::Create, Scope::Read, Scope::Renew, Scope::Release],
                     quotas: Quotas {
                         inputs: 1,
-                        outputs: 1,
+                        outputs: outputs as u32,
                         viewers: 5,
                     },
                     expires_at: None,
@@ -767,7 +1184,8 @@ printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","wi
         assert_eq!(workers.engine.active_count().await, 1);
         assert_eq!(
             std::fs::read_to_string(root.path().join("encoder.count")).unwrap(),
-            "x"
+            "xx",
+            "one ingest and one output, regardless of viewer count"
         );
         let token = workers
             .sessions
@@ -817,6 +1235,134 @@ printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","wi
         assert_eq!(workers.engine.active_count().await, 0);
         assert_eq!(workers.sessions.lock().unwrap().job_count(), 0);
         workers.engine.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn shared_ingest_crash_fails_each_output_and_settles_its_reservations() {
+        let (root, workers, principal) = fixture_with_outputs(false, 2).await;
+        let first = workers
+            .create(&principal, &request(1920), "first", 0)
+            .await
+            .unwrap();
+        let second = workers
+            .create(&principal, &request(320), "second", 0)
+            .await
+            .unwrap();
+        assert_ne!(first.job_id, second.job_id);
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("encoder.count")).unwrap(),
+            "xxx"
+        );
+        let pid = std::fs::read_to_string(root.path().join("encoder.ingest-pid")).unwrap();
+        assert!(pid.bytes().all(|byte| byte.is_ascii_digit()));
+        assert!(tokio::process::Command::new("/bin/kill")
+            .args(["-KILL", &pid])
+            .status()
+            .await
+            .unwrap()
+            .success());
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                workers.reap(1).await.unwrap();
+                if workers.sessions.lock().unwrap().job_count() == 0 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+        for viewer in [first, second] {
+            assert_eq!(
+                workers
+                    .sessions
+                    .lock()
+                    .unwrap()
+                    .get(&principal, &viewer.id, 1)
+                    .unwrap()
+                    .status,
+                Status::Failed
+            );
+        }
+        assert_eq!(workers.engine.active_count().await, 0);
+        assert_eq!(workers.available(&principal, 1).unwrap().inputs, 1);
+        assert_eq!(workers.available(&principal, 1).unwrap().outputs, 2);
+        assert_eq!(
+            std::fs::read_dir(root.path().join("media"))
+                .unwrap()
+                .count(),
+            0
+        );
+        workers.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn failed_output_releases_its_slot_without_stopping_shared_ingest() {
+        let (root, workers, principal) = fixture_with_outputs(false, 2).await;
+        let first = workers
+            .create(&principal, &request(1920), "first", 0)
+            .await
+            .unwrap();
+        let second = workers
+            .create(&principal, &request(320), "second", 0)
+            .await
+            .unwrap();
+        let pids = std::fs::read_to_string(root.path().join("encoder.pids")).unwrap();
+        let output_pid = pids.lines().nth(1).unwrap();
+        assert!(output_pid.bytes().all(|byte| byte.is_ascii_digit()));
+        assert!(tokio::process::Command::new("/bin/kill")
+            .args(["-KILL", output_pid])
+            .status()
+            .await
+            .unwrap()
+            .success());
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                workers.reap(1).await.unwrap();
+                if workers.sessions.lock().unwrap().job_count() == 1 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            workers
+                .sessions
+                .lock()
+                .unwrap()
+                .get(&principal, &first.id, 1)
+                .unwrap()
+                .status,
+            Status::Failed
+        );
+        assert_eq!(
+            workers
+                .sessions
+                .lock()
+                .unwrap()
+                .get(&principal, &second.id, 1)
+                .unwrap()
+                .status,
+            Status::Ready
+        );
+        assert_eq!(workers.available(&principal, 1).unwrap().inputs, 0);
+        assert_eq!(workers.available(&principal, 1).unwrap().outputs, 1);
+        workers
+            .sessions
+            .lock()
+            .unwrap()
+            .release(&principal, &second.id, 1)
+            .unwrap();
+        workers.reap(16).await.unwrap();
+        assert_eq!(
+            std::fs::read_dir(root.path().join("media"))
+                .unwrap()
+                .count(),
+            0
+        );
+        workers.shutdown().await;
     }
 
     #[tokio::test]

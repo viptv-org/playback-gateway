@@ -237,7 +237,22 @@ impl PlaybackManager {
         live: bool,
         permits: Option<Arc<InputPermits>>,
     ) -> Option<Arc<Probe>> {
+        self.cached_probe_scoped(url, headers, live, permits, None)
+            .await
+    }
+    pub(super) async fn cached_probe_scoped(
+        &self,
+        url: &str,
+        headers: &str,
+        live: bool,
+        permits: Option<Arc<InputPermits>>,
+        scope: Option<&str>,
+    ) -> Option<Arc<Probe>> {
         let mut digest = Sha256::new();
+        if let Some(scope) = scope {
+            digest.update((scope.len() as u64).to_be_bytes());
+            digest.update(scope.as_bytes());
+        }
         digest.update(url.as_bytes());
         digest.update([0]);
         digest.update(headers.as_bytes());

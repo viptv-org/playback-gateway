@@ -29,6 +29,21 @@ impl PlaybackManager {
     pub async fn heartbeat_at(&self, id: &str, position: Option<f64>) -> bool {
         let mut sessions = self.sessions.lock().await;
         if let Some(session) = sessions.get_mut(id) {
+            if session
+                .ingest
+                .as_ref()
+                .is_some_and(|ingest| !ingest.running())
+            {
+                return false;
+            }
+            if session.ingest.is_some()
+                && !matches!(
+                    session.child.as_mut().map(|child| child.try_wait()),
+                    Some(Ok(None))
+                )
+            {
+                return false;
+            }
             if session.touched.elapsed() < self.config.ttl {
                 session.touched = Instant::now();
                 if let (Some(stream), Some(position)) = (&session.stream, position) {
@@ -81,6 +96,11 @@ impl PlaybackManager {
         let Some(session) = sessions.get_mut(id) else {
             return false;
         };
+        if let Some(ingest) = &session.ingest {
+            if !ingest.running() {
+                return false;
+            }
+        }
         if let Some(direct) = &session.direct {
             return !direct.closed.load(std::sync::atomic::Ordering::Acquire)
                 && !direct.failed.load(std::sync::atomic::Ordering::Acquire);

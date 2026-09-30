@@ -24,6 +24,7 @@ impl InputPermits {
 }
 
 pub(super) struct Session {
+    pub(super) ingest: Option<Arc<ingest::SharedIngest>>,
     pub(super) stream: Option<Arc<fmp4::Stream>>,
     // Keep inspected VOD facts alive while this input is in use.
     pub(super) _source_probe: Option<Arc<Probe>>,
@@ -54,6 +55,7 @@ impl Session {
             let _ = child.wait().await;
         }
         self.child.take();
+        self.ingest.take();
         if tokio::fs::remove_dir_all(&self.dir).await.is_ok() {
             self.dir = PathBuf::new();
         }
@@ -79,6 +81,7 @@ impl Drop for Session {
         }
         let dir = self.dir.clone();
         let permits = self.permits.clone();
+        let ingest = self.ingest.take();
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
             let task = runtime.spawn(async move {
                 if let Some(mut child) = child {
@@ -88,6 +91,7 @@ impl Drop for Session {
                     let _ = tokio::fs::remove_dir_all(dir).await;
                 }
                 drop(permits);
+                drop(ingest);
             });
             let mut tasks = self.cleanup_tasks.lock().unwrap_or_else(|e| e.into_inner());
             tasks.retain(|task| !task.is_finished());

@@ -40,6 +40,61 @@ impl PlaybackManager {
         provider_permit: Option<OwnedSemaphorePermit>,
         selection: TrackSelection,
     ) -> Result<PreparedPlayback<'_>, String> {
+        self.prepare_with_scope(
+            url,
+            headers,
+            position,
+            capabilities,
+            force,
+            live,
+            provider_permit,
+            selection,
+            None,
+        )
+        .await
+    }
+
+    /// Scope is caller-authorized opaque namespace text, never product identity.
+    /// URL, credential headers and egress route additionally bind the ingest.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn prepare_shared_with_selection(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+        position: f64,
+        capabilities: Option<Capabilities>,
+        force: bool,
+        live: bool,
+        selection: TrackSelection,
+        scope: String,
+    ) -> Result<PreparedPlayback<'_>, String> {
+        self.prepare_with_scope(
+            url,
+            headers,
+            position,
+            capabilities,
+            force,
+            live,
+            None,
+            selection,
+            Some(scope),
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn prepare_with_scope(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+        position: f64,
+        capabilities: Option<Capabilities>,
+        force: bool,
+        live: bool,
+        provider_permit: Option<OwnedSemaphorePermit>,
+        selection: TrackSelection,
+        scope: Option<String>,
+    ) -> Result<PreparedPlayback<'_>, String> {
         let reason = selection.conversion_reason.as_deref();
         if reason.is_some_and(|value| {
             !matches!(
@@ -88,6 +143,7 @@ impl PlaybackManager {
             return Err("Invalid browser capability report".into());
         }
         if !force
+            && scope.is_none()
             && caps.direct_play
             && caps.browser.as_ref().is_some_and(|b| b.inspect_original)
             && std::env::var("PLAYBACK_BROWSER_PREPARATION").as_deref() == Ok("1")
@@ -137,6 +193,7 @@ impl PlaybackManager {
                 self.sessions.lock().await.insert(
                     id,
                     Session {
+                        ingest: None,
                         stream: None,
                         _source_probe: None,
                         direct: Some(direct),
@@ -179,11 +236,12 @@ impl PlaybackManager {
         self.initialize().await?;
         let probe_started = Instant::now();
         let probe = self
-            .cached_probe(
+            .cached_probe_scoped(
                 validated.as_str(),
                 &header_block,
                 live,
                 Some(permits.clone()),
+                scope.as_deref(),
             )
             .await
             .ok_or_else(|| {
@@ -191,6 +249,9 @@ impl PlaybackManager {
                 "Could not inspect source video safely; try another stream".to_owned()
             })?;
         let probe_ms = probe_started.elapsed().as_millis() as u64;
+        let shared_scope = scope.filter(|_| {
+            live && caps.direct_hls != Some(false) && ingest::replay_indices(&probe).is_some()
+        });
         // The capability envelope gates only the managed/transcode path. Original
         // delivery is decided below from the client's declared decoders, so an
         // HDR, wide-gamut or otherwise unusual source is still playable whenever
@@ -271,7 +332,10 @@ impl PlaybackManager {
         }
         // Original delivery is opt-in, uses inspected tracks, and keeps the
         // provider reservation owned by this session and in-flight reads.
-        if !force && caps.direct_play && std::env::var("PLAYBACK_DIRECT_PLAY").as_deref() != Ok("0")
+        if shared_scope.is_none()
+            && !force
+            && caps.direct_play
+            && std::env::var("PLAYBACK_DIRECT_PLAY").as_deref() != Ok("0")
         {
             if let Some(format) = direct_format(&probe, &caps, selected_input, &selection) {
                 if let Ok(transport) =
@@ -341,6 +405,7 @@ impl PlaybackManager {
                         self.sessions.lock().await.insert(
                             id,
                             Session {
+                                ingest: None,
                                 stream: None,
                                 _source_probe: Some(probe.clone()),
                                 direct: Some(transport),
@@ -425,35 +490,41 @@ impl PlaybackManager {
             && selected_subtitle.is_none()
             && caps.browser.as_ref().is_some_and(|b| b.fmp4);
         let video = probe.video()?;
-        let hevc_copy = (continuous || live && caps.browser.as_ref().is_some_and(|b| b.fmp4))
-            && !hdr
-            && !interlaced
+        // Sharing replaces original HLS transport, not the native decoder gate.
+        // Preserve previously compatible native HEVC instead of forcing H264.
+        let native_hevc_copy = shared_scope.is_some()
             && video.codec_name.as_deref() == Some("hevc")
-            && matches!(video.profile.as_deref(), Some("Main" | "Main 10"))
-            && matches!(video.pix_fmt.as_deref(), Some("yuv420p" | "yuv420p10le"))
-            && conservative_frame_rate(video.avg_frame_rate.as_deref())
-            && caps.browser.as_ref().is_some_and(|b| {
-                b.engines.iter().any(|e| {
-                    e.codec == "hevc"
-                        && e.evidence != "unknown"
-                        && matches!(e.engine.as_str(), "native" | "mse")
-                        && video
-                            .level
-                            .is_some_and(|level| level > 0 && level <= e.max_level.unwrap_or(150))
-                        && e.bit_depth.unwrap_or(8)
-                            >= if video.pix_fmt.as_deref() == Some("yuv420p10le") {
-                                10
-                            } else {
-                                8
-                            }
-                        && compat::frame_rate_within(
-                            video.avg_frame_rate.as_deref(),
-                            e.max_frame_rate.unwrap_or(30),
-                        )
-                        && video.width.zip(e.max_width).is_some_and(|(v, m)| v <= m)
-                        && video.height.zip(e.max_height).is_some_and(|(v, m)| v <= m)
-                })
-            });
+            && direct_format(&probe, &caps, selected_input, &selection) == Some("hls");
+        let hevc_copy = native_hevc_copy
+            || (continuous || live && caps.browser.as_ref().is_some_and(|b| b.fmp4))
+                && !hdr
+                && !interlaced
+                && video.codec_name.as_deref() == Some("hevc")
+                && matches!(video.profile.as_deref(), Some("Main" | "Main 10"))
+                && matches!(video.pix_fmt.as_deref(), Some("yuv420p" | "yuv420p10le"))
+                && conservative_frame_rate(video.avg_frame_rate.as_deref())
+                && caps.browser.as_ref().is_some_and(|b| {
+                    b.engines.iter().any(|e| {
+                        e.codec == "hevc"
+                            && e.evidence != "unknown"
+                            && matches!(e.engine.as_str(), "native" | "mse")
+                            && video.level.is_some_and(|level| {
+                                level > 0 && level <= e.max_level.unwrap_or(150)
+                            })
+                            && e.bit_depth.unwrap_or(8)
+                                >= if video.pix_fmt.as_deref() == Some("yuv420p10le") {
+                                    10
+                                } else {
+                                    8
+                                }
+                            && compat::frame_rate_within(
+                                video.avg_frame_rate.as_deref(),
+                                e.max_frame_rate.unwrap_or(30),
+                            )
+                            && video.width.zip(e.max_width).is_some_and(|(v, m)| v <= m)
+                            && video.height.zip(e.max_height).is_some_and(|(v, m)| v <= m)
+                    })
+                });
         let compatible_video = probe.compatible_video(width, height, H264_COPY_LEVEL) || hevc_copy;
         let seek_origin = if !force_video && continuous && compatible_video {
             self.copy_seek_position(
@@ -554,6 +625,7 @@ impl PlaybackManager {
                 .map_err(|_| "Media storage unavailable".to_owned())?;
             let dir = root.join(&id);
             let mut session = Session {
+                ingest: None,
                 stream: None,
                 _source_probe: Some(probe.clone()),
                 direct: None,
@@ -575,6 +647,12 @@ impl PlaybackManager {
             tokio::fs::create_dir(&dir)
                 .await
                 .map_err(|_| "Media storage unavailable".to_owned())?;
+            if let Some(scope) = &shared_scope {
+                session.ingest = Some(
+                    self.shared_ingest(scope, validated.as_str(), &header_block, probe.clone())
+                        .await?,
+                );
+            }
             let accel = if copy_video {
                 hardware::Accel::default()
             } else {
@@ -613,7 +691,20 @@ impl PlaybackManager {
                         cmd.args(["-c:v", decoder]);
                     }
                 }
-                input_args(&mut cmd, &header_block);
+                if session.ingest.is_some() {
+                    // Trusted generated playlist only. Provider protocols and
+                    // credentials cannot leak into local output readers.
+                    cmd.args([
+                        "-protocol_whitelist",
+                        "file",
+                        "-allowed_extensions",
+                        "ts",
+                        "-live_start_index",
+                        "-2",
+                    ]);
+                } else {
+                    input_args(&mut cmd, &header_block);
+                }
                 // Input is never paced to realtime. A live input already arrives in
                 // realtime, and `-re` only withheld the upstream's initial burst (an
                 // HLS source starts three segments behind its edge), which pinned
@@ -623,10 +714,19 @@ impl PlaybackManager {
                 if position > 0.0 {
                     cmd.arg("-ss").arg(format!("{position:.6}"));
                 }
-                cmd.arg("-i").arg(validated.as_str());
+                cmd.arg("-i");
+                if let Some(ingest) = &session.ingest {
+                    cmd.arg(&ingest.playlist);
+                } else {
+                    cmd.arg(validated.as_str());
+                }
                 cmd.args(["-map", "0:v:0"]);
                 if let Some(audio) = &selected_audio {
-                    cmd.arg("-map").arg(format!("0:{}", audio.input_index));
+                    let index = match &session.ingest {
+                        Some(ingest) => ingest.index(audio.input_index)?,
+                        None => audio.input_index,
+                    };
+                    cmd.arg("-map").arg(format!("0:{index}"));
                 }
                 if let Some(subtitle) = &selected_subtitle {
                     cmd.arg("-map").arg(format!("0:{}", subtitle.input_index));
@@ -645,7 +745,7 @@ impl PlaybackManager {
                 }
                 if copy_video {
                     cmd.args(["-c:v", "copy"]);
-                    if hevc_copy {
+                    if hevc_copy && (continuous_output || fmp4_hls) {
                         cmd.args(["-tag:v", "hvc1"]);
                     }
                 } else {

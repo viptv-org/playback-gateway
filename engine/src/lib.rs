@@ -11,6 +11,7 @@ mod direct_gate;
 mod fmp4;
 mod hardware;
 mod hls;
+mod ingest;
 mod lease;
 mod lifecycle;
 mod manager;

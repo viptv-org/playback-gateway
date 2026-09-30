@@ -22,6 +22,22 @@ jobs, authorizes media resources per viewer, and retains admission through
 cancelled-process cleanup. Real HTTP live fixtures verify five compatible
 viewers share one active upstream connection; distinct namespaces stay isolated.
 
+Eligible live HLS outputs now share an independent FFmpeg ingest even when their
+normalized output plans differ. The ingest copies inspected H.264/HEVC video and
+AAC/MP2/MP3/AC3/EAC3 audio to a private rolling HLS replay; output readers have
+only local-file protocols enabled. HTTP(S) MPEG-TS and HLS sources use the same
+ingest seam, retaining upstream egress checks for every child resource. Late
+outputs start from retained keyframe segments, with verified source-to-replay
+track indices. Releasing or failing one output preserves the other outputs.
+
+Sources containing subtitles or other video/audio codecs, and progressive live
+delivery, retain their existing independent execution paths. They are not yet
+qualified for cross-output single-ingest. VOD seek origins remain distinct. The
+replay has 12 retained segments plus deletion grace, a 20-second first-segment deadline
+and a 64 MiB sampled storage watchdog. The watchdog can overshoot between checks;
+operators still need a bounded data volume. See VALIDATION.md for exact evidence
+and remaining format, TLS, hardware, storage and crash-containment acceptance.
+
 ## Transport policy
 
 IPTV inputs can use **HTTP or HTTPS**. Public gateway control and media endpoints
