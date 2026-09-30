@@ -246,6 +246,44 @@ async fn decode(bytes: &[u8], seek: &str) {
     );
 }
 
+async fn decoded_audio_frequency(bytes: &[u8]) -> f64 {
+    let mut child = Command::new(std::env::var("PLAYBACK_TEST_FFMPEG").unwrap())
+        .args([
+            "-v", "error", "-nostdin", "-f", "mpegts", "-i", "pipe:0", "-map", "0:a:0", "-t",
+            "0.3", "-ac", "1", "-ar", "48000", "-f", "f32le", "pipe:1",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    let feeding = async {
+        input.write_all(bytes).await.unwrap();
+        drop(input);
+    };
+    let (_, output) = tokio::time::timeout(Duration::from_secs(8), async {
+        tokio::join!(feeding, child.wait_with_output())
+    })
+    .await
+    .unwrap();
+    let output = output.unwrap();
+    assert!(output.status.success());
+    let samples = output
+        .stdout
+        .chunks_exact(4)
+        .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap()))
+        .collect::<Vec<_>>();
+    assert!(samples.len() > 4800, "selected audio must actually decode");
+    samples
+        .windows(2)
+        .filter(|pair| pair[0] <= 0.0 && pair[1] > 0.0)
+        .count() as f64
+        * 48_000.0
+        / samples.len() as f64
+}
+
 async fn tls_proxy(upstream: std::net::SocketAddr) -> (String, Child) {
     let reservation = TcpListener::bind("11.255.255.1:0").await.unwrap();
     let address = reservation.local_addr().unwrap();
@@ -939,6 +977,21 @@ async fn real_late_shared_subtitle_output_retains_overlapping_cues_after_evictio
             .find(|s| s["codec_type"] == "video")
             .unwrap();
         assert_eq!(video["width"], 64);
+        let audio = facts["streams"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|stream| stream["codec_type"] == "audio")
+            .unwrap();
+        assert_eq!(
+            audio["index"],
+            second["playback"]["selected_audio"]["output_stream_index"]
+        );
+        let frequency = decoded_audio_frequency(&bytes).await;
+        assert!(
+            (430.0..450.0).contains(&frequency),
+            "selected original audio3 must decode its440Hz content, not audio0's880Hz"
+        );
         let time = facts["packets"]
             .as_array()
             .unwrap()
