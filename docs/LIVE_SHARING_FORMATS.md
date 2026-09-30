@@ -33,7 +33,7 @@ or FFV1 (the preceding MPEG-2 checkpoint used FFV1 as its fallback).
 It independently passed the same-plan-one-job/different-plans-two-inputs case.
 Existing actual HTTP five-viewer/namespace-isolation and HLS/multiple-audio
 different-output single-ingest regressions also passed with those binaries.
-The default suite passes 103 tests (33 opt-in ignored), with strict all-target
+The default suite passes 104 tests (33 opt-in ignored), with strict all-target
 Clippy and diff checks. These native process/library fixtures do not alone
 qualify a newly built service image, physical device or hardware decoder.
 
@@ -78,11 +78,20 @@ container fixture additionally supports:
 
 ```sh
 sudo -n bash scripts/check-bounded-media-container.sh LOCAL_GATEWAY_IMAGE matroska
+sudo -n bash scripts/check-runtime-container.sh LOCAL_GATEWAY_IMAGE matroska
 ```
 
 It must observe actual private `.mkv` writes under a 2 MiB kernel mount, not merely
 run the TS fixture under a different name. Its test-only controller privileges
 do not broaden the actual UID10001/no-capabilities service envelope.
+
+An extra exact-image crash test caught missing orphan recognition for `.mkv`:
+processes were killed/reaped, but restart retained its private UUID directory.
+Startup cleanup now recognizes only strictly named private Matroska segments
+(and partials) inside its existing canonical UUIDv4/regular-file guards. Foreign
+files prevent deletion, and `.mkv` remains rejected by public `media_type`.
+The unit regression verifies both cleanup and preservation; the runtime script
+supports the same actual source kind for crash and active/stalled response tests.
 
 ## Remaining transport seams
 

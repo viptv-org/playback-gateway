@@ -42,6 +42,12 @@ fn matroska_segment_number(file: &str) -> Option<u64> {
         .flatten()
 }
 
+// Orphan cleanup recognizes private generated files without advertising them
+// as viewer-facing media resources.
+pub(super) fn generated_replay_file(file: &str) -> bool {
+    matroska_segment_number(file).is_some()
+}
+
 // The segment muxer limits its playlist, not files. Retain three evicted
 // segments for already-reading outputs; never delete an unlisted/open new file.
 async fn matroska_window(dir: &std::path::Path) -> Result<bool, ()> {
@@ -619,6 +625,36 @@ mod tests {
         file.set_len(REPLAY_BYTES + 1).await.unwrap();
         assert!(!within_budget(root.path(), REPLAY_BYTES).await);
         assert!(within_budget(root.path(), REPLAY_BYTES + 1).await);
+    }
+
+    #[tokio::test]
+    async fn crashed_private_matroska_is_cleaned_but_foreign_files_remain() {
+        let root = tempfile::tempdir().unwrap();
+        let generated = root.path().join(Uuid::new_v4().to_string());
+        let foreign = root.path().join(Uuid::new_v4().to_string());
+        for dir in [&generated, &foreign] {
+            tokio::fs::create_dir(dir).await.unwrap();
+            for file in [
+                "index.m3u8",
+                "segment-000000000.mkv",
+                "segment-000000001.mkv.tmp",
+            ] {
+                tokio::fs::write(dir.join(file), b"owned fixture")
+                    .await
+                    .unwrap();
+            }
+        }
+        tokio::fs::write(foreign.join("notes.txt"), b"foreign fixture")
+            .await
+            .unwrap();
+        lease::cleanup_orphans(root.path()).await.unwrap();
+        assert!(!generated.exists());
+        assert!(foreign.join("notes.txt").exists());
+        assert!(foreign.join("segment-000000000.mkv").exists());
+        assert!(
+            media_type("segment-000000000.mkv").is_none(),
+            "private cleanup must not enable public Matroska resources"
+        );
     }
 
     #[test]

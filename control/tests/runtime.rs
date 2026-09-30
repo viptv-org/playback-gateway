@@ -411,7 +411,12 @@ impl Fixture {
 async fn real_service_active_and_stalled_media_shutdown_reaps_workers() {
     let mut fixture = Fixture::new().await;
     let first = fixture.start("first", 1920).await;
-    let second = fixture.start("second", 160).await;
+    let second_width = if std::env::var("PLAYBACK_TEST_MATROSKA_AV").as_deref() == Ok("1") {
+        64
+    } else {
+        160
+    };
+    let second = fixture.start("second", second_width).await;
     assert_ne!(first["job_id"], second["job_id"]);
     connections(&fixture.source, 1).await;
     fixture.segment(&second).await;
@@ -421,8 +426,9 @@ async fn real_service_active_and_stalled_media_shutdown_reaps_workers() {
     let outputs: Vec<_> = dirs
         .iter()
         .filter(|dir| {
-            std::fs::read_to_string(dir.join("index.m3u8"))
-                .is_ok_and(|text| !text.contains("#EXT-X-INDEPENDENT-SEGMENTS"))
+            std::fs::read_to_string(dir.join("index.m3u8")).is_ok_and(|text| {
+                !text.contains("#EXT-X-INDEPENDENT-SEGMENTS") && !text.contains(".mkv")
+            })
         })
         .collect();
     assert_eq!(outputs.len(), 2);

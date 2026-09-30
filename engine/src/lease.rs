@@ -140,7 +140,8 @@ pub(super) async fn cleanup_orphans(root: &std::path::Path) -> Result<(), String
         {
             let filename = file.file_name();
             let known = filename.to_str().is_some_and(|name| {
-                media_type(name.strip_suffix(".tmp").unwrap_or(name)).is_some()
+                let name = name.strip_suffix(".tmp").unwrap_or(name);
+                media_type(name).is_some() || ingest::generated_replay_file(name)
             });
             if !known
                 || !file

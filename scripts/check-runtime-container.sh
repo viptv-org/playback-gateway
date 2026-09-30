@@ -3,6 +3,7 @@
 # Disposable, isolated real service/process qualification; not deployment.
 set -euo pipefail
 gateway_image="${1:?Usage: bash scripts/check-runtime-container.sh LOCAL_GATEWAY_IMAGE}"
+case "${2:-ts}" in ts) matroska=0 ;; matroska) matroska=1 ;; *) echo 'Fixture mode must be ts or matroska' >&2; exit 2 ;; esac
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 revision=$(git -C "$repo_root" rev-parse HEAD)
 image_id=$(docker image inspect "$gateway_image" --format '{{.Id}}')
@@ -30,6 +31,7 @@ for test_name in standalone_binary_serves_readiness_locks_storage_and_shuts_down
   container_id=$(docker run --detach --pull=never --init --user 0:0 --network none --read-only --no-healthcheck \
     --cap-drop ALL --cap-add NET_ADMIN --security-opt no-new-privileges \
     --tmpfs /tmp:rw,nosuid,nodev,size=512m --memory 1g --memory-swap 1g --pids-limit 256 --cpus 2 \
+    --env "PLAYBACK_TEST_MATROSKA_AV=$matroska" \
     --entrypoint "$entrypoint" "$fixture_image" "$test_name" --ignored --exact --nocapture)
   [[ "$container_id" =~ ^[0-9a-f]{64}$ ]]
   if ! result=$(timeout --signal=TERM --kill-after=5s 120s docker wait "$container_id"); then
