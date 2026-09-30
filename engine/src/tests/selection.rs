@@ -376,7 +376,7 @@ async fn real_text_subtitle_hls_selection_seek_and_sparse_startup() {
                         .as_ref()
                         .unwrap()
                         .output_stream_index,
-                    2
+                    0
                 );
                 let base =
                     reqwest::Url::parse(&format!("http://client.invalid{}", response.url)).unwrap();

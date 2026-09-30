@@ -313,7 +313,8 @@ impl PlaybackManager {
         let selected_subtitle = selected_caption.map(|caption| SelectedSubtitle {
             input_index: caption.index.expect("selection validates stream index"),
             output_index: 0,
-            output_stream_index: if selected_audio.is_some() { 2 } else { 1 },
+            // HLS captions are a separate single-stream WebVTT rendition.
+            output_stream_index: 0,
             language: caption.language(),
             language_status: caption.language_status().into(),
             disposition: caption.disposition.as_ref().map(ProbeDisposition::public),

@@ -186,6 +186,7 @@ pub struct SelectedSubtitle {
     pub input_index: u32,
     /// Subtitle ordinal, never a native player track ID.
     pub output_index: u32,
+    /// Stream index within the separate WebVTT rendition, not the AV segment.
     pub output_stream_index: u32,
     pub language: Option<String>,
     pub language_status: String,

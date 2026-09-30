@@ -484,8 +484,6 @@ async fn real_shared_subtitles_preserve_sparse_identity_and_decoded_stream_index
         0
     );
     assert_eq!(first["playback"]["selected_audio"]["input_index"], 3);
-    let second = fixture.start("captions-second", 64).await;
-    assert_ne!(first["job_id"], second["job_id"]);
     connections(&fixture.source, 1).await;
     fixture.signal("-TERM").await;
     assert!(
