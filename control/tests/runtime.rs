@@ -158,6 +158,92 @@ async fn gone(pids: &BTreeSet<u32>) {
     .await
     .expect("all owned media children must be reaped");
 }
+
+async fn demux(bytes: &[u8], format: &str) -> Value {
+    let mut child = Command::new(std::env::var("PLAYBACK_TEST_FFPROBE").unwrap())
+        .args([
+            "-v",
+            "error",
+            "-f",
+            format,
+            "-show_streams",
+            "-show_packets",
+            "-of",
+            "json",
+            "-i",
+            "pipe:0",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    let feeding = async {
+        input.write_all(bytes).await.unwrap();
+        drop(input);
+    };
+    let output = tokio::time::timeout(Duration::from_secs(8), async {
+        let (_, output) = tokio::join!(feeding, child.wait_with_output());
+        output.unwrap()
+    })
+    .await
+    .unwrap();
+    assert!(output.status.success(), "fetched media must demux");
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+async fn decode(bytes: &[u8], seek: &str) {
+    let mut child = Command::new(std::env::var("PLAYBACK_TEST_FFMPEG").unwrap())
+        .args([
+            "-v",
+            "error",
+            "-nostdin",
+            "-f",
+            "mpegts",
+            "-i",
+            "pipe:0",
+            "-ss",
+            seek,
+            "-map",
+            "0:v:0",
+            "-frames:v",
+            "1",
+            "-threads",
+            "2",
+            "-f",
+            "framemd5",
+            "pipe:1",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    let feeding = async {
+        input.write_all(bytes).await.unwrap();
+        drop(input);
+    };
+    let (_, output) = tokio::time::timeout(Duration::from_secs(8), async {
+        tokio::join!(feeding, child.wait_with_output())
+    })
+    .await
+    .unwrap();
+    assert!(
+        output.as_ref().unwrap().status.success(),
+        "retained media must decode after seeking"
+    );
+    assert!(
+        String::from_utf8(output.unwrap().stdout)
+            .unwrap()
+            .lines()
+            .any(|line| !line.starts_with('#') && line.contains(',')),
+        "seek must actually decode a frame"
+    );
+}
 struct Fixture {
     root: tempfile::TempDir,
     child: Child,
@@ -614,6 +700,143 @@ async fn real_late_shared_subtitle_output_retains_overlapping_cues_after_evictio
     assert_eq!(vtt.matches("LONG_ENGLISH").count(), 1);
     assert_eq!(vtt.matches("OVERLAPPING_ENGLISH").count(), 1);
     assert!(!vtt.contains("EXPIRED_ENGLISH") && !vtt.contains("WRONG_SPANISH"));
+    let cue_facts = demux(vtt.as_bytes(), "webvtt").await;
+    let packets = cue_facts["packets"].as_array().unwrap();
+    assert_eq!(packets.len(), 2);
+    for (packet, expected_start, expected_duration) in
+        [(&packets[0], 1.0, 74.0), (&packets[1], 2.0, 63.0)]
+    {
+        let start = packet["pts_time"].as_str().unwrap().parse::<f64>().unwrap();
+        let duration = packet["duration_time"]
+            .as_str()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap();
+        assert!(
+            (start - expected_start).abs() < 0.05 && (duration - expected_duration).abs() < 0.001,
+            "decoded caption interval must retain source timing"
+        );
+    }
+    let av_playlist = fixture
+        .client
+        .get(format!("{}{path}/index.m3u8", fixture.base))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let names = av_playlist
+        .lines()
+        .filter(|line| line.ends_with(".ts"))
+        .take(2)
+        .collect::<Vec<_>>();
+    assert_eq!(names.len(), 2);
+    for name in &names {
+        let response = fixture
+            .client
+            .get(format!("{}{path}/{name}", fixture.base))
+            .send()
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+        let bytes = response.bytes().await.unwrap();
+        let facts = demux(&bytes, "mpegts").await;
+        let video = facts["streams"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["codec_type"] == "video")
+            .unwrap();
+        assert_eq!(video["width"], 64);
+        let time = facts["packets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["stream_index"] == video["index"])
+            .unwrap()["pts_time"]
+            .as_str()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap();
+        assert!(
+            time > 25.0 && time < 65.0,
+            "late AV must retain the same absolute clock as active cues"
+        );
+        decode(&bytes, "0.5").await;
+        let number = name
+            .strip_prefix("segment-")
+            .unwrap()
+            .strip_suffix(".ts")
+            .unwrap();
+        let captions = fixture
+            .client
+            .get(format!("{}{path}/index{number}.vtt", fixture.base))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        assert_eq!(captions.matches("LONG_ENGLISH").count(), 1);
+        assert_eq!(captions.matches("OVERLAPPING_ENGLISH").count(), 1);
+        let ids = |text: &str| {
+            text.lines()
+                .filter(|line| line.starts_with("cue-"))
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            ids(&captions),
+            ids(&vtt),
+            "retained-window seek must reuse stable cue identity"
+        );
+    }
+    let released = fixture
+        .client
+        .delete(format!(
+            "{}/v1/sessions/{}",
+            fixture.base,
+            first["id"].as_str().unwrap()
+        ))
+        .bearer_auth(&fixture.key)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(released.status().as_u16(), 204);
+    let denied = fixture
+        .client
+        .get(format!(
+            "{}{}",
+            fixture.base,
+            first["playback"]["url"].as_str().unwrap()
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert!(!denied.status().is_success());
+    let tampered = path.rsplit_once('/').unwrap().0;
+    assert!(!fixture
+        .client
+        .get(format!("{}{tampered}/wrong/index_vtt.m3u8", fixture.base))
+        .send()
+        .await
+        .unwrap()
+        .status()
+        .is_success());
+    assert!(fixture
+        .client
+        .get(format!("{}{path}/index_vtt.m3u8", fixture.base))
+        .send()
+        .await
+        .unwrap()
+        .status()
+        .is_success());
+    connections(&fixture.source, 1).await;
+    assert_eq!(fixture.source.requests.load(Ordering::SeqCst), source_opens);
+    let pids = children(fixture.child.id().unwrap());
+    assert!(!pids.is_empty());
+    let dirs = fixture.media_dirs();
     fixture.signal("-TERM").await;
     assert!(
         tokio::time::timeout(Duration::from_secs(8), fixture.child.wait())
@@ -623,6 +846,11 @@ async fn real_late_shared_subtitle_output_retains_overlapping_cues_after_evictio
             .success()
     );
     connections(&fixture.source, 0).await;
+    gone(&pids).await;
+    assert!(
+        dirs.iter().all(|dir| !dir.exists()),
+        "owned replay/output storage must disappear after teardown"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
