@@ -244,6 +244,58 @@ async fn decode(bytes: &[u8], seek: &str) {
         "seek must actually decode a frame"
     );
 }
+
+async fn tls_proxy(upstream: std::net::SocketAddr) -> (String, Child) {
+    let reservation = TcpListener::bind("11.255.255.1:0").await.unwrap();
+    let address = reservation.local_addr().unwrap();
+    drop(reservation);
+    let script = r#"import socket, socketserver, ssl, sys, threading
+context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+context.load_cert_chain('/fixtures/subtitle-ca.pem','/fixtures/subtitle-key.pem')
+class Handler(socketserver.BaseRequestHandler):
+ def handle(self):
+  try:
+   with context.wrap_socket(self.request,server_side=True) as client, socket.create_connection((sys.argv[2],int(sys.argv[3])),timeout=5) as upstream:
+    upstream.settimeout(None)
+    def request():
+     try:
+      while True:
+       data=client.recv(65536)
+       if not data: break
+       upstream.sendall(data)
+     except (OSError,ssl.SSLError): pass
+     try: upstream.shutdown(socket.SHUT_WR)
+     except OSError: pass
+    threading.Thread(target=request,daemon=True).start()
+    while True:
+     data=upstream.recv(65536)
+     if not data: break
+     client.sendall(data)
+  except (OSError,ssl.SSLError): pass
+class Server(socketserver.ThreadingTCPServer):
+ daemon_threads=True
+Server(('11.255.255.1',int(sys.argv[1])),Handler).serve_forever()
+"#;
+    let child = Command::new("python3")
+        .args(["-c", script])
+        .arg(address.port().to_string())
+        .arg(upstream.ip().to_string())
+        .arg(upstream.port().to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while TcpStream::connect(address).await.is_err() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    (format!("https://{address}"), child)
+}
 struct Fixture {
     root: tempfile::TempDir,
     child: Child,
@@ -252,6 +304,7 @@ struct Fixture {
     source: Source,
     client: reqwest::Client,
     key: String,
+    _tls: Vec<Child>,
 }
 impl Fixture {
     async fn new() -> Self {
@@ -416,17 +469,46 @@ impl Fixture {
                 video["r_frame_rate"]
             );
         }
-        let source = source(std::fs::read(input).unwrap()).await;
+        let mut source = source(std::fs::read(input).unwrap()).await;
+        let mut tls = Vec::new();
+        let use_tls = std::env::var("PLAYBACK_TEST_SUBTITLE_TLS").as_deref() == Ok("1");
+        if use_tls {
+            let address = source
+                .url
+                .strip_prefix("http://")
+                .unwrap()
+                .split('/')
+                .next()
+                .unwrap()
+                .parse()
+                .unwrap();
+            let (base, proxy) = tls_proxy(address).await;
+            source.url = format!("{base}/live.mkv");
+            tls.push(proxy);
+        }
         let port = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = port.local_addr().unwrap();
         drop(port);
         let child = Self::spawn(root.path(), address);
-        let base = format!("http://{address}");
-        let client = reqwest::Client::builder()
+        let base = if use_tls {
+            let (base, proxy) = tls_proxy(address).await;
+            tls.push(proxy);
+            base
+        } else {
+            format!("http://{address}")
+        };
+        let mut client = reqwest::Client::builder()
             .no_proxy()
-            .timeout(Duration::from_secs(35))
-            .build()
-            .unwrap();
+            .timeout(Duration::from_secs(35));
+        if use_tls {
+            client = client.add_root_certificate(
+                reqwest::Certificate::from_pem(
+                    &std::fs::read("/fixtures/subtitle-ca.pem").unwrap(),
+                )
+                .unwrap(),
+            );
+        }
+        let client = client.build().unwrap();
         let mut fixture = Self {
             root,
             child,
@@ -435,6 +517,7 @@ impl Fixture {
             source,
             client,
             key: String::new(),
+            _tls: tls,
         };
         fixture.ready().await;
         let response=fixture.client.post(format!("{}/v1/keys",fixture.base)).bearer_auth(BOOTSTRAP).json(&json!({"label":"runtime fixture","namespaces":["fixture"],"scopes":["create","read","renew","release","capabilities"],"quotas":{"inputs":1,"outputs":2,"viewers":3}})).send().await.map_err(|_|"key request failed").unwrap();
@@ -515,11 +598,26 @@ impl Fixture {
             .map_err(|_| "playlist request failed")
             .unwrap();
         assert!(response.status().is_success());
-        let text = response
+        let mut text = response
             .text()
             .await
             .map_err(|_| "playlist body failed")
             .unwrap();
+        if url.ends_with("master.m3u8") {
+            text = self
+                .client
+                .get(format!(
+                    "{}{}/index.m3u8",
+                    self.base,
+                    url.rsplit_once('/').unwrap().0
+                ))
+                .send()
+                .await
+                .unwrap()
+                .text()
+                .await
+                .unwrap();
+        }
         let segment = text.lines().find(|line| line.ends_with(".ts")).unwrap();
         let path = url.rsplit_once('/').unwrap().0;
         let response = self
@@ -639,6 +737,8 @@ async fn real_late_shared_subtitle_output_retains_overlapping_cues_after_evictio
     assert_eq!(std::env::var("PLAYBACK_TEST_SUBTITLES").as_deref(), Ok("1"));
     let mut fixture = Fixture::new().await;
     let first = fixture.start("captions-original", 128).await;
+    let expiring = fixture.start("captions-expiring", 128).await;
+    assert_eq!(first["job_id"], expiring["job_id"]);
     let source_opens = fixture.source.requests.load(Ordering::SeqCst);
     tokio::time::timeout(Duration::from_secs(60), async {
         loop {
@@ -834,6 +934,60 @@ async fn real_late_shared_subtitle_output_retains_overlapping_cues_after_evictio
         .is_success());
     connections(&fixture.source, 1).await;
     assert_eq!(fixture.source.requests.load(Ordering::SeqCst), source_opens);
+    tokio::time::timeout(Duration::from_secs(35), async {
+        loop {
+            // Media reads deliberately keep happening; they must not renew a lease.
+            let response = fixture
+                .client
+                .get(format!(
+                    "{}{}",
+                    fixture.base,
+                    expiring["playback"]["url"].as_str().unwrap()
+                ))
+                .send()
+                .await
+                .unwrap();
+            if !response.status().is_success() {
+                break;
+            }
+            let renewal = fixture
+                .client
+                .post(format!(
+                    "{}/v1/sessions/{}/renew",
+                    fixture.base,
+                    second["id"].as_str().unwrap()
+                ))
+                .bearer_auth(&fixture.key)
+                .send()
+                .await
+                .unwrap();
+            assert!(renewal.status().is_success());
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    })
+    .await
+    .expect("unrenewed viewer must expire despite media reads");
+    let expired = fixture
+        .client
+        .post(format!(
+            "{}/v1/sessions/{}/renew",
+            fixture.base,
+            expiring["id"].as_str().unwrap()
+        ))
+        .bearer_auth(&fixture.key)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(expired.status().as_u16(), 410);
+    assert!(fixture
+        .client
+        .get(format!("{}{path}/index_vtt.m3u8", fixture.base))
+        .send()
+        .await
+        .unwrap()
+        .status()
+        .is_success());
+    connections(&fixture.source, 1).await;
     let pids = children(fixture.child.id().unwrap());
     assert!(!pids.is_empty());
     let dirs = fixture.media_dirs();
