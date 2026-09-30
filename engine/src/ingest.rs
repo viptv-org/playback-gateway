@@ -211,7 +211,7 @@ pub(super) fn replay_indices(probe: &Probe) -> Option<BTreeMap<u32, u32>> {
     }
     subtitles.sort_by_key(|s| s.index);
     for stream in subtitles {
-        if stream.codec_name.as_deref()!=Some("subrip") {
+        if stream.codec_name.as_deref() != Some("subrip") {
             return None;
         }
         let index = stream.index.filter(|index| *index <= 65535)?;
@@ -376,7 +376,9 @@ impl PlaybackManager {
             "-map_chapters",
             "-1",
         ]);
-        if captions.is_some() {cmd.args(["-max_interleave_delta","1000000"]);}
+        if captions.is_some() {
+            cmd.args(["-max_interleave_delta", "1000000"]);
+        }
         match kind {
             ReplayKind::Ts => {
                 cmd.args([

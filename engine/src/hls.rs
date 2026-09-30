@@ -176,10 +176,7 @@ pub(super) fn dimensions(caps: &Capabilities) -> Result<(u32, u32), String> {
     if caps.max_width < 2 || caps.max_height < 2 {
         return Err("Invalid playback dimensions".into());
     }
-    Ok((
-        caps.max_width / 2 * 2,
-        caps.max_height / 2 * 2,
-    ))
+    Ok((caps.max_width / 2 * 2, caps.max_height / 2 * 2))
 }
 pub(super) fn hdr_size(width: u32, height: u32) -> String {
     // Fit both axes, including portrait, without upscaling; round down to even pixels.
@@ -330,18 +327,23 @@ pub(super) async fn playback_ready(
     if !caption_ready {
         return false;
     }
-    subtitle_master(dir,subtitle).await
+    subtitle_master(dir, subtitle).await
 }
 
-pub(super) async fn shared_caption_ready(dir: &std::path::Path,subtitle: Option<&SelectedSubtitle>) -> bool {
-    if !playlist_ready(dir).await {return false;}
+pub(super) async fn shared_caption_ready(
+    dir: &std::path::Path,
+    subtitle: Option<&SelectedSubtitle>,
+) -> bool {
+    if !playlist_ready(dir).await {
+        return false;
+    }
     match subtitle {
-        Some(subtitle)=>subtitle_master(dir,subtitle).await,
-        None=>true,
+        Some(subtitle) => subtitle_master(dir, subtitle).await,
+        None => true,
     }
 }
 
-async fn subtitle_master(dir: &std::path::Path,subtitle: &SelectedSubtitle) -> bool {
+async fn subtitle_master(dir: &std::path::Path, subtitle: &SelectedSubtitle) -> bool {
     let Ok(av) = tokio::fs::read_to_string(dir.join("index.m3u8")).await else {
         return false;
     };

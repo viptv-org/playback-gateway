@@ -5,8 +5,8 @@
 //! reservations throughout preparation. Callers own authentication, identity
 //! and policy — the audit that motivated this crate confirmed zero database
 //! and no account dependencies beyond the three seams below.
-mod compat;
 mod captions;
+mod compat;
 mod direct;
 mod direct_gate;
 mod fmp4;
@@ -16,10 +16,10 @@ mod ingest;
 mod lease;
 mod lifecycle;
 mod manager;
+mod prepared;
 mod probe;
 mod process;
 mod start;
-mod prepared;
 mod subtitles;
 #[cfg(test)]
 mod tests;
@@ -29,8 +29,8 @@ pub use manager::{PlaybackManager, SampleLimits};
 pub use prepared::{OutputPlan, PreparedPlayback};
 pub use process::contain_media_process;
 pub use types::{
-    Capabilities, Config, MediaTrack, PlaybackResponse, SelectedAudio,
-    SelectedSubtitle, TrackDisposition, TrackSelection,
+    Capabilities, Config, MediaTrack, PlaybackResponse, SelectedAudio, SelectedSubtitle,
+    TrackDisposition, TrackSelection,
 };
 
 use compat::{
