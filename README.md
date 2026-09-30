@@ -40,6 +40,8 @@ and an operator replay watchdog (LIVE_REPLAY_MAX_BYTES, default 256 MiB). The
 supplied Compose deployment independently bounds media allocation with a nested
 256 MiB tmpfs and /tmp with 64 MiB, preserving credentials on the parent volume.
 See [bounded media](docs/BOUNDED_MEDIA.md) for scope, tuning and upgrade handling.
+See [bounded sustained 4K copy qualification](docs/CBR4K_QUALIFICATION.md) for
+the configured CBR workload, exact byte/progress evidence and its limitations.
 The sampled watchdog can overshoot; it is not the filesystem bound. See VALIDATION.md for exact evidence
 and remaining format, TLS, hardware, storage and crash-containment acceptance.
 

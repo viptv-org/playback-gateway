@@ -25,7 +25,9 @@ one copy output and one active upstream; creating the second viewer must not
 open another source connection. Over 18 seconds of observation the actual
 completed private replay files must exceed the old 64 MiB threshold, the session
 must remain ready, and allocation must remain within the kernel media mount.
-One real output frame is decoded, then both viewers are released. After the
+The copied output playlist must advance at least eight segment sequences beyond
+startup, an actual authorized HLS segment is fetched, and one real output frame
+is decoded. Then both viewers are released. After the
 existing idle grace the media processes, upstream and all media allocations
 must disappear. The generated 24-second clip avoids timestamp looping during
 the retention observation; the server never deliberately sends EOF.
@@ -55,9 +57,24 @@ unchanged. [Current FFmpeg HLS documentation](https://ffmpeg.org/ffmpeg-all.html
 defines `allowed_extensions` as the comma-separated extensions the demuxer may
 access and recommends correct whitelists instead of disabling extension checks.
 
-Working-tree candidate evidence (not the final committed-image qualification):
-101,676,604 retained replay bytes, 188,088,320 allocated media bytes,
-10,000,060 demuxed H264 bytes in a sampled replay segment; successful actual
-copy/output decode and release/reap with final media allocation zero.
-The script emits the exact committed source revision and image digest for each
-independent final run; retain that output with the handoff.
+## Committed-image result
+
+2026-09-30: source `34ae599f1958ae3de91ab29ba64106a38099d7e5`, locally built
+image `sha256:212af567feefbba9160d5e4dd616ededddf228df4349b7500341c9f7580b36cb`:
+
+- Encoded/demuxed source: 120 frames, 24.000000 seconds, 119,500,720 H264
+  packet bytes; 122,155,444 transport file bytes (not used as packet evidence).
+- Retained completed replay: 101,676,604 bytes; sampled segment's actual H264
+  packet bytes: 10,000,060. This is filler retained by demux/remux, not TS padding.
+- Copied output advanced from segment sequence 0 to 18, with successful real
+  HLS segment delivery and 3840x2160 frame decode. One active upstream served
+  the two compatible viewers of the same normalized output job.
+- Sampled total media allocation: 198,311,936 bytes, below the configured
+  1 GiB kernel bound. Final allocation zero after release/grace/reap, with no
+  media children or upstream left. Exactly one named test passed, in 37 seconds.
+
+The default suite passed 99 tests (29 opt-in ignored); strict all-target Clippy,
+diff and shell syntax checks passed. The script emits the exact committed source
+revision and image digest for each independent run; retain that output with the
+handoff. The source commit adds only test assertions beyond the runtime fix at
+`c51a314`; both commits independently built the identical image above.
