@@ -682,8 +682,7 @@ impl PlaybackManager {
                     .as_ref()
                     .is_some_and(|ingest| ingest.captions.is_some());
                 if shared_captions {
-                    cmd.arg("-copyts")
-                        .args(["-hls_segment_options", "mpegts_copyts=1"]);
+                    cmd.arg("-copyts");
                 }
                 if pipeline.vaapi() {
                     hardware::vaapi_device_args(
@@ -741,6 +740,7 @@ impl PlaybackManager {
                     cmd.arg(validated.as_str());
                 }
                 cmd.args(["-map", "0:v:0"]);
+                if shared_captions {cmd.args(["-hls_segment_options","mpegts_copyts=1"]);}
                 if let Some(audio) = &selected_audio {
                     let index = match &session.ingest {
                         Some(ingest) => ingest.index(audio.input_index)?,
