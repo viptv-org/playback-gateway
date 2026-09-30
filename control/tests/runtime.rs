@@ -249,7 +249,7 @@ async fn tls_proxy(upstream: std::net::SocketAddr) -> (String, Child) {
     let reservation = TcpListener::bind("11.255.255.1:0").await.unwrap();
     let address = reservation.local_addr().unwrap();
     drop(reservation);
-    let script = r#"import socket, socketserver, ssl, sys, threading
+    let script = r#"import socket, socketserver, ssl, sys, select
 context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 context.load_cert_chain('/fixtures/subtitle-ca.pem','/fixtures/subtitle-key.pem')
 class Handler(socketserver.BaseRequestHandler):
@@ -257,20 +257,13 @@ class Handler(socketserver.BaseRequestHandler):
   try:
    with context.wrap_socket(self.request,server_side=True) as client, socket.create_connection((sys.argv[2],int(sys.argv[3])),timeout=5) as upstream:
     upstream.settimeout(None)
-    def request():
-     try:
-      while True:
-       data=client.recv(65536)
-       if not data: break
-       upstream.sendall(data)
-     except (OSError,ssl.SSLError): pass
-     try: upstream.shutdown(socket.SHUT_WR)
-     except OSError: pass
-    threading.Thread(target=request,daemon=True).start()
     while True:
-     data=upstream.recv(65536)
-     if not data: break
-     client.sendall(data)
+     ready,_,_=select.select([client,upstream],[],[],1)
+     if client.pending() and client not in ready: ready.append(client)
+     for peer in ready:
+      data=peer.recv(65536)
+      if not data: return
+      (upstream if peer is client else client).sendall(data)
   except (OSError,ssl.SSLError): pass
 class Server(socketserver.ThreadingTCPServer):
  daemon_threads=True
