@@ -1272,12 +1272,22 @@ pub(crate) mod tests {
         workers.shutdown().await;
     }
     #[tokio::test]
-    #[ignore = "requires real FFmpeg/ffprobe; isolated nonshared MPEG2 source fixture"]
+    #[ignore = "requires real FFmpeg/ffprobe; isolated nonshared FFV1 source fixture"]
     async fn real_fallback_outputs_reserve_each_physical_input_and_share_identical_jobs() {
+        check_live_codec_ingest(false).await;
+    }
+    #[tokio::test]
+    #[ignore = "requires real FFmpeg/ffprobe; isolated shared MPEG2 live source fixture"]
+    async fn real_mpeg2_live_differing_encoded_outputs_share_ingest_and_input_quota() {
+        check_live_codec_ingest(true).await;
+    }
+    async fn check_live_codec_ingest(shared: bool) {
         let ffmpeg = std::env::var("PLAYBACK_TEST_FFMPEG").unwrap();
         let ffprobe = std::env::var("PLAYBACK_TEST_FFPROBE").unwrap();
         let root = tempfile::tempdir().unwrap();
-        let input_file = root.path().join("fallback.ts");
+        let input_file = root
+            .path()
+            .join(if shared { "mpeg2.ts" } else { "fallback.mkv" });
         let generated = tokio::time::timeout(
             Duration::from_secs(20),
             tokio::process::Command::new(&ffmpeg)
@@ -1294,13 +1304,13 @@ pub(crate) mod tests {
                     "8",
                     "-an",
                     "-c:v",
-                    "mpeg2video",
+                    if shared { "mpeg2video" } else { "ffv1" },
                     "-threads",
                     "2",
                     "-g",
                     "25",
                     "-f",
-                    "mpegts",
+                    if shared { "mpegts" } else { "matroska" },
                 ])
                 .arg(&input_file)
                 .output(),
@@ -1311,8 +1321,8 @@ pub(crate) mod tests {
         assert!(generated.status.success());
         let source = http_source(std::fs::read(input_file).unwrap()).await;
         let engine = PlaybackManager::new(playback_engine::Config {
-            ffmpeg: ffmpeg.into(),
-            ffprobe: ffprobe.into(),
+            ffmpeg: ffmpeg.clone().into(),
+            ffprobe: ffprobe.clone().into(),
             root: root.path().join("media"),
             max_sessions: 3,
             ttl: Duration::from_secs(120),
@@ -1332,7 +1342,7 @@ pub(crate) mod tests {
                     namespaces: vec!["fixture".into()],
                     scopes: vec![Scope::Create, Scope::Read, Scope::Release],
                     quotas: Quotas {
-                        inputs: 2,
+                        inputs: if shared { 1 } else { 2 },
                         outputs: 3,
                         viewers: 4,
                     },
@@ -1366,17 +1376,100 @@ pub(crate) mod tests {
             .await
             .unwrap();
         assert_ne!(first.job_id, second.job_id);
-        expect_connections(&source, 2).await;
+        expect_connections(&source, if shared { 1 } else { 2 }).await;
+        if shared {
+            assert_eq!(
+                source.requests.load(std::sync::atomic::Ordering::SeqCst),
+                opened,
+                "MPEG2 differing output plans must use the already running ingest"
+            );
+        }
         assert_eq!(workers.available(&principal, 1).unwrap().inputs, 0);
-        input.output.max_width = 80;
-        input.output.max_height = 44;
-        assert_eq!(
-            workers
-                .create(&principal, &input, "third", 1)
+        if shared {
+            for (viewer, width, height) in [(&first, 320, 180), (&second, 160, 90)] {
+                let delivery = workers.delivery(&principal, viewer, 2).unwrap().unwrap();
+                assert_eq!(delivery.video_mode, "encode");
+                let token = delivery.url.split('/').nth(3).unwrap();
+                let playlist = workers
+                    .media(
+                        &viewer.id,
+                        token,
+                        "index.m3u8",
+                        2,
+                        axum::http::Method::GET,
+                        axum::http::HeaderMap::new(),
+                    )
+                    .await
+                    .unwrap();
+                let playlist = axum::body::to_bytes(playlist.into_body(), 128 * 1024)
+                    .await
+                    .unwrap();
+                let filename = std::str::from_utf8(&playlist)
+                    .unwrap()
+                    .lines()
+                    .find(|line| line.ends_with(".ts"))
+                    .unwrap();
+                let segment = workers
+                    .media(
+                        &viewer.id,
+                        token,
+                        filename,
+                        2,
+                        axum::http::Method::GET,
+                        axum::http::HeaderMap::new(),
+                    )
+                    .await
+                    .unwrap();
+                let segment = axum::body::to_bytes(segment.into_body(), 16 * 1024 * 1024)
+                    .await
+                    .unwrap();
+                let sample = root.path().join(format!("decoded-{width}.ts"));
+                std::fs::write(&sample, segment).unwrap();
+                let inspected = tokio::time::timeout(
+                    Duration::from_secs(10),
+                    tokio::process::Command::new(&ffprobe)
+                        .kill_on_drop(true)
+                        .args(["-v", "error", "-show_streams", "-of", "json", "-i"])
+                        .arg(&sample)
+                        .output(),
+                )
                 .await
-                .unwrap_err(),
-            "input_capacity"
-        );
+                .unwrap()
+                .unwrap();
+                assert!(inspected.status.success());
+                let facts: serde_json::Value = serde_json::from_slice(&inspected.stdout).unwrap();
+                assert_eq!(facts["streams"][0]["codec_name"], "h264");
+                assert_eq!(facts["streams"][0]["width"], width);
+                assert_eq!(facts["streams"][0]["height"], height);
+                let decoded = tokio::time::timeout(
+                    Duration::from_secs(10),
+                    tokio::process::Command::new(&ffmpeg)
+                        .kill_on_drop(true)
+                        .args(["-v", "error", "-threads", "2", "-i"])
+                        .arg(&sample)
+                        .args(["-frames:v", "1", "-f", "null", "-"])
+                        .output(),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+                assert!(
+                    decoded.status.success(),
+                    "each differing MPEG2-derived output must decode"
+                );
+            }
+        }
+        if !shared {
+            input.output.max_width = 80;
+            input.output.max_height = 44;
+            assert_eq!(
+                workers
+                    .create(&principal, &input, "third", 1)
+                    .await
+                    .unwrap_err(),
+                "input_capacity"
+            );
+        }
         for viewer in [first, same] {
             workers
                 .sessions
@@ -1387,7 +1480,10 @@ pub(crate) mod tests {
         }
         workers.reap(26).await.unwrap();
         expect_connections(&source, 1).await;
-        assert_eq!(workers.available(&principal, 26).unwrap().inputs, 1);
+        assert_eq!(
+            workers.available(&principal, 26).unwrap().inputs,
+            if shared { 0 } else { 1 }
+        );
         workers
             .sessions
             .lock()
@@ -1396,7 +1492,10 @@ pub(crate) mod tests {
             .unwrap();
         workers.reap(41).await.unwrap();
         expect_connections(&source, 0).await;
-        assert_eq!(workers.available(&principal, 41).unwrap().inputs, 2);
+        assert_eq!(
+            workers.available(&principal, 41).unwrap().inputs,
+            if shared { 1 } else { 2 }
+        );
         workers.shutdown().await;
     }
     pub(crate) async fn fixture(stall: bool) -> (tempfile::TempDir, Arc<Workers>, Principal) {

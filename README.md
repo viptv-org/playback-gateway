@@ -23,7 +23,7 @@ cancelled-process cleanup. Real HTTP live fixtures verify five compatible
 viewers share one active upstream connection; distinct namespaces stay isolated.
 
 Eligible live HLS outputs now share an independent FFmpeg ingest even when their
-normalized output plans differ. The ingest copies inspected H.264/HEVC video and
+normalized output plans differ. The ingest copies inspected H.264/HEVC/MPEG-2 video and
 AAC/MP2/MP3/AC3/EAC3 audio to a private rolling HLS replay; output readers have
 only local-file protocols enabled. HTTP(S) MPEG-TS and HLS sources use the same
 ingest seam, retaining upstream egress checks for every child resource. Late

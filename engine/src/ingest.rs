@@ -74,7 +74,10 @@ pub(super) fn replay_indices(probe: &Probe) -> Option<BTreeMap<u32, u32>> {
         return None;
     }
     let video = probe.streams.iter().find(|s| s.is_video())?;
-    if !matches!(video.codec_name.as_deref(), Some("h264" | "hevc")) {
+    if !matches!(
+        video.codec_name.as_deref(),
+        Some("h264" | "hevc" | "mpeg2video")
+    ) {
         return None;
     }
     let mut indices = BTreeMap::from([(video.index?, 0)]);
@@ -411,6 +414,13 @@ mod tests {
             replay_indices(&probe()).unwrap(),
             BTreeMap::from([(5, 0), (3, 1), (9, 2)])
         );
+    }
+
+    #[test]
+    fn mpeg2_video_uses_lossless_ts_replay_without_changing_decoder_eligibility() {
+        let mut facts = probe();
+        facts.streams[1].codec_name = Some("mpeg2video".into());
+        assert_eq!(replay_indices(&facts), replay_indices(&probe()));
     }
 
     #[test]
