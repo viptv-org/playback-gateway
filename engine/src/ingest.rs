@@ -6,13 +6,13 @@ use std::{collections::BTreeMap, sync::Weak};
 #[cfg(test)]
 const REPLAY_BYTES: u64 = 256 * 1024 * 1024;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ReplayKind {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ReplayKind {
     Ts,
     Matroska,
 }
 impl ReplayKind {
-    fn for_probe(probe: &Probe) -> Self {
+    pub(super) fn for_probe(probe: &Probe) -> Self {
         if probe
             .streams
             .iter()

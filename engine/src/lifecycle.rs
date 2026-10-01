@@ -44,6 +44,13 @@ impl PlaybackManager {
             {
                 return false;
             }
+            if session
+                .stream
+                .as_ref()
+                .is_some_and(|stream| stream.evicted())
+            {
+                return false;
+            }
             if session.touched.elapsed() < self.config.ttl {
                 session.touched = Instant::now();
                 if let (Some(stream), Some(position)) = (&session.stream, position) {
@@ -349,10 +356,8 @@ impl PlaybackManager {
             session.touched = Instant::now();
             (direct, session.stream.clone())
         };
-        if file == "stream.mp4" {
-            if let Some(stream) = stream {
-                return Some(stream.serve(method).await);
-            }
+        if let Some(stream) = stream.filter(|stream| stream.file == file) {
+            return Some(stream.serve(method).await);
         }
         if file == "tracks.json" || file.starts_with("subtitle-") {
             return Some(self.serve_tracks(direct?, file, method, headers).await);

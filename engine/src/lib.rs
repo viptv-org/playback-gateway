@@ -19,6 +19,7 @@ mod manager;
 mod prepared;
 mod probe;
 mod process;
+mod progressive;
 mod start;
 mod subtitles;
 #[cfg(test)]
