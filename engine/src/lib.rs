@@ -50,7 +50,10 @@ use hls::{
     hdr_size, newest_segment, segment_number, HLS_THROTTLE_AHEAD_SEGMENTS,
     HLS_THROTTLE_RESUME_SEGMENTS,
 };
-use lease::{cleanup_orphans, constant_time_eq, header_block, input_args, InputPermits, Session};
+use lease::{
+    cleanup_orphans, constant_time_eq, header_block, input_args, relaxed_hls_args, InputPermits,
+    Session,
+};
 #[cfg(test)]
 use probe::{probe_failure, ProbeFailure, LIVE_PROBE_CACHE_TTL, PROBE_CACHE_TTL};
 use probe::{probe_output, ProbeCacheEntry, ProbeChild};

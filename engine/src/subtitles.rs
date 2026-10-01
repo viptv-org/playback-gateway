@@ -67,6 +67,7 @@ impl PlaybackManager {
         let mut command = Command::new(&self.config.ffmpeg);
         command.args(["-v", "error", "-nostdin"]);
         input_args(&mut command, &source_headers);
+        relaxed_hls_args(&mut command, probe.relaxed_hls_segments);
         command
             .args([
                 "-ss",

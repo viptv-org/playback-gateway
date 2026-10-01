@@ -608,6 +608,7 @@ impl PlaybackManager {
                     .and_then(|v| v.parse::<f64>().ok())
                     .unwrap_or(0.0),
                 permits.clone(),
+                probe.relaxed_hls_segments,
             )
             .await
         } else {
@@ -791,6 +792,7 @@ impl PlaybackManager {
                     ]);
                 } else {
                     input_args(&mut cmd, &header_block);
+                    relaxed_hls_args(&mut cmd, probe.relaxed_hls_segments);
                 }
                 // Input is never paced to realtime. A live input already arrives in
                 // realtime, and `-re` only withheld the upstream's initial burst (an

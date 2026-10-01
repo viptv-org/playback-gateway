@@ -5,6 +5,10 @@ pub(super) struct Probe {
     pub(super) streams: Vec<ProbeStream>,
     #[serde(default)]
     pub(super) format: serde_json::Value,
+    /// The source is HLS whose segment names FFmpeg's `extension_picky`
+    /// refused; every later reader must relax that check the same way.
+    #[serde(skip)]
+    pub(super) relaxed_hls_segments: bool,
 }
 #[derive(Clone, Debug, Deserialize)]
 pub(super) struct ProbeStream {

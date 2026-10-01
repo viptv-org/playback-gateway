@@ -18,6 +18,8 @@ pub(super) enum ProbeFailure {
     OversizedOutput,
     InvalidJson,
     Protocol,
+    /// FFmpeg refused an HLS segment by its name before reading its bytes.
+    SegmentExtension,
     Http(u16),
     Network,
     Timeout,
@@ -85,6 +87,10 @@ pub(super) async fn probe_output(
 
 pub(super) fn probe_failure(stderr: &[u8]) -> ProbeFailure {
     let text = String::from_utf8_lossy(stderr).to_ascii_lowercase();
+    if text.contains("allowed_segment_extensions") || text.contains("mismatches allowed extensions")
+    {
+        return ProbeFailure::SegmentExtension;
+    }
     if [
         "not on whitelist",
         "protocol not found",
@@ -173,6 +179,7 @@ impl PlaybackManager {
         position: f64,
         origin: f64,
         permits: Arc<InputPermits>,
+        relaxed_hls: bool,
     ) -> Option<f64> {
         if position == 0.0 {
             return Some(0.0);
@@ -180,6 +187,7 @@ impl PlaybackManager {
         let mut cmd = Command::new(&self.config.ffprobe);
         cmd.args(["-v", "error"]);
         input_args(&mut cmd, headers);
+        relaxed_hls_args(&mut cmd, relaxed_hls);
         cmd.args([
             "-select_streams",
             "v:0",
@@ -363,12 +371,38 @@ impl PlaybackManager {
         permits: Option<Arc<InputPermits>>,
         reduced: bool,
     ) -> Result<Probe, ProbeFailure> {
+        match self
+            .probe_command(url, headers, permits.clone(), reduced, false)
+            .await
+        {
+            // Only an FFmpeg that knows extension_picky emits this refusal,
+            // so the relaxed retry never sends it an unknown option.
+            Err(ProbeFailure::SegmentExtension) => {
+                let mut probe = self
+                    .probe_command(url, headers, permits, reduced, true)
+                    .await?;
+                probe.relaxed_hls_segments = true;
+                Ok(probe)
+            }
+            result => result,
+        }
+    }
+
+    async fn probe_command(
+        &self,
+        url: &str,
+        headers: &str,
+        permits: Option<Arc<InputPermits>>,
+        reduced: bool,
+        relaxed_hls: bool,
+    ) -> Result<Probe, ProbeFailure> {
         let mut cmd = Command::new(&self.config.ffprobe);
         cmd.kill_on_drop(true)
             .stdin(Stdio::null())
             .stderr(Stdio::piped());
         cmd.args(["-v", "error"]);
         input_args(&mut cmd, headers);
+        relaxed_hls_args(&mut cmd, relaxed_hls);
         // The reduced form keeps every field the delivery decision needs, including
         // SDR/HDR transfer evidence, while shrinking a response that failed to parse.
         let entries = if reduced {

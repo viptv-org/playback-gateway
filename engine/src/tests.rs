@@ -2,6 +2,7 @@ use super::*;
 
 mod browser;
 mod compat;
+mod disguised;
 mod hdr;
 mod lifecycle;
 mod probe;
