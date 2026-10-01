@@ -17,6 +17,12 @@ use tokio::{
     process::{Child, Command},
 };
 const BOOTSTRAP: &str = "runtime-qualification-bootstrap-fixture-only";
+/// Real-time paced progressive source length; long enough that no fixture
+/// observes the source loop.
+const PROGRESSIVE_SECONDS: f64 = 240.0;
+fn progressive() -> bool {
+    std::env::var("PLAYBACK_TEST_PROGRESSIVE").as_deref() == Ok("1")
+}
 fn state_root(root: &Path) -> PathBuf {
     std::env::var_os("PLAYBACK_TEST_DATA_DIR")
         .map(PathBuf::from)
@@ -93,9 +99,15 @@ async fn source(bytes: Vec<u8>) -> Source {
     let requests = Arc::new(AtomicUsize::new(0));
     let opened = requests.clone();
     let high = std::env::var("PLAYBACK_TEST_CBR_4K").as_deref() == Ok("1");
-    let captions = std::env::var("PLAYBACK_TEST_SUBTITLES").as_deref() == Ok("1");
+    let progressive = progressive();
+    let captions = std::env::var("PLAYBACK_TEST_SUBTITLES").as_deref() == Ok("1") || progressive;
     let overflow = std::env::var("PLAYBACK_TEST_CAPTION_OVERFLOW").as_deref() == Ok("1");
-    let interval = Duration::from_secs_f64(120.0 * (188 * 100) as f64 / bytes.len() as f64);
+    let seconds = if progressive {
+        PROGRESSIVE_SECONDS
+    } else {
+        120.0
+    };
+    let interval = Duration::from_secs_f64(seconds * (188 * 100) as f64 / bytes.len() as f64);
     let bytes = Arc::new(bytes);
     let task = tokio::spawn(async move {
         let mut peers = tokio::task::JoinSet::new();
@@ -427,6 +439,16 @@ impl Fixture {
                     "-metadata:s:s:1",
                     "language=eng",
                 ]);
+        } else if progressive() {
+            // One real audio track: AAC in MPEG-TS, FLAC in Matroska.
+            generation.args([
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:sample_rate=48000",
+                "-c:a",
+                if matroska { "flac" } else { "aac" },
+            ]);
         } else {
             generation.arg("-an");
         }
@@ -435,7 +457,9 @@ impl Fixture {
             generation
                 .args([
                     "-t",
-                    if captions {
+                    if progressive() {
+                        "240"
+                    } else if captions {
                         "120"
                     } else if high {
                         "24"
@@ -529,7 +553,7 @@ impl Fixture {
                 .parse()
                 .unwrap();
             let (base, proxy) = tls_proxy(address).await;
-            source.url = format!("{base}/live.mkv");
+            source.url = format!("{base}/{}", if captions { "live.mkv" } else { "live.ts" });
             tls.push(proxy);
         }
         let port = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -566,7 +590,7 @@ impl Fixture {
             _tls: tls,
         };
         fixture.ready().await;
-        let response=fixture.client.post(format!("{}/v1/keys",fixture.base)).bearer_auth(BOOTSTRAP).json(&json!({"label":"runtime fixture","namespaces":["fixture"],"scopes":["create","read","renew","release","capabilities"],"quotas":{"inputs":1,"outputs":2,"viewers":3}})).send().await.map_err(|_|"key request failed").unwrap();
+        let response=fixture.client.post(format!("{}/v1/keys",fixture.base)).bearer_auth(BOOTSTRAP).json(&json!({"label":"runtime fixture","namespaces":["fixture"],"scopes":["create","read","renew","release","capabilities"],"quotas":if progressive() {json!({"inputs":1,"outputs":4,"viewers":5})} else {json!({"inputs":1,"outputs":2,"viewers":3})}})).send().await.map_err(|_|"key request failed").unwrap();
         assert!(response.status().is_success());
         let value: Value = response
             .json()
@@ -593,7 +617,7 @@ impl Fixture {
                 "FFPROBE_PATH",
                 std::env::var("PLAYBACK_TEST_FFPROBE").unwrap(),
             )
-            .env("MAX_OUTPUTS", "2")
+            .env("MAX_OUTPUTS", if progressive() { "4" } else { "2" })
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .kill_on_drop(true);
@@ -1644,4 +1668,628 @@ async fn real_cbr_4k_copy_retains_over_old_budget_and_reclaims_spool() {
     println!("CBR4K retained_replay_bytes={retained} allocated_media_bytes={allocated} sample_video_packet_bytes={packet_bytes}; allocation_after_release=0");
     fixture.signal("-TERM").await;
     assert!(fixture.child.wait().await.unwrap().success());
+}
+
+fn progressive_codecs() -> (&'static str, &'static str, &'static str, &'static str) {
+    // (video, audio, file, content type) of the same-container remux.
+    if std::env::var("PLAYBACK_TEST_MATROSKA_AV").as_deref() == Ok("1") {
+        ("ffv1", "flac", "stream.mkv", "video/x-matroska")
+    } else {
+        ("h264", "aac", "stream.ts", "video/mp2t")
+    }
+}
+async fn create_progressive(
+    fixture: &Fixture,
+    key: &str,
+    namespace: &str,
+    idempotency: &str,
+    video: &str,
+) -> reqwest::Response {
+    let (_, audio, _, _) = progressive_codecs();
+    fixture
+        .client
+        .post(format!("{}/v1/sessions", fixture.base))
+        .bearer_auth(key)
+        .header("Idempotency-Key", idempotency)
+        .json(&json!({"namespace":namespace,"input":{"url":fixture.source.url,"headers":{},"live":true},"output":{"protocol":"progressive","video_codecs":[video],"audio_codecs":[audio],"max_width":1920,"max_height":1080},"position_seconds":0}))
+        .send()
+        .await
+        .map_err(|_| "progressive request failed")
+        .unwrap()
+}
+async fn start_progressive(fixture: &Fixture, key: &str, namespace: &str, id: &str) -> Value {
+    let (video, _, file, _) = progressive_codecs();
+    let response = create_progressive(fixture, key, namespace, id, video).await;
+    assert!(response.status().is_success(), "progressive viewer starts");
+    let viewer: Value = response.json().await.unwrap();
+    let playback = &viewer["playback"];
+    assert!(
+        playback["url"].as_str().unwrap().ends_with(file),
+        "{playback}"
+    );
+    viewer
+}
+/// Continuously consumes one progressive body; keeps its first `keep` bytes.
+struct Consumer {
+    total: Arc<AtomicUsize>,
+    head: Arc<std::sync::Mutex<Vec<u8>>>,
+    task: tokio::task::JoinHandle<bool>,
+}
+impl Consumer {
+    fn new(mut response: reqwest::Response, keep: usize) -> Self {
+        let total = Arc::new(AtomicUsize::new(0));
+        let head = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (counted, kept) = (total.clone(), head.clone());
+        let task = tokio::spawn(async move {
+            loop {
+                match response.chunk().await {
+                    Ok(Some(chunk)) => {
+                        let mut kept = kept.lock().unwrap();
+                        let room = keep.saturating_sub(kept.len()).min(chunk.len());
+                        kept.extend_from_slice(&chunk[..room]);
+                        counted.fetch_add(chunk.len(), Ordering::SeqCst);
+                    }
+                    Ok(None) => return true,
+                    Err(_) => return false,
+                }
+            }
+        });
+        Self { total, head, task }
+    }
+    async fn reach(&self, bytes: usize) {
+        tokio::time::timeout(Duration::from_secs(30), async {
+            while self.total.load(Ordering::SeqCst) < bytes {
+                assert!(
+                    !self.task.is_finished(),
+                    "progressive body must keep flowing"
+                );
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("progressive body must keep flowing");
+    }
+    async fn advances(&self) {
+        let before = self.total.load(Ordering::SeqCst);
+        self.reach(before + 16 * 1024).await;
+    }
+}
+async fn session_state(fixture: &Fixture, key: &str, id: &str) -> (u16, Value) {
+    let response = fixture
+        .client
+        .get(format!("{}/v1/sessions/{id}", fixture.base))
+        .bearer_auth(key)
+        .send()
+        .await
+        .map_err(|_| "status failed")
+        .unwrap();
+    let status = response.status().as_u16();
+    (status, response.json().await.unwrap_or(Value::Null))
+}
+async fn release(fixture: &Fixture, key: &str, id: &str) -> u16 {
+    fixture
+        .client
+        .delete(format!("{}/v1/sessions/{id}", fixture.base))
+        .bearer_auth(key)
+        .send()
+        .await
+        .map_err(|_| "release failed")
+        .unwrap()
+        .status()
+        .as_u16()
+}
+async fn failed_processing(fixture: &Fixture, id: &str, within: Duration) {
+    tokio::time::timeout(within, async {
+        loop {
+            let (_, state) = session_state(fixture, &fixture.key, id).await;
+            if state["status"] == "failed" {
+                assert_eq!(state["error_code"], "processing_failed");
+                assert!(state.get("playback").is_none());
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("the affected progressive viewer must fail safely");
+}
+async fn available(fixture: &Fixture, inputs: u64, outputs: u64, viewers: u64) {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let caps: Value = fixture
+                .client
+                .get(format!("{}/v1/capabilities", fixture.base))
+                .bearer_auth(&fixture.key)
+                .send()
+                .await
+                .map_err(|_| "capacity failed")
+                .unwrap()
+                .json()
+                .await
+                .map_err(|_| "capacity body failed")
+                .unwrap();
+            let free = &caps["available"];
+            if free["inputs"] == inputs && free["outputs"] == outputs && free["viewers"] == viewers
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("reservations must settle after actual teardown");
+}
+async fn probe_progressive(bytes: &[u8]) -> Value {
+    let format = if progressive_codecs().2 == "stream.mkv" {
+        "matroska"
+    } else {
+        "mpegts"
+    };
+    demux(bytes, format).await
+}
+async fn decode_all(bytes: &[u8]) {
+    let format = if progressive_codecs().2 == "stream.mkv" {
+        "matroska"
+    } else {
+        "mpegts"
+    };
+    let mut child = Command::new(std::env::var("PLAYBACK_TEST_FFMPEG").unwrap())
+        .args([
+            "-v", "error", "-xerror", "-nostdin", "-f", format, "-i", "pipe:0",
+        ])
+        // Only the first two seconds: the fetched prefix ends mid-packet.
+        .args([
+            "-map", "0:v:0", "-map", "0:a:0", "-t", "2", "-threads", "2", "-f", "framecrc",
+            "pipe:1",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    let feeding = async {
+        // The decoder may stop reading once two seconds are decoded.
+        let _ = input.write_all(bytes).await;
+        drop(input);
+    };
+    let (_, output) = tokio::time::timeout(Duration::from_secs(20), async {
+        tokio::join!(feeding, child.wait_with_output())
+    })
+    .await
+    .unwrap();
+    let output = output.unwrap();
+    let frames = String::from_utf8(output.stdout).unwrap();
+    let video = frames.lines().filter(|line| line.starts_with("0,")).count();
+    let audio = frames.lines().filter(|line| line.starts_with("1,")).count();
+    println!("Decoded progressive prefix: video_frames={video} audio_frames={audio}");
+    assert!(output.status.success(), "progressive output must decode");
+    assert!(
+        video >= 10 && audio >= 10,
+        "both tracks must actually decode"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires isolated Docker network-none, NET_ADMIN and the built image's service/media binaries"]
+async fn real_progressive_image_share_late_join_evict_isolate_and_reap() {
+    assert!(progressive());
+    let mut fixture = Fixture::new().await;
+    let (video, audio, file, content_type) = progressive_codecs();
+    let service = fixture.child.id().unwrap();
+
+    // A decoder the client cannot use fails explicitly and opens nothing.
+    let refused = create_progressive(&fixture, &fixture.key, "fixture", "hevc", "hevc").await;
+    assert_eq!(refused.status().as_u16(), 422, "explicit refusal");
+    let refused: Value = refused.json().await.unwrap();
+    assert_eq!(refused["error"]["code"], "unsupported_output");
+    println!("Undecodable request refused: {}", refused["error"]["code"]);
+
+    let first = start_progressive(&fixture, &fixture.key, "fixture", "first").await;
+    connections(&fixture.source, 1).await;
+    let opened = fixture.source.requests.load(Ordering::SeqCst);
+    let first_url = format!(
+        "{}{}",
+        fixture.base,
+        first["playback"]["url"].as_str().unwrap()
+    );
+    println!(
+        "First viewer playback: {}",
+        json!({"format":first["playback"]["format"],"mode":first["playback"]["mode"],"video_mode":first["playback"]["video_mode"],"audio_mode":first["playback"]["audio_mode"]})
+    );
+    let head = fixture.client.head(&first_url).send().await.unwrap();
+    assert_eq!(head.status().as_u16(), 200);
+    assert_eq!(head.headers()["content-type"], content_type);
+    assert_eq!(head.headers()["accept-ranges"], "none");
+    assert!(
+        head.headers().get("content-length").is_none() || head.headers()["content-length"] == "0"
+    );
+    let response = fixture
+        .client
+        .get(&first_url)
+        .timeout(Duration::from_secs(600))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(response.headers()["accept-ranges"], "none");
+    assert!(response.headers().get("content-length").is_none());
+    let first_reader = Consumer::new(response, 256 * 1024);
+    first_reader.reach(256 * 1024).await;
+    {
+        let head = first_reader.head.lock().unwrap();
+        if file == "stream.ts" {
+            assert_eq!(head[0], 0x47, "fresh MPEG-TS packets");
+        } else {
+            assert_eq!(&head[..4], &[0x1a, 0x45, 0xdf, 0xa3], "fresh EBML header");
+        }
+    }
+    // Once opened, the same viewer's media URL is single-consumer.
+    let again = fixture.client.get(&first_url).send().await.unwrap();
+    assert!(!again.status().is_success(), "second GET is refused");
+
+    // A late compatible viewer joins the same upstream.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let late = start_progressive(&fixture, &fixture.key, "fixture", "late").await;
+    assert_ne!(late["id"], first["id"]);
+    connections(&fixture.source, 1).await;
+    assert_eq!(
+        fixture.source.requests.load(Ordering::SeqCst),
+        opened,
+        "a progressive late join must not re-open the provider"
+    );
+    let late_path = late["playback"]["url"].as_str().unwrap().to_owned();
+    let late_url = format!("{}{late_path}", fixture.base);
+    let first_token = first["playback"]["url"]
+        .as_str()
+        .unwrap()
+        .split('/')
+        .nth(3)
+        .unwrap();
+    let mut crossed: Vec<&str> = late_path.split('/').collect();
+    crossed[3] = first_token;
+    let crossed = fixture
+        .client
+        .get(format!("{}{}", fixture.base, crossed.join("/")))
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        !crossed.status().is_success(),
+        "media tokens are per viewer"
+    );
+    let response = fixture
+        .client
+        .get(&late_url)
+        .timeout(Duration::from_secs(600))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+    let late_reader = Consumer::new(response, 1024 * 1024);
+    late_reader.reach(1024 * 1024).await;
+    first_reader.advances().await;
+    let late_bytes = late_reader.head.lock().unwrap().clone();
+    let facts = probe_progressive(&late_bytes).await;
+    let streams: Vec<(String, String)> = facts["streams"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|stream| {
+            (
+                stream["codec_type"].as_str().unwrap().to_owned(),
+                stream["codec_name"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    println!("Late output streams: {streams:?}");
+    assert_eq!(
+        streams,
+        vec![
+            ("video".into(), video.into()),
+            ("audio".into(), audio.into())
+        ],
+        "same codecs, first video and the selected audio only"
+    );
+    let first_video = facts["packets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|packet| packet["codec_type"] == "video")
+        .unwrap();
+    assert!(
+        first_video["flags"].as_str().unwrap().starts_with('K'),
+        "late join starts at a keyframe: {first_video}"
+    );
+    decode_all(&late_bytes).await;
+
+    // Namespace isolation: another namespace never shares or sees these viewers.
+    let other_key: Value = fixture
+        .client
+        .post(format!("{}/v1/keys", fixture.base))
+        .bearer_auth(BOOTSTRAP)
+        .json(&json!({"label":"other namespace","namespaces":["other"],"scopes":["create","read","release"],"quotas":{"inputs":1,"outputs":1,"viewers":1}}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let other_key = other_key["secret"].as_str().unwrap().to_owned();
+    let denied = create_progressive(&fixture, &other_key, "fixture", "wrong-ns", video).await;
+    assert!(
+        !denied.status().is_success(),
+        "a key cannot use another namespace"
+    );
+    let other = start_progressive(&fixture, &other_key, "other", "other").await;
+    connections(&fixture.source, 2).await;
+    // Its own source preparation and its own ingest; never the fixture's.
+    let after_other = fixture.source.requests.load(Ordering::SeqCst);
+    assert!(
+        after_other > opened,
+        "another namespace opens its own upstream"
+    );
+    println!(
+        "Other namespace provider requests: {} (fixture namespace: {opened})",
+        after_other - opened
+    );
+    let (status, _) = session_state(&fixture, &other_key, first["id"].as_str().unwrap()).await;
+    assert!(
+        !(200..300).contains(&status),
+        "other namespace cannot read a viewer"
+    );
+    // A foreign release is an idempotent no-op, never an existence oracle.
+    assert_eq!(
+        release(&fixture, &other_key, first["id"].as_str().unwrap()).await,
+        204
+    );
+    let (status, state) =
+        session_state(&fixture, &fixture.key, first["id"].as_str().unwrap()).await;
+    assert_eq!((status, state["status"].as_str()), (200, Some("ready")));
+    first_reader.advances().await;
+    let (status, _) = session_state(&fixture, &fixture.key, other["id"].as_str().unwrap()).await;
+    assert!(!(200..300).contains(&status));
+    let other_path = other["playback"]["url"].as_str().unwrap().to_owned();
+    let mut crossed: Vec<&str> = other_path.split('/').collect();
+    crossed[3] = first_token;
+    let crossed = fixture
+        .client
+        .get(format!("{}{}", fixture.base, crossed.join("/")))
+        .send()
+        .await
+        .unwrap();
+    assert!(!crossed.status().is_success());
+    let response = fixture
+        .client
+        .get(format!("{}{other_path}", fixture.base))
+        .timeout(Duration::from_secs(600))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+    let other_reader = Consumer::new(response, 0);
+    other_reader.reach(64 * 1024).await;
+    println!("Namespace isolation: separate upstream, cross-namespace read/release/token denied");
+    assert_eq!(
+        release(&fixture, &other_key, other["id"].as_str().unwrap()).await,
+        204
+    );
+
+    // A slow reader: opened, then never read, with a tiny receive window.
+    let slow = start_progressive(&fixture, &fixture.key, "fixture", "slow").await;
+    let socket = tokio::net::TcpSocket::new_v4().unwrap();
+    socket.set_recv_buffer_size(4096).unwrap();
+    let mut stalled = socket.connect(fixture.address).await.unwrap();
+    stalled
+        .write_all(
+            format!(
+                "GET {} HTTP/1.1\r\nHost: fixture\r\nConnection: close\r\n\r\n",
+                slow["playback"]["url"].as_str().unwrap()
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut header = Vec::new();
+    while !header.ends_with(b"\r\n\r\n") {
+        header.push(stalled.read_u8().await.unwrap());
+    }
+    assert!(header.starts_with(b"HTTP/1.1 200"));
+    let stalled_at = std::time::Instant::now();
+    // Releasing one viewer during the stall leaves the others running.
+    assert_eq!(
+        release(&fixture, &fixture.key, first["id"].as_str().unwrap()).await,
+        204
+    );
+    tokio::time::timeout(Duration::from_secs(30), &mut { first_reader.task })
+        .await
+        .expect("a released viewer's stream ends")
+        .unwrap();
+    println!(
+        "First viewer released after {:?}; late viewer continues",
+        stalled_at.elapsed()
+    );
+    late_reader.advances().await;
+    tokio::time::timeout(Duration::from_secs(30), &mut { other_reader.task })
+        .await
+        .expect("the released other-namespace stream ends")
+        .unwrap();
+    connections(&fixture.source, 1).await;
+    failed_processing(
+        &fixture,
+        slow["id"].as_str().unwrap(),
+        Duration::from_secs(150),
+    )
+    .await;
+    println!(
+        "Stalled reader evicted (processing_failed) after {:?}",
+        stalled_at.elapsed()
+    );
+    late_reader.advances().await;
+    connections(&fixture.source, 1).await;
+    let mut rest = Vec::new();
+    let drained =
+        tokio::time::timeout(Duration::from_secs(30), stalled.read_to_end(&mut rest)).await;
+    assert!(drained.is_ok(), "the evicted response must end");
+    assert!(
+        !rest.ends_with(b"0\r\n\r\n"),
+        "eviction ends the body with an error, not a clean end"
+    );
+    println!(
+        "Evicted body ended after {} buffered bytes ({:?})",
+        rest.len(),
+        drained.unwrap().map(|_| "eof")
+    );
+    assert_eq!(
+        fixture.source.requests.load(Ordering::SeqCst),
+        after_other,
+        "a slow or released viewer never re-opens the provider"
+    );
+
+    // The last release cancels the reader, the ingest and its storage.
+    let pids = children(service);
+    println!("Media children before last release: {}", pids.len());
+    assert!(!pids.is_empty());
+    let last_release = std::time::Instant::now();
+    assert_eq!(
+        release(&fixture, &fixture.key, late["id"].as_str().unwrap()).await,
+        204
+    );
+    tokio::time::timeout(Duration::from_secs(30), &mut { late_reader.task })
+        .await
+        .expect("the last viewer's stream ends")
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while fixture.source.active.load(Ordering::SeqCst) != 0 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("upstream closes after last release");
+    gone(&pids).await;
+    assert!(children(service).is_empty());
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !fixture.media_dirs().is_empty() {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("replay storage is reclaimed");
+    available(&fixture, 1, 4, 5).await;
+    println!(
+        "Last release reaped processes, upstream, storage and reservations in {:?}",
+        last_release.elapsed()
+    );
+    fixture.signal("-TERM").await;
+    assert!(fixture.child.wait().await.unwrap().success());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires isolated Docker fixture with dedicated 2 MiB DATA_DIR/media tmpfs"]
+async fn real_progressive_kernel_bounded_media_full_fails_and_reclaims() {
+    use std::io::Write;
+    assert!(progressive());
+    assert_eq!(
+        std::env::var("PLAYBACK_TEST_DATA_DIR").as_deref(),
+        Ok("/var/lib/playback-gateway")
+    );
+    let mut fixture = Fixture::new().await;
+    let service = fixture.child.id().unwrap();
+    let media = state_root(fixture.root.path()).join("media");
+    let process_status = std::fs::read_to_string(format!("/proc/{service}/status")).unwrap();
+    assert!(process_status.lines().any(|line| line.starts_with("Uid:")
+        && line.split_whitespace().skip(1).all(|uid| uid == "10001")));
+    assert_eq!(allocation(&media).0, 2 * 1024 * 1024);
+    let viewer = start_progressive(&fixture, &fixture.key, "fixture", "first").await;
+    let response = fixture
+        .client
+        .get(format!(
+            "{}{}",
+            fixture.base,
+            viewer["playback"]["url"].as_str().unwrap()
+        ))
+        .timeout(Duration::from_secs(600))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+    let reader = Consumer::new(response, 0);
+    reader.reach(64 * 1024).await;
+    connections(&fixture.source, 1).await;
+    assert!(
+        fixture
+            .media_dirs()
+            .iter()
+            .any(|dir| dir.join("index.m3u8").exists()),
+        "the hard mount holds the shared private replay"
+    );
+    let pids = children(service);
+    assert_eq!(pids.len(), 2, "one ingest and one progressive reader");
+    let fill = media.join("capacity-fixture.bin");
+    let mut file = std::fs::File::create(&fill).unwrap();
+    let bytes = vec![0u8; 4096];
+    loop {
+        match file.write_all(&bytes) {
+            Ok(()) => assert!(allocation(&media).1 <= 2 * 1024 * 1024),
+            Err(error) => {
+                assert_eq!(error.raw_os_error(), Some(libc::ENOSPC));
+                break;
+            }
+        }
+    }
+    assert_eq!(allocation(&media).1, 2 * 1024 * 1024);
+    println!(
+        "Media tmpfs full: ENOSPC at {} bytes allocated",
+        allocation(&media).1
+    );
+    let ready = fixture
+        .client
+        .get(format!("{}/ready", fixture.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ready.status().as_u16(), 503);
+    let (video, _, _, _) = progressive_codecs();
+    let denied = create_progressive(&fixture, &fixture.key, "fixture", "full", video).await;
+    assert!(!denied.status().is_success());
+    let denied: Value = denied.json().await.unwrap();
+    assert_eq!(denied["error"]["code"], "not_ready");
+    failed_processing(
+        &fixture,
+        viewer["id"].as_str().unwrap(),
+        Duration::from_secs(60),
+    )
+    .await;
+    let ended = tokio::time::timeout(Duration::from_secs(30), &mut { reader.task })
+        .await
+        .expect("the affected progressive stream ends")
+        .unwrap();
+    assert!(!ended, "the affected stream ends with an error");
+    gone(&pids).await;
+    connections(&fixture.source, 0).await;
+    available(&fixture, 1, 4, 5).await;
+    drop(file);
+    std::fs::remove_file(fill).unwrap();
+    assert!(allocation(&media).1 < 2 * 1024 * 1024);
+    println!(
+        "Full storage failed the viewer safely; processes, upstream and reservations reclaimed"
+    );
+    let fresh = start_progressive(&fixture, &fixture.key, "fixture", "after-full").await;
+    let response = fixture
+        .client
+        .get(format!(
+            "{}{}",
+            fixture.base,
+            fresh["playback"]["url"].as_str().unwrap()
+        ))
+        .timeout(Duration::from_secs(600))
+        .send()
+        .await
+        .unwrap();
+    let fresh_reader = Consumer::new(response, 0);
+    fresh_reader.reach(64 * 1024).await;
+    fixture.signal("-TERM").await;
+    assert!(fixture.child.wait().await.unwrap().success());
+    connections(&fixture.source, 0).await;
 }

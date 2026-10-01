@@ -35,6 +35,7 @@ M3U8 index instead of TS. This is a tested internal FFmpeg adapter, not public
 Matroska HLS: client HLS output remains TS/fMP4. Gateway-owned eviction retains
 12 listed segments, three old segments for active readers and an open new file.
 See [live format qualification](docs/LIVE_SHARING_FORMATS.md).
+See [progressive live delivery qualification](docs/PROGRESSIVE_QUALIFICATION.md).
 
 Linux SubRip subtitle inputs now use the private Matroska adapter and bounded
 decoded cue carryover. Long overlapping cues survive original-segment eviction,
