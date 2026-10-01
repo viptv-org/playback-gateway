@@ -4,6 +4,13 @@ Built-image evidence for [progressive live delivery](../API_V1.md#progressive-li
 (playback-gateway#1). This records named disposable fixtures. It is not a
 deployment or a universal playback approval.
 
+**Supported subset: live MPEG-TS only.** Live Matroska progressive is
+unsupported and refused at request time with `unsupported_output` (see
+[Matroska progressive: unsupported](#matroska-progressive-unsupported)). The
+first qualification run below found the Matroska stall; the
+[re-run](#re-run-after-narrowing-to-mpeg-ts) records the narrowed subset and the
+error-termination fix on a rebuilt image.
+
 ## Image and source
 
 - Runtime source: `eb9978d` (merge of #5), built from a Git archive with the
@@ -42,7 +49,7 @@ in MPEG-TS, FLAC in Matroska), a 240-second clip paced in real time so no test
 observes the source loop, `MAX_OUTPUTS=4`, and key quotas of 1 input, 4 outputs
 and 5 viewers.
 
-## Results (2026-09-30)
+## Results (2026-09-30, first run on `eb9978d`)
 
 | Mode | Test | Result |
 | --- | --- | --- |
@@ -108,7 +115,7 @@ control/media API are both reached over verified TLS through the fixture CA.
 - After the fill file is removed, a fresh progressive viewer streams again,
   and SIGTERM exits cleanly.
 
-### Defect found: Matroska progressive stalls on the built image
+### Defect found: Matroska progressive stalls on the built image (first run)
 
 On the built image, an FFV1/FLAC Matroska progressive viewer gets
 `format=matroska` and `remux`/`copy`. It receives about 220 KB, then no more
@@ -130,18 +137,93 @@ In `bounded-matroska`, storage exhaustion does fail the viewer
 (`processing_failed`) and the tmpfs hits `ENOSPC`. However, the viewer's stream
 ended cleanly instead of with an error, so the test fails there.
 
-A correct fix needs a concatenable Matroska replay: for example a header or
-init segment plus cluster-only segments, or a reader that opens each segment as
-its own demuxer. That changes the private Matroska replay adapter, which the
-shared HLS Matroska outputs also use. It is not a minimal change, so it is
-left as follow-up work. Until it is fixed, a live Matroska progressive request
-is accepted but does not deliver continuous media.
+The clean end was a generic progressive defect, not Matroska-specific: a
+stream finished its body cleanly whenever the producer dropped its channel
+before the HTTP body observed the close, or when the reader process exited
+successfully after its replay was torn down. It is fixed for every progressive
+container (see the re-run).
+
+## Matroska progressive: unsupported
+
+Decision (2026-09-30, technical and reversible): the supported progressive
+subset is narrowed to live MPEG-TS. A live progressive request whose input is
+Matroska, or whose private replay would be Matroska, fails at request time with
+`422 unsupported_output`, before any ingest, reader, replay or reservation
+starts. The private Matroska replay and its shared HLS outputs are unchanged.
+
+**Root cause.** The private Matroska replay is a segment muxer that writes every
+`segment-*.mkv` as a complete Matroska file (EBML header, Segment, Tracks,
+Clusters). A progressive reader opens the private M3U8 with FFmpeg's HLS
+demuxer, which concatenates the segment files into one byte stream for a single
+Matroska demuxer. At each segment boundary that demuxer meets a second EBML
+header inside its Segment, fails to resync forward, and jumps back about 10 s.
+A copy-only Matroska muxer cannot absorb the backward timestamps and stalls.
+Encoding HLS outputs re-offset timestamps and continue, at the cost of
+re-reading duplicated data.
+
+**Proposed fix** (follow-up issue "Matroska progressive live delivery via
+joinable replay"): make the replay joinable by a copy-only reader, either
+
+- a header file (EBML header, Segment and Tracks written once) plus media-only
+  segments that contain only Clusters, so header + any suffix of segments is
+  one valid Matroska stream; or
+- a reader that opens each segment as its own demuxer input (per-segment
+  opening) and re-stitches packets with continuous timestamps.
+
+Either change touches the private Matroska adapter that shared HLS outputs
+also use, so the HLS Matroska fixtures must be re-run with it. Then re-enable
+Matroska in the progressive subset and run the `matroska`, `matroska-tls` and
+`bounded-matroska` modes against a rebuilt image.
+
+## Re-run after narrowing to MPEG-TS
+
+- Runtime source: `0220483` (Matroska progressive refused; failed progressive
+  bodies abort), built from a Git archive with the repository `Dockerfile` plus
+  the same throwaway `ENV CARGO_BUILD_JOBS=2`. Local image
+  `viptv-gateway-qual:ts-only-0220483`, content ID
+  `sha256:3445592a8a69edc0e18055f2c242383ab8224793a4f2cf42bb8480f48a54d68a`.
+- Fixture source: `0220483` for `ts`, `bounded` and `bounded-matroska`;
+  `9d6de06` for `matroska`, which changes only the Matroska refusal assertion
+  in `control/tests/runtime.rs` (the gateway runtime source is identical).
+- In the Matroska modes both named tests now assert the refusal on the built
+  image: `422 unsupported_output`, no upstream connection left open, no ingest
+  or reader child, no private replay directory, reservations at 1/4/5, and a
+  clean SIGTERM exit.
+
+| Mode | Test | Result |
+| --- | --- | --- |
+| `ts` (HTTP) | `real_progressive_image_share_late_join_evict_isolate_and_reap` | pass, 88.8 s |
+| `bounded` | `real_progressive_kernel_bounded_media_full_fails_and_reclaims` | pass, 25.2 s |
+| `matroska` | same image test, refusal branch | pass (refused), 1.1 s |
+| `bounded-matroska` | same bounded test, refusal branch | pass (refused), 1.1 s |
+
+`ts` repeats every first-run assertion (HEVC refusal, headers, single GET,
+late join with no new provider request, keyframe start and `-xerror` decode of
+50 video and 94 audio frames, namespace isolation, eviction about 36.8 s after
+the stall with a body that ends without a clean terminator, release and
+last-release cleanup). In `bounded`, a real `ENOSPC` at 2,097,152 bytes fails
+the viewer with `processing_failed` and the client's body ends with a transport
+error, not a clean end; processes, upstream and reservations are reclaimed and
+a fresh viewer streams afterwards.
+
+**Error termination.** A progressive body now ends cleanly only after a
+successful end of output, and a live progressive body never does. Before the
+fix, a body ended cleanly when the producer dropped its channel before the
+HTTP body observed the close (release or job failure) or when the reader
+exited successfully after its replay was torn down. Unit tests
+`failed_or_released_reader_never_ends_its_body_cleanly` (50 rounds of the
+close race plus a failed reader) and
+`live_reader_exiting_cleanly_still_ends_the_body_with_an_error` fail on the
+previous `fmp4::Stream` and pass now;
+`on_demand_output_ends_cleanly_only_after_success` keeps the on-demand fMP4
+clean end. `live_matroska_progressive_is_refused_before_any_media_job` proves
+the refusal at the coordinator without starting a process.
 
 ## Not qualified
 
-- Matroska (FFV1/FLAC) progressive delivery: it fails on the built image (see
-  above). There is no Matroska evidence for HTTPS, eviction, isolation or
-  reaping.
+- Matroska (FFV1/FLAC) progressive delivery: unsupported and refused with
+  `unsupported_output` (see above). There is no Matroska evidence for
+  delivery, HTTPS, eviction, isolation or reaping.
 - Public ingress, Cloudflare or Dockflare HTTPS, and any deployment. HTTPS
   here is a fixture CA and proxy in a network-none container.
 - On-demand progressive, which keeps its pre-existing original-file transport.
