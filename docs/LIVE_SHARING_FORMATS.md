@@ -131,9 +131,11 @@ physical decoder or hardware acceptance.
 - Progressive evidence is the real-FFmpeg fixture
   `real_progressive_viewers_share_one_upstream_late_join_decodes_and_last_release_reaps`
   (MPEG-TS H264/AAC over plain loopback HTTP: two viewers, one upstream, a late
-  join that starts on a keyframe and decodes, and last-release cleanup). A
-  Matroska progressive fixture, HTTPS ingress and the built image have not been
-  qualified yet.
+  join that starts on a keyframe and decodes, and last-release cleanup).
+  [Progressive qualification](PROGRESSIVE_QUALIFICATION.md) records the
+  built-image evidence: MPEG-TS progressive passes over HTTP and HTTPS and
+  under a 2 MiB media tmpfs; Matroska progressive stalls on the built image and
+  is not qualified.
 
 Before the shared subtitle implementation, a bounded local experiment with the same FFmpeg 9 binaries verified that the
 official segment-muxer Matroska/M3U8 seam retains H264, FLAC and subrip as indices
