@@ -831,6 +831,7 @@ fn disguised_segment() -> (Vec<u8>, Vec<u8>) {
 #[tokio::test]
 async fn disguised_hls_segments_lose_their_prefix_and_lying_type_but_keys_do_not() {
     let (body, media) = disguised_segment();
+    let body_len = body.len();
     let app = Router::new()
         .route(
             "/list.m3u8",
@@ -840,9 +841,9 @@ async fn disguised_hls_segments_lose_their_prefix_and_lying_type_but_keys_do_not
         )
         .route(
             "/seg0.png",
-            get(move || {
+            get(move |headers: HeaderMap| {
                 let body = body.clone();
-                async move { ([(header::CONTENT_TYPE, "image/png")], body) }
+                async move { ranged(&headers, body, "image/png") }
             }),
         )
         .route(
@@ -900,5 +901,71 @@ async fn disguised_hls_segments_lose_their_prefix_and_lying_type_but_keys_do_not
         .await
         .unwrap();
     assert_eq!(bytes(response).await, "GGGG0123456789ab");
+    // A range from byte 0 is the clean sub-range past the junk; a later range
+    // is in origin coordinates and passes through.
+    let prefix = body_len - media.len();
+    let total = body_len;
+    let short = prefix + 4 * 188 - 1;
+    for (asked, start, end) in [
+        ("bytes=0-".to_owned(), prefix, total - 1),
+        (format!("bytes=0-{short}"), prefix, short),
+    ] {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::RANGE, asked.parse().unwrap());
+        let response = direct
+            .clone()
+            .serve(&segment, Method::GET, headers)
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "video/mp2t");
+        assert_eq!(
+            response.headers()[header::CONTENT_RANGE],
+            format!("bytes {start}-{end}/{total}").as_str()
+        );
+        assert_eq!(
+            response.headers()[header::CONTENT_LENGTH],
+            (end + 1 - start).to_string().as_str()
+        );
+        assert_eq!(bytes(response).await, media[..end + 1 - start]);
+    }
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::RANGE,
+        format!("bytes={}-", prefix + 188).parse().unwrap(),
+    );
+    let response = direct
+        .clone()
+        .serve(&segment, Method::GET, headers)
+        .await
+        .unwrap();
+    assert_eq!(
+        response.headers()[header::CONTENT_RANGE],
+        format!("bytes {}-{}/{total}", prefix + 188, total - 1).as_str()
+    );
+    assert_eq!(bytes(response).await, media[188..]);
     task.abort();
+}
+
+/// A minimal origin that honours single `bytes=a-b` / `bytes=a-` ranges.
+fn ranged(headers: &HeaderMap, body: Vec<u8>, kind: &'static str) -> Response {
+    let range = headers
+        .get(header::RANGE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| range_bounds(Some(value), body.len() as u64));
+    match range {
+        Some((start, end)) if headers.contains_key(header::RANGE) => Response::builder()
+            .status(StatusCode::PARTIAL_CONTENT)
+            .header(header::CONTENT_TYPE, kind)
+            .header(
+                header::CONTENT_RANGE,
+                format!("bytes {start}-{end}/{}", body.len()),
+            )
+            .body(Body::from(body[start as usize..=end as usize].to_vec()))
+            .unwrap(),
+        _ => Response::builder()
+            .header(header::CONTENT_TYPE, kind)
+            .body(Body::from(body))
+            .unwrap(),
+    }
 }

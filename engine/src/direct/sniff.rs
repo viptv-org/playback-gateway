@@ -17,6 +17,8 @@ const TS_SYNC: u8 = 0x47;
 const TS_RUN: usize = 5;
 const TS_MIN_RUN: usize = 3;
 const ADTS_RUN: usize = 3;
+/// Largest leading box accepted when its end lies beyond the sniff window.
+const MAX_OPEN_BOX: usize = 64 * 1024 * 1024;
 const MEDIA_BOXES: [&[u8; 4]; 7] = [
     b"ftyp", b"styp", b"moof", b"moov", b"sidx", b"emsg", b"prft",
 ];
@@ -67,6 +69,17 @@ pub struct Sniffed {
 /// says the head is the whole body, which lets a short final segment match
 /// with fewer packets.
 pub fn sniff(head: &[u8], complete: bool) -> Sniffed {
+    // Captions served under a media name are text, never stripped.
+    if head
+        .strip_prefix(b"\xef\xbb\xbf".as_slice())
+        .unwrap_or(head)
+        .starts_with(b"WEBVTT")
+    {
+        return Sniffed {
+            offset: 0,
+            kind: None,
+        };
+    }
     if let Some(kind) = recognized_start(head, complete) {
         return Sniffed {
             offset: 0,
@@ -147,7 +160,9 @@ fn box_chain_at(head: &[u8], at: usize) -> bool {
     }
     match head.get(at + size + 4..at + size + 8) {
         Some(next) => next.iter().all(|byte| byte.is_ascii_graphic()),
-        None => true,
+        // A box running past the window must have a plausible size: four
+        // ASCII bytes before a word like `moov` in junk text read as >512 MiB.
+        None => size <= MAX_OPEN_BOX,
     }
 }
 
@@ -334,6 +349,14 @@ mod tests {
         let mut disguised = CSS.to_vec();
         disguised.extend(&tagged);
         assert_eq!(sniff(&disguised, true).offset, CSS.len());
+    }
+
+    #[test]
+    fn text_that_mentions_box_names_is_not_media() {
+        let caption = b"WEBVTT\n\n00:00.000 --> 00:01.000\nthe moov styp moof\n";
+        assert_eq!(sniff(caption, true).kind, None);
+        let css = b"body{color:#000}/* a moov and styp */\n";
+        assert_eq!(sniff(css, true).kind, None);
     }
 
     #[test]
