@@ -7,41 +7,48 @@ use ingest::ReplayKind;
 /// A slow reader may leave its bounded channel full for at most this long.
 pub(super) const PROGRESSIVE_EVICT_AFTER: Duration = Duration::from_secs(20);
 
-/// Supported progressive output containers. Only MPEG-TS is qualified.
-///
-/// Live Matroska is deliberately absent. The private Matroska replay writes
-/// every segment as a complete Matroska file, and the reader's HLS demuxer
-/// concatenates them into one byte stream. At each new EBML header the
-/// Matroska demuxer resyncs backwards (about 10 s per segment); a copy-only
-/// Matroska muxer then stalls. Supporting it needs a joinable replay (a header
-/// plus media-only segments, or a reader that opens each segment on its own).
-/// See `docs/PROGRESSIVE_QUALIFICATION.md`.
+/// Supported progressive output containers: the input's own container, which
+/// is also its private replay's container.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Container {
     MpegTs,
+    /// A Matroska input whose private replay is Matroska (FFV1 video, FLAC
+    /// audio or text subtitles). Its reader reads the replay through
+    /// [`joinable`], never through the HLS demuxer, which would concatenate
+    /// complete segment files and resync backwards at each one.
+    Matroska,
 }
 impl Container {
     pub(super) fn format(self) -> &'static str {
         match self {
             Self::MpegTs => "mpegts",
+            Self::Matroska => "matroska",
         }
     }
     pub(super) fn file(self) -> &'static str {
         match self {
             Self::MpegTs => "stream.ts",
+            Self::Matroska => "stream.mkv",
         }
     }
     pub(super) fn content_type(self) -> &'static str {
         match self {
             Self::MpegTs => "video/mp2t",
+            Self::Matroska => "video/x-matroska",
+        }
+    }
+    fn replay(self) -> ReplayKind {
+        match self {
+            Self::MpegTs => ReplayKind::Ts,
+            Self::Matroska => ReplayKind::Matroska,
         }
     }
 }
 
-/// The qualified subset: live MPEG-TS whose private replay is MPEG-TS, so the
-/// output is the same container remuxed without encoding. Everything else,
-/// including live Matroska, is explicitly unsupported, never silently
-/// converted or switched to HLS.
+/// The qualified subset. The input container must already be the private
+/// replay's container family, so the output is the same container remuxed
+/// without encoding. Everything else is explicitly unsupported, never
+/// silently converted or switched to HLS.
 pub(super) fn container(
     probe: &Probe,
     caps: &Capabilities,
@@ -58,9 +65,14 @@ pub(super) fn container(
         return None;
     }
     let names = probe.format.get("format_name")?.as_str()?;
-    if !names.split(',').any(|name| name == "mpegts")
-        || ReplayKind::for_probe(probe) != ReplayKind::Ts
-    {
+    let container = if names.split(',').any(|name| name == "mpegts") {
+        Container::MpegTs
+    } else if names.split(',').any(|name| name == "matroska") {
+        Container::Matroska
+    } else {
+        return None;
+    };
+    if ReplayKind::for_probe(probe) != container.replay() {
         return None;
     }
     let video = probe.video().ok()?;
@@ -76,29 +88,59 @@ pub(super) fn container(
     {
         return None;
     }
-    Some(Container::MpegTs)
+    Some(container)
 }
 
-/// Copy-only reader arguments: local replay files only, start near the live
-/// edge at a segment (keyframe) boundary, one video and the selected audio.
+/// Where a copy-only reader takes the shared private replay from.
+pub(super) enum ReaderInput<'a> {
+    /// The MPEG-TS replay's private playlist, read by FFmpeg's HLS demuxer.
+    Playlist {
+        extensions: &'a str,
+        playlist: &'a std::path::Path,
+    },
+    /// The Matroska replay joined by the gateway on the reader's stdin.
+    Joined,
+}
+
+/// Copy-only reader arguments: local replay input only, starting near the
+/// live edge at a segment (keyframe) boundary, one video and the selected
+/// audio.
 pub(super) fn reader_args(
     cmd: &mut Command,
-    extensions: &str,
-    playlist: &std::path::Path,
+    input: ReaderInput<'_>,
     audio: Option<u32>,
     container: Container,
 ) {
     cmd.args(["-hide_banner", "-loglevel", "error", "-nostdin"]);
-    cmd.args([
-        "-protocol_whitelist",
-        "file",
-        "-allowed_extensions",
-        extensions,
-        "-live_start_index",
-        "-2",
-        "-i",
-    ])
-    .arg(playlist);
+    match input {
+        ReaderInput::Playlist {
+            extensions,
+            playlist,
+        } => {
+            cmd.args([
+                "-protocol_whitelist",
+                "file",
+                "-allowed_extensions",
+                extensions,
+                "-live_start_index",
+                "-2",
+                "-i",
+            ])
+            .arg(playlist);
+        }
+        // The joiner already starts at the live edge; the reader can open
+        // nothing but its own stdin.
+        ReaderInput::Joined => {
+            cmd.args([
+                "-protocol_whitelist",
+                "pipe",
+                "-f",
+                "matroska",
+                "-i",
+                "pipe:0",
+            ]);
+        }
+    }
     cmd.args(["-map", "0:v:0"]);
     if let Some(audio) = audio {
         cmd.arg("-map").arg(format!("0:{audio}"));
@@ -156,24 +198,40 @@ impl PlaybackManager {
             .shared_ingest(&scope, &source, &headers, probe.clone())
             .await?;
         let audio = audio_index.map(|index| ingest.index(index)).transpose()?;
+        let joined = ingest.matroska();
+        if joined != (container == Container::Matroska) {
+            return Err("Source replay unsupported".into());
+        }
+        let replay = ingest
+            .playlist
+            .parent()
+            .ok_or("Media storage unavailable")?
+            .to_owned();
         let id = Uuid::new_v4().to_string();
         let capability = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
         let mut cmd = Command::new(&self.config.ffmpeg);
         contain_media_process(&mut cmd);
         cmd.kill_on_drop(true)
-            .stdin(Stdio::null())
+            .stdin(if joined {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        reader_args(
-            &mut cmd,
-            ingest.extensions(),
-            &ingest.playlist,
-            audio,
-            container,
-        );
+        let input = if joined {
+            ReaderInput::Joined
+        } else {
+            ReaderInput::Playlist {
+                extensions: ingest.extensions(),
+                playlist: &ingest.playlist,
+            }
+        };
+        reader_args(&mut cmd, input, audio, container);
         let mut child = cmd
             .spawn()
             .map_err(|_| "Playback engine unavailable".to_owned())?;
+        let feed = child.stdin.take();
         let output = child.stdout.take().ok_or("Media output unavailable")?;
         let progress = child.stderr.take().ok_or("Media progress unavailable")?;
         let stream = fmp4::Stream::with_transport(
@@ -184,6 +242,20 @@ impl PlaybackManager {
             (container.file(), container.content_type()),
             Some(PROGRESSIVE_EVICT_AFTER),
         );
+        if let Some(mut feed) = feed {
+            // The joiner stops when the viewer's stream closes (release,
+            // failure, eviction, teardown) or the reader stops reading. Ending
+            // it closes the reader's stdin; a live body still ends in error.
+            let mut closed = stream.closed();
+            tokio::spawn(async move {
+                tokio::select! {
+                    error = joinable::follow(&replay, &mut feed) => {
+                        tracing::debug!(?error, "Progressive Matroska join ended");
+                    }
+                    _ = closed.wait_for(|closed| *closed) => {}
+                }
+            });
+        }
         // The session owns the reader before any await, so a cancelled start
         // still kills it and releases the ingest reference.
         let session = Session {
@@ -249,7 +321,7 @@ mod tests {
     }
 
     #[test]
-    fn mpegts_input_keeps_its_container() {
+    fn mpegts_and_matroska_inputs_keep_their_container_family() {
         let none = TrackSelection::default();
         assert_eq!(
             eligible(&probe("mpegts", "h264", "aac"), &caps(), &none, true),
@@ -257,20 +329,17 @@ mod tests {
         );
         assert_eq!(Container::MpegTs.file(), "stream.ts");
         assert_eq!(Container::MpegTs.content_type(), "video/mp2t");
-    }
-
-    #[test]
-    fn live_matroska_is_refused_even_when_its_replay_would_be_matroska() {
-        let none = TrackSelection::default();
-        // Every Matroska input the private Matroska replay accepts, including
-        // the FFV1/FLAC fixture that stalled on the built image.
-        for (video, audio) in [("h264", "flac"), ("ffv1", "flac"), ("h264", "aac")] {
+        // Every Matroska input whose private replay is Matroska, including the
+        // FFV1/FLAC fixture that stalled before the replay was joinable.
+        for (video, audio) in [("h264", "flac"), ("ffv1", "flac")] {
             assert_eq!(
                 eligible(&probe("matroska,webm", video, audio), &caps(), &none, true),
-                None,
+                Some(Container::Matroska),
                 "{video}/{audio}"
             );
         }
+        assert_eq!(Container::Matroska.file(), "stream.mkv");
+        assert_eq!(Container::Matroska.content_type(), "video/x-matroska");
     }
 
     #[test]
@@ -325,26 +394,42 @@ mod tests {
         );
     }
 
-    #[test]
-    fn reader_is_copy_only_local_and_starts_at_a_live_segment_boundary() {
+    fn args(input: ReaderInput<'_>, container: Container) -> Vec<String> {
         let mut cmd = Command::new("ffmpeg");
-        reader_args(
-            &mut cmd,
-            "ts,m3u8",
-            std::path::Path::new("/media/x/index.m3u8"),
-            Some(2),
-            Container::MpegTs,
-        );
-        let args: Vec<_> = cmd
-            .as_std()
+        reader_args(&mut cmd, input, Some(2), container);
+        cmd.as_std()
             .get_args()
             .map(|a| a.to_string_lossy().into_owned())
-            .collect();
+            .collect()
+    }
+
+    #[test]
+    fn reader_is_copy_only_local_and_starts_at_a_live_segment_boundary() {
+        let args = args(
+            ReaderInput::Playlist {
+                extensions: "ts,m3u8",
+                playlist: std::path::Path::new("/media/x/index.m3u8"),
+            },
+            Container::MpegTs,
+        );
         let joined = args.join(" ");
         assert!(joined.contains("-protocol_whitelist file -allowed_extensions ts,m3u8"));
         assert!(joined.contains("-live_start_index -2 -i /media/x/index.m3u8"));
         assert!(joined.contains("-map 0:v:0 -map 0:2 -c copy -sn -dn"));
         assert!(joined.contains("-f mpegts"));
+        assert!(!args
+            .iter()
+            .any(|a| a.starts_with("-c:v") || a == "-vf" || a == "-ss"));
+    }
+
+    #[test]
+    fn matroska_reader_opens_only_its_joined_stdin_and_copies() {
+        let args = args(ReaderInput::Joined, Container::Matroska);
+        let joined = args.join(" ");
+        assert!(joined.contains("-protocol_whitelist pipe -f matroska -i pipe:0"));
+        assert!(joined.contains("-map 0:v:0 -map 0:2 -c copy -sn -dn"));
+        assert!(joined.ends_with("-f matroska -progress pipe:2 -stats_period 0.5 pipe:1"));
+        assert!(!joined.contains("m3u8") && !joined.contains("file"));
         assert!(!args
             .iter()
             .any(|a| a.starts_with("-c:v") || a == "-vf" || a == "-ss"));

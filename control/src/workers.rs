@@ -2181,16 +2181,18 @@ printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","wi
         }
     }
 
+    // H264/AAC in Matroska has an MPEG-TS private replay: a same-container
+    // remux is impossible, so it is refused rather than converted.
     #[tokio::test]
-    async fn live_matroska_progressive_is_refused_before_any_media_job() {
+    async fn matroska_progressive_without_a_matroska_replay_is_refused_before_any_media_job() {
         let (root, workers, p) = fixture(false).await;
         std::fs::write(root.path().join("probe"), r#"#!/bin/sh
-printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"ffv1","width":640,"height":360,"pix_fmt":"yuv420p","avg_frame_rate":"25/1","r_frame_rate":"25/1","field_order":"progressive"},{"index":1,"codec_type":"audio","codec_name":"flac","channels":2}],"format":{"format_name":"matroska,webm"}}'
+printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","width":640,"height":360,"pix_fmt":"yuv420p","avg_frame_rate":"25/1","r_frame_rate":"25/1","field_order":"progressive"},{"index":1,"codec_type":"audio","codec_name":"aac","channels":2}],"format":{"format_name":"matroska,webm"}}'
 "#).unwrap();
         let mut matroska = request(1920);
         matroska.output.protocol = OutputProtocol::Progressive;
-        matroska.output.video_codecs = vec!["ffv1".into()];
-        matroska.output.audio_codecs = vec!["flac".into()];
+        matroska.output.video_codecs = vec!["h264".into()];
+        matroska.output.audio_codecs = vec!["aac".into()];
         assert_eq!(
             workers.create(&p, &matroska, "mkv", 0).await.unwrap_err(),
             "unsupported_output"
