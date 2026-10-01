@@ -61,9 +61,9 @@ language. Normalized output plans, including chosen tracks and conversion modes,
 still determine worker sharing; request preferences cannot merge incompatible
 outputs. Use matching control clients/gateway builds for these new fields.
 
-This is a schema example, not a playable public URL. `progressive` requests are
-accepted only when the selected original-container transport is compatible;
-there is no silent switch to HLS. Dimensions represent decoder capabilities,
+This is a schema example, not a playable public URL. `progressive` requests
+are currently rejected with `unsupported_output` for every input: no shared
+progressive output exists yet, and there is no silent switch to HLS. Dimensions represent decoder capabilities,
 not a product quality preference. Track indices are absolute input indices.
 Live sessions start at zero. Source URLs cannot contain embedded userinfo or
 fragments. At most 32 upstream headers, with 4096 bytes per value, are accepted;

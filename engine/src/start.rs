@@ -369,11 +369,11 @@ impl PlaybackManager {
                     let capability =
                         format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
                     let filename = if format == "hls" {
-                        "index.m3u8"
+                        "index.m3u8".to_owned()
                     } else {
                         // Original files are served under their own container
                         // name; the client demuxes them itself.
-                        Box::leak(format!("source.{format}").into_boxed_str())
+                        format!("source.{format}")
                     };
                     // A native file can only retain one default audio track here;
                     // arbitrary track changes deliberately return to managed HLS.

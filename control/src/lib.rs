@@ -1,5 +1,5 @@
-pub mod credentials;
 pub mod api;
+pub mod credentials;
 pub mod key_api;
 pub mod network;
 pub mod protocol;

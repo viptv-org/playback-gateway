@@ -180,8 +180,10 @@ async fn real_vaapi_hdr10_session_is_tone_mapped_on_the_gpu() {
     let Some(device) = std::env::var_os("PLAYBACK_TEST_VAAPI_DEVICE").map(PathBuf::from) else {
         return;
     };
-    let ffmpeg = PathBuf::from(std::env::var("PLAYBACK_TEST_FFMPEG").expect("PLAYBACK_TEST_FFMPEG"));
-    let ffprobe = PathBuf::from(std::env::var("PLAYBACK_TEST_FFPROBE").expect("PLAYBACK_TEST_FFPROBE"));
+    let ffmpeg =
+        PathBuf::from(std::env::var("PLAYBACK_TEST_FFMPEG").expect("PLAYBACK_TEST_FFMPEG"));
+    let ffprobe =
+        PathBuf::from(std::env::var("PLAYBACK_TEST_FFPROBE").expect("PLAYBACK_TEST_FFPROBE"));
     let vaapi = hardware::vaapi(&ffmpeg, &device, true).await;
     assert!(vaapi.encode, "the device must encode H.264");
     assert!(

@@ -121,9 +121,10 @@ physical decoder or hardware acceptance.
   [shared subtitles](SHARED_SUBTITLES.md), including an initially caption-disabled
   output. Other subtitle formats/platforms retain independent pipelines and
   truthful physical-input accounting; none are silently discarded.
-- Progressive v1 currently accepts compatible original-container transport,
-  with no silent switch to HLS. Existing continuous fMP4 is single-consumer and
-  not a shareable gateway output; flipping its eligibility is not fanout.
+- Progressive v1 requests are currently rejected with `unsupported_output` for
+  every input, with no silent switch to HLS (see issue #1). Existing continuous
+  fMP4 is single-consumer and not a shareable gateway output; flipping its
+  eligibility is not fanout.
 
 Before the shared subtitle implementation, a bounded local experiment with the same FFmpeg 9 binaries verified that the
 official segment-muxer Matroska/M3U8 seam retains H264, FLAC and subrip as indices
