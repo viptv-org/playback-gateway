@@ -105,16 +105,18 @@ Decision recorded 2026-09-30 (playback-gateway#1): original progressive
 delivery is a same-container lossless remux, not byte-identical forwarding.
 
 - **Supported subset.** `input.live` is `true`; the input container is
-  MPEG-TS (delivered as MPEG-TS, `video/mp2t`, `stream.ts`) or a Matroska input
-  whose private replay is Matroska (FFV1 video, FLAC audio or text subtitles;
-  delivered as Matroska, `video/x-matroska`, `stream.mkv`); the video and the
-  selected audio codecs are inside the private replay set and in the request's
-  `video_codecs`/`audio_codecs`; the picture is progressive and within
-  `max_width`/`max_height`; `conversion` is `auto`; and no subtitle track or
-  preferred subtitle language is requested. Live HLS, MP4 and other inputs,
-  mismatched container families (for example H264/AAC in Matroska, whose replay
-  is MPEG-TS), and any live request needing an encode fail with
-  `unsupported_output`. On-demand `progressive` requests are outside this
+  MPEG-TS whose private replay is MPEG-TS (delivered as MPEG-TS, `video/mp2t`,
+  `stream.ts`); the video and the selected audio codecs are inside the private
+  replay set and in the request's `video_codecs`/`audio_codecs`; the picture is
+  progressive and within `max_width`/`max_height`; `conversion` is `auto`; and
+  no subtitle track or preferred subtitle language is requested. Live HLS, MP4,
+  **Matroska** and other inputs, MPEG-TS inputs whose replay would be Matroska
+  (FFV1 video, FLAC audio or subtitle streams), and any live request needing an
+  encode fail at request time with `unsupported_output`, before any ingest,
+  reader or reservation starts. Live Matroska progressive is unsupported until
+  the private Matroska replay is joinable by a copy-only reader (see
+  [progressive qualification](docs/PROGRESSIVE_QUALIFICATION.md)); shared HLS
+  outputs of Matroska-replay inputs are unaffected. On-demand `progressive` requests are outside this
   contract: they keep the pre-existing original-file transport when the
   original container and codecs are compatible, and otherwise fail with
   `unsupported_output`.
@@ -137,6 +139,13 @@ delivery is a same-container lossless remux, not byte-identical forwarding.
   with `processing_failed`. The shared replay keeps its own time and byte
   window and deletes segments regardless of reader position, so a slow or
   stalled reader never retains shared storage or delays another viewer.
+- **Termination.** A live progressive body never ends cleanly. When its job
+  fails (storage exhaustion, eviction, ingest or reader failure), is released
+  or expires, or its reader stops for any reason, the gateway aborts the
+  chunked response without a terminating chunk (the connection is reset), so a
+  client sees a transport error, never an apparently complete stream. A
+  client must treat any end of a live progressive body as a failure and start
+  a new viewer session to continue.
 - **Lifecycle.** Each viewer has its own media token, lease, expiry and release.
   A closed client connection ends that viewer's reader. Releasing or expiring a
   viewer stops only its reader after the normal idle grace. When the last reader

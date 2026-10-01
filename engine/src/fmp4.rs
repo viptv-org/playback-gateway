@@ -20,6 +20,10 @@ pub(super) struct Stream {
     origin: f64,
     backpressured: Arc<AtomicBool>,
     evicted: Arc<AtomicBool>,
+    /// Set only when the producer reached a successful end of output. Every
+    /// other end (failure, eviction, release, a live reader stopping) aborts
+    /// the body so a client never mistakes it for a complete stream.
+    clean_end: Arc<AtomicBool>,
     pub(super) file: &'static str,
     content_type: &'static str,
 }
@@ -39,17 +43,19 @@ impl Stream {
             None,
         )
     }
-    /// `evict_after` bounds how long a reader may leave the bounded channel
-    /// full. A live reader that stays full that long is evicted: the producer
-    /// stops reading its child, and the heartbeat reports the output failed so
-    /// the coordinator tears it down. Other viewers never wait on it.
+    /// `live_evict_after` marks a live reader and bounds how long it may leave
+    /// the bounded channel full. A live reader that stays full that long is
+    /// evicted: the producer stops reading its child, and the heartbeat reports
+    /// the output failed so the coordinator tears it down. Other viewers never
+    /// wait on it. A live output has no successful end, so its body always ends
+    /// with an error, even when the reader process itself exits cleanly.
     pub(super) fn with_transport(
         mut output: impl tokio::io::AsyncRead + Send + Unpin + 'static,
         mut progress: impl tokio::io::AsyncRead + Send + Unpin + 'static,
         origin: f64,
         permits: Arc<InputPermits>,
         (file, content_type): (&'static str, &'static str),
-        evict_after: Option<Duration>,
+        live_evict_after: Option<Duration>,
     ) -> Arc<Self> {
         let (send, receiver) = mpsc::channel(32); // 32 * 64 KiB, plus one reader block.
         let (ready, ready_rx) = watch::channel(false);
@@ -87,6 +93,8 @@ impl Stream {
         let blocked = backpressured.clone();
         let evicted = Arc::new(AtomicBool::new(false));
         let eviction = evicted.clone();
+        let clean_end = Arc::new(AtomicBool::new(false));
+        let succeeded = clean_end.clone();
         tokio::spawn(async move {
             let _permits = permits;
             let mut bytes = vec![0; 64 * 1024];
@@ -103,7 +111,11 @@ impl Stream {
                                 break;
                             }
                         }
-                        if *completion.borrow() != Some(true) {
+                        if *completion.borrow() == Some(true) && live_evict_after.is_none() {
+                            // Published before `send` drops, so the consumer
+                            // sees it once the channel reports closed.
+                            succeeded.store(true, Ordering::Release);
+                        } else {
                             let _ =
                                 send.try_send(Err(std::io::Error::other("Media producer failed")));
                         }
@@ -114,7 +126,7 @@ impl Stream {
                         blocked.store(send.capacity() == 0, Ordering::Release);
                         let chunk = Ok(Bytes::copy_from_slice(&bytes[..n]));
                         let sent = async {
-                            match evict_after {
+                            match live_evict_after {
                                 Some(limit) => timeout(limit, send.send(chunk)).await.ok(),
                                 None => Some(send.send(chunk).await),
                             }
@@ -150,6 +162,7 @@ impl Stream {
             origin,
             backpressured,
             evicted,
+            clean_end,
             file,
             content_type,
         })
@@ -219,6 +232,10 @@ impl Stream {
                 let next = tokio::select! { next = receive.recv() => Ok(next), _ = closed.changed() => Err(std::io::Error::other("Media access revoked")) };
                 let Some(chunk) = next? else {
                     if self.evicted() { Err(std::io::Error::other("Media reader evicted"))?; }
+                    // The producer can stop (release, failure, a live reader
+                    // exiting) before this loop observes `closed`; only a
+                    // successful end may finish the body cleanly.
+                    if !self.clean_end.load(Ordering::Acquire) { Err(std::io::Error::other("Media output ended"))?; }
                     break;
                 };
                 yield chunk?;

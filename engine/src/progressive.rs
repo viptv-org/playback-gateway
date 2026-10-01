@@ -7,36 +7,41 @@ use ingest::ReplayKind;
 /// A slow reader may leave its bounded channel full for at most this long.
 pub(super) const PROGRESSIVE_EVICT_AFTER: Duration = Duration::from_secs(20);
 
+/// Supported progressive output containers. Only MPEG-TS is qualified.
+///
+/// Live Matroska is deliberately absent. The private Matroska replay writes
+/// every segment as a complete Matroska file, and the reader's HLS demuxer
+/// concatenates them into one byte stream. At each new EBML header the
+/// Matroska demuxer resyncs backwards (about 10 s per segment); a copy-only
+/// Matroska muxer then stalls. Supporting it needs a joinable replay (a header
+/// plus media-only segments, or a reader that opens each segment on its own).
+/// See `docs/PROGRESSIVE_QUALIFICATION.md`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Container {
     MpegTs,
-    Matroska,
 }
 impl Container {
     pub(super) fn format(self) -> &'static str {
         match self {
             Self::MpegTs => "mpegts",
-            Self::Matroska => "matroska",
         }
     }
     pub(super) fn file(self) -> &'static str {
         match self {
             Self::MpegTs => "stream.ts",
-            Self::Matroska => "stream.mkv",
         }
     }
     pub(super) fn content_type(self) -> &'static str {
         match self {
             Self::MpegTs => "video/mp2t",
-            Self::Matroska => "video/x-matroska",
         }
     }
 }
 
-/// The qualified subset. The input container must already be the private
-/// replay's container family, so the output is the same container remuxed
-/// without encoding. Everything else is explicitly unsupported, never
-/// silently converted or switched to HLS.
+/// The qualified subset: live MPEG-TS whose private replay is MPEG-TS, so the
+/// output is the same container remuxed without encoding. Everything else,
+/// including live Matroska, is explicitly unsupported, never silently
+/// converted or switched to HLS.
 pub(super) fn container(
     probe: &Probe,
     caps: &Capabilities,
@@ -53,14 +58,9 @@ pub(super) fn container(
         return None;
     }
     let names = probe.format.get("format_name")?.as_str()?;
-    let input = if names.split(',').any(|name| name == "mpegts") {
-        ReplayKind::Ts
-    } else if names.split(',').any(|name| name == "matroska") {
-        ReplayKind::Matroska
-    } else {
-        return None;
-    };
-    if ReplayKind::for_probe(probe) != input {
+    if !names.split(',').any(|name| name == "mpegts")
+        || ReplayKind::for_probe(probe) != ReplayKind::Ts
+    {
         return None;
     }
     let video = probe.video().ok()?;
@@ -76,10 +76,7 @@ pub(super) fn container(
     {
         return None;
     }
-    Some(match input {
-        ReplayKind::Ts => Container::MpegTs,
-        ReplayKind::Matroska => Container::Matroska,
-    })
+    Some(Container::MpegTs)
 }
 
 /// Copy-only reader arguments: local replay files only, start near the live
@@ -251,23 +248,28 @@ mod tests {
     }
 
     #[test]
-    fn mpegts_and_matroska_inputs_keep_their_container_family() {
+    fn mpegts_input_keeps_its_container() {
         let none = TrackSelection::default();
         assert_eq!(
             eligible(&probe("mpegts", "h264", "aac"), &caps(), &none, true),
             Some(Container::MpegTs)
         );
-        assert_eq!(
-            eligible(
-                &probe("matroska,webm", "h264", "flac"),
-                &caps(),
-                &none,
-                true
-            ),
-            Some(Container::Matroska)
-        );
         assert_eq!(Container::MpegTs.file(), "stream.ts");
-        assert_eq!(Container::Matroska.content_type(), "video/x-matroska");
+        assert_eq!(Container::MpegTs.content_type(), "video/mp2t");
+    }
+
+    #[test]
+    fn live_matroska_is_refused_even_when_its_replay_would_be_matroska() {
+        let none = TrackSelection::default();
+        // Every Matroska input the private Matroska replay accepts, including
+        // the FFV1/FLAC fixture that stalled on the built image.
+        for (video, audio) in [("h264", "flac"), ("ffv1", "flac"), ("h264", "aac")] {
+            assert_eq!(
+                eligible(&probe("matroska,webm", video, audio), &caps(), &none, true),
+                None,
+                "{video}/{audio}"
+            );
+        }
     }
 
     #[test]
@@ -345,6 +347,101 @@ mod tests {
         assert!(!args
             .iter()
             .any(|a| a.starts_with("-c:v") || a == "-vf" || a == "-ss"));
+    }
+
+    /// A stream over an in-memory producer; returns the producer's write end.
+    fn transport(live: bool) -> (Arc<fmp4::Stream>, tokio::io::DuplexStream, Arc<Semaphore>) {
+        let (writer, output) = tokio::io::duplex(64 * 1024);
+        let (_progress_writer, progress) = tokio::io::duplex(1024);
+        let slots = Arc::new(Semaphore::new(1));
+        let permits = Arc::new(InputPermits {
+            _playback: slots.clone().try_acquire_owned().unwrap().into(),
+            _provider: None,
+        });
+        let file = if live {
+            ("stream.ts", "video/mp2t")
+        } else {
+            ("stream.mp4", "video/mp4")
+        };
+        let stream = fmp4::Stream::with_transport(
+            output,
+            progress,
+            0.0,
+            permits,
+            file,
+            live.then_some(PROGRESSIVE_EVICT_AFTER),
+        );
+        (stream, writer, slots)
+    }
+
+    async fn body(stream: &Arc<fmp4::Stream>) -> Result<axum::body::Bytes, axum::Error> {
+        let response = stream.clone().serve(axum::http::Method::GET).await.unwrap();
+        timeout(
+            Duration::from_secs(5),
+            axum::body::to_bytes(response.into_body(), 64 * 1024 * 1024),
+        )
+        .await
+        .expect("body ends")
+    }
+
+    #[tokio::test]
+    async fn live_reader_exiting_cleanly_still_ends_the_body_with_an_error() {
+        // e.g. the replay is torn down after ENOSPC and the reader sees an end
+        // of playlist: a live viewer must not receive what looks like a file.
+        let (stream, mut writer, _slots) = transport(true);
+        writer.write_all(&[0x47; 188]).await.unwrap();
+        stream.ready().await.unwrap();
+        drop(writer);
+        stream.complete(true);
+        assert!(body(&stream).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn failed_or_released_reader_never_ends_its_body_cleanly() {
+        // Exercise the race between the producer dropping its channel and the
+        // consumer observing the close, whichever side wins.
+        for round in 0..50 {
+            let (stream, mut writer, _slots) = transport(true);
+            writer.write_all(&[0x47; 188]).await.unwrap();
+            stream.ready().await.unwrap();
+            let consumer = {
+                let stream = stream.clone();
+                tokio::spawn(async move { body(&stream).await })
+            };
+            if round % 2 == 0 {
+                tokio::task::yield_now().await;
+            }
+            // The coordinator's stop path on job failure or release.
+            stream.close();
+            drop(writer);
+            assert!(
+                consumer.await.unwrap().is_err(),
+                "round {round}: a failed job must abort the body"
+            );
+        }
+        // A reader process that fails ends the body with an error too.
+        let (stream, mut writer, _slots) = transport(true);
+        writer.write_all(&[0x47; 188]).await.unwrap();
+        stream.ready().await.unwrap();
+        drop(writer);
+        stream.complete(false);
+        assert!(body(&stream).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn on_demand_output_ends_cleanly_only_after_success() {
+        for success in [true, false] {
+            let (stream, mut writer, _slots) = transport(false);
+            writer.write_all(b"fmp4").await.unwrap();
+            stream.ready().await.unwrap();
+            drop(writer);
+            stream.complete(success);
+            let result = body(&stream).await;
+            assert_eq!(result.is_ok(), success);
+            if success {
+                assert_eq!(&result.unwrap()[..], b"fmp4");
+            }
+        }
     }
 
     #[tokio::test]

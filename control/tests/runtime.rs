@@ -1709,6 +1709,30 @@ async fn start_progressive(fixture: &Fixture, key: &str, namespace: &str, id: &s
     );
     viewer
 }
+/// Live Matroska progressive is outside the supported subset (see
+/// docs/PROGRESSIVE_QUALIFICATION.md). Matroska fixture modes prove the
+/// explicit request-time refusal on the built image, and that it starts no
+/// ingest, reader, replay or reservation, then exit cleanly.
+async fn refuse_matroska_progressive(mut fixture: Fixture) {
+    let (video, _, _, _) = progressive_codecs();
+    let service = fixture.child.id().unwrap();
+    let refused = create_progressive(&fixture, &fixture.key, "fixture", "matroska", video).await;
+    assert_eq!(refused.status().as_u16(), 422, "explicit refusal");
+    let refused: Value = refused.json().await.unwrap();
+    assert_eq!(refused["error"]["code"], "unsupported_output");
+    connections(&fixture.source, 0).await;
+    assert!(children(service).is_empty(), "no ingest or reader starts");
+    // The media root may not even exist yet: nothing was ever started.
+    let media = state_root(fixture.root.path()).join("media");
+    assert!(
+        !media.exists() || fixture.media_dirs().is_empty(),
+        "no private replay"
+    );
+    available(&fixture, 1, 4, 5).await;
+    println!("Live Matroska progressive refused: unsupported_output");
+    fixture.signal("-TERM").await;
+    assert!(fixture.child.wait().await.unwrap().success());
+}
 /// Continuously consumes one progressive body; keeps its first `keep` bytes.
 struct Consumer {
     total: Arc<AtomicUsize>,
@@ -1877,6 +1901,9 @@ async fn real_progressive_image_share_late_join_evict_isolate_and_reap() {
     assert!(progressive());
     let mut fixture = Fixture::new().await;
     let (video, audio, file, content_type) = progressive_codecs();
+    if file == "stream.mkv" {
+        return refuse_matroska_progressive(fixture).await;
+    }
     let service = fixture.child.id().unwrap();
 
     // A decoder the client cannot use fails explicitly and opens nothing.
@@ -2195,6 +2222,9 @@ async fn real_progressive_kernel_bounded_media_full_fails_and_reclaims() {
         Ok("/var/lib/playback-gateway")
     );
     let mut fixture = Fixture::new().await;
+    if progressive_codecs().2 == "stream.mkv" {
+        return refuse_matroska_progressive(fixture).await;
+    }
     let service = fixture.child.id().unwrap();
     let media = state_root(fixture.root.path()).join("media");
     let process_status = std::fs::read_to_string(format!("/proc/{service}/status")).unwrap();
