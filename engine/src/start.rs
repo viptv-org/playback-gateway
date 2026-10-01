@@ -219,7 +219,13 @@ impl PlaybackManager {
             }));
         }
         let (width, height) = dimensions(&caps)?;
-        if !caps.h264 || !caps.aac {
+        // A scoped progressive request declares the decoders it will use for
+        // the original codecs; it never falls back to the managed H264/AAC path.
+        let progressive_request = scope.is_some()
+            && live
+            && caps.direct_files == Some(true)
+            && caps.direct_hls == Some(false);
+        if !progressive_request && (!caps.h264 || !caps.aac) {
             return Err("H264 and AAC playback support is required".into());
         }
         let permit = self
@@ -250,7 +256,7 @@ impl PlaybackManager {
                 "Could not inspect source video safely; try another stream".to_owned()
             })?;
         let probe_ms = probe_started.elapsed().as_millis() as u64;
-        let shared_scope = scope.filter(|_| {
+        let shared_scope = scope.clone().filter(|_| {
             live && caps.direct_hls != Some(false) && ingest::replay_indices(&probe).is_some()
         });
         // The capability envelope gates only the managed/transcode path. Original
@@ -331,6 +337,68 @@ impl PlaybackManager {
                 .is_some_and(|duration| position >= duration)
         {
             return Err("Playback position is past the end of this source".into());
+        }
+        if progressive_request {
+            let Some(container) =
+                progressive::container(&probe, &caps, selected_input, &selection, live)
+            else {
+                // No plan: the coordinator reports `unsupported_output`.
+                return Ok(PreparedPlayback::new(None, async {
+                    Err("Progressive output unsupported".to_owned())
+                }));
+            };
+            let video = probe.video()?;
+            let audio_mode = if selected_input.is_some() {
+                "copy"
+            } else {
+                "none"
+            };
+            let plan = OutputPlan {
+                mode: "remux".into(),
+                format: container.format().into(),
+                video_mode: "copy".into(),
+                audio_mode: audio_mode.into(),
+                video_codec: video.codec_name.clone().unwrap_or_default(),
+                audio_codec: selected_input.and_then(|s| s.codec_name.clone()),
+                width: video.width.unwrap_or(0),
+                height: video.height.unwrap_or(0),
+                audio_track: selected_audio.as_ref().map(|s| s.input_index),
+                subtitle_track: None,
+                position_micros: 0,
+                segmentation: "progressive".into(),
+                // One reader per viewer; viewers share the ingest, not the output.
+                shareable: false,
+                shared_ingest: true,
+            };
+            let job = progressive::Progressive {
+                container,
+                scope: scope.expect("progressive requests are scoped"),
+                source: validated.to_string(),
+                headers: header_block,
+                probe: probe.clone(),
+                permits,
+                audio_index: selected_audio.as_ref().map(|s| s.input_index),
+                response: PlaybackResponse {
+                    id: String::new(),
+                    url: String::new(),
+                    format: container.format().into(),
+                    mode: "remux".into(),
+                    video_mode: "copy".into(),
+                    audio_mode: audio_mode.into(),
+                    position: 0.0,
+                    live: true,
+                    duration: 0.0,
+                    audio_tracks,
+                    subtitles_supported: false,
+                    subtitle_tracks,
+                    selected_audio,
+                    selected_subtitle: None,
+                },
+            };
+            return Ok(PreparedPlayback::new(Some(plan), async move {
+                let _lifecycle = _lifecycle;
+                self.start_progressive(job).await
+            }));
         }
         // Original delivery is opt-in, uses inspected tracks, and keeps the
         // provider reservation owned by this session and in-flight reads.

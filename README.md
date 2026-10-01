@@ -42,9 +42,11 @@ including when captions are enabled only by a late output. Source track identity
 stays absolute; selected WebVTT stream index is zero within its separate rendition.
 See [shared subtitle qualification](docs/SHARED_SUBTITLES.md).
 
-Sources containing unqualified subtitle formats or other video/audio codecs,
-and progressive live delivery, retain their existing independent execution paths. They are not yet
-qualified for cross-output single-ingest. Different fallback output plans reserve
+Sources containing unqualified subtitle formats or other video/audio codecs
+retain their existing independent execution paths. They are not yet
+qualified for cross-output single-ingest. Progressive live delivery is a
+same-container lossless remux of the shared replay for a narrow supported subset
+only; see [progressive live delivery](API_V1.md#progressive-live-delivery). Different fallback output plans reserve
 separate physical input slots; identical plans still share their existing job.
 VOD seek origins remain distinct. The
 replay has 12 retained segments plus deletion grace, a 20-second first-segment deadline

@@ -9,6 +9,15 @@ use std::collections::{BTreeMap, BTreeSet};
 
 /// Use the engine's inspected plan, never a parallel control-layer approximation.
 pub use playback_engine::OutputPlan as ExecutionPlan;
+
+/// Progressive same-container remux: one private reader per viewer over the
+/// shared live ingest. Such outputs are never joined by another viewer.
+pub fn single_consumer(plan: &ExecutionPlan) -> bool {
+    plan.segmentation == "progressive"
+        && plan.shared_ingest
+        && !plan.shareable
+        && matches!(plan.format.as_str(), "mpegts" | "matroska")
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
@@ -185,7 +194,8 @@ impl Sessions {
                 start_job: false,
             });
         }
-        if !plan.shareable {
+        let single = single_consumer(plan);
+        if !plan.shareable && !(single && request.input.live) {
             return Err("unsupported_output");
         }
         let body = serde_json::to_string(request).map_err(|_| "invalid_request")?;
@@ -236,7 +246,13 @@ impl Sessions {
         } else {
             hex(&hash(&serde_json::json!([identity, plan]).to_string()))
         };
-        let fingerprint = hex(&hash(&serde_json::json!([input, plan]).to_string()));
+        // A single-consumer output is a distinct job for each viewer; only its
+        // input identity (and so the input quota) is shared.
+        let fingerprint = if single {
+            format!("single_{}", random_hex(16))
+        } else {
+            hex(&hash(&serde_json::json!([input, plan]).to_string()))
+        };
         let existing = self.jobs.values().find(|j| j.fingerprint == fingerprint);
         if existing.is_some_and(|job| job.state == JobState::Stopping) {
             return Err("input_cleanup_pending");
@@ -692,6 +708,74 @@ mod tests {
             shareable: true,
             shared_ingest: true,
         }
+    }
+    fn progressive_plan() -> ExecutionPlan {
+        ExecutionPlan {
+            format: "mpegts".into(),
+            segmentation: "progressive".into(),
+            shareable: false,
+            ..plan()
+        }
+    }
+    #[test]
+    fn progressive_viewers_get_private_jobs_over_one_counted_input() {
+        let p = principal("one", "family");
+        let mut sessions = Sessions::default();
+        let mut progressive = request("family");
+        progressive.output.protocol = OutputProtocol::Progressive;
+        let first = sessions
+            .reserve(&p, &progressive, &progressive_plan(), "p-1", 0)
+            .unwrap();
+        let second = sessions
+            .reserve(&p, &progressive, &progressive_plan(), "p-2", 0)
+            .unwrap();
+        // Each viewer starts its own reader; neither joins the other's output.
+        assert!(first.start_job && second.start_job);
+        assert_ne!(first.viewer.job_id, second.viewer.job_id);
+        // An HLS output of the same live input shares the same physical input.
+        let hls = sessions
+            .reserve(&p, &request("family"), &plan(), "h-1", 0)
+            .unwrap();
+        assert!(hls.start_job);
+        let available = sessions.available(&p, 0);
+        assert_eq!(available.inputs, 1);
+        assert_eq!(available.outputs, 0);
+        // The output quota bounds readers; a fourth output is refused.
+        assert_eq!(
+            sessions
+                .reserve(&p, &progressive, &progressive_plan(), "p-3", 0)
+                .unwrap_err(),
+            "output_capacity"
+        );
+        // Releasing one reader stops only its own job after the idle grace.
+        assert!(sessions.ready(&first.viewer.job_id, 1));
+        assert!(sessions.ready(&second.viewer.job_id, 1));
+        assert!(sessions.ready(&hls.viewer.job_id, 1));
+        sessions.release(&p, &first.viewer.id, 2).unwrap();
+        assert_eq!(sessions.reap(40), vec![first.viewer.job_id.clone()]);
+        assert_eq!(
+            sessions.get(&p, &second.viewer.id, 40).unwrap().status,
+            Status::Ready
+        );
+        // Single-consumer plans are never accepted for on-demand input or
+        // without the shared ingest.
+        let mut on_demand = progressive.clone();
+        on_demand.input.live = false;
+        assert_eq!(
+            sessions
+                .reserve(&p, &on_demand, &progressive_plan(), "p-4", 40)
+                .unwrap_err(),
+            "unsupported_output"
+        );
+        let unshared = ExecutionPlan {
+            shared_ingest: false,
+            ..progressive_plan()
+        };
+        assert!(!single_consumer(&unshared));
+        assert!(!single_consumer(&ExecutionPlan {
+            shareable: false,
+            ..plan()
+        }));
     }
     #[test]
     fn five_viewers_share_one_job_and_single_stop_does_not_interrupt_others() {

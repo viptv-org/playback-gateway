@@ -121,10 +121,19 @@ physical decoder or hardware acceptance.
   [shared subtitles](SHARED_SUBTITLES.md), including an initially caption-disabled
   output. Other subtitle formats/platforms retain independent pipelines and
   truthful physical-input accounting; none are silently discarded.
-- Progressive v1 requests are currently rejected with `unsupported_output` for
-  every input, with no silent switch to HLS (see issue #1). Existing continuous
-  fMP4 is single-consumer and not a shareable gateway output; flipping its
-  eligibility is not fanout.
+- Progressive v1 is a same-container lossless remux of the shared private
+  replay for live MPEG-TS inputs and Matroska-replay Matroska inputs only (see
+  [API v1](../API_V1.md#progressive-live-delivery)). Each viewer owns one
+  bounded copy-only reader; other inputs fail with `unsupported_output`, with no
+  silent switch to HLS. Arbitrary byte ranges, seeking and HLS or MP4 inputs
+  remain unsupported. Existing continuous fMP4 is single-consumer and not a
+  shareable gateway output; flipping its eligibility is not fanout.
+- Progressive evidence is the real-FFmpeg fixture
+  `real_progressive_viewers_share_one_upstream_late_join_decodes_and_last_release_reaps`
+  (MPEG-TS H264/AAC over plain loopback HTTP: two viewers, one upstream, a late
+  join that starts on a keyframe and decodes, and last-release cleanup). A
+  Matroska progressive fixture, HTTPS ingress and the built image have not been
+  qualified yet.
 
 Before the shared subtitle implementation, a bounded local experiment with the same FFmpeg 9 binaries verified that the
 official segment-muxer Matroska/M3U8 seam retains H264, FLAC and subrip as indices

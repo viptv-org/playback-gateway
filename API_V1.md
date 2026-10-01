@@ -61,9 +61,11 @@ language. Normalized output plans, including chosen tracks and conversion modes,
 still determine worker sharing; request preferences cannot merge incompatible
 outputs. Use matching control clients/gateway builds for these new fields.
 
-This is a schema example, not a playable public URL. `progressive` requests
-are currently rejected with `unsupported_output` for every input: no shared
-progressive output exists yet, and there is no silent switch to HLS. Dimensions represent decoder capabilities,
+This is a schema example, not a playable public URL. Live `progressive` is
+accepted only for the supported subset described in
+[progressive live delivery](#progressive-live-delivery), which also states the
+on-demand behavior; every other live `progressive` request fails with
+`unsupported_output`, with no silent switch to HLS. Dimensions represent decoder capabilities,
 not a product quality preference. Track indices are absolute input indices.
 Live sessions start at zero. Source URLs cannot contain embedded userinfo or
 fragments. At most 32 upstream headers, with 4096 bytes per value, are accepted;
@@ -96,6 +98,52 @@ Eligible live replay outputs share one input across differing normalized plans.
 Independent fallback or VOD output pipelines each consume an input reservation;
 viewers joining an identical existing job do not reserve another input. This
 accounting does not promise universal single-ingest for every source/transport.
+
+### Progressive live delivery
+
+Decision recorded 2026-09-30 (playback-gateway#1): original progressive
+delivery is a same-container lossless remux, not byte-identical forwarding.
+
+- **Supported subset.** `input.live` is `true`; the input container is
+  MPEG-TS (delivered as MPEG-TS, `video/mp2t`, `stream.ts`) or a Matroska input
+  whose private replay is Matroska (FFV1 video, FLAC audio or text subtitles;
+  delivered as Matroska, `video/x-matroska`, `stream.mkv`); the video and the
+  selected audio codecs are inside the private replay set and in the request's
+  `video_codecs`/`audio_codecs`; the picture is progressive and within
+  `max_width`/`max_height`; `conversion` is `auto`; and no subtitle track or
+  preferred subtitle language is requested. Live HLS, MP4 and other inputs,
+  mismatched container families (for example H264/AAC in Matroska, whose replay
+  is MPEG-TS), and any live request needing an encode fail with
+  `unsupported_output`. On-demand `progressive` requests are outside this
+  contract: they keep the pre-existing original-file transport when the
+  original container and codecs are compatible, and otherwise fail with
+  `unsupported_output`.
+- **Execution.** Compatible viewers in one namespace with the same source and
+  headers share one authenticated upstream ingest, the same one shared HLS
+  outputs use. Each viewer gets its own job: a copy-only FFmpeg reader of the
+  private replay that can open only gateway-generated local files. The output
+  carries the first video and the one selected audio track (or none);
+  metadata, chapters, data and subtitle streams are dropped. No packet is
+  re-encoded.
+- **Join and seek.** A reader starts two replay segments behind the live edge,
+  at a segment boundary, which is a keyframe, and writes fresh container headers.
+  There are no byte ranges (`Accept-Ranges: none`), no seeking and no content
+  length. Each viewer's media URL can be opened once with `GET` (`HEAD` is
+  answered without consuming it). A second `GET` on the same viewer fails, so
+  reconnecting requires a new viewer session.
+- **Bounds.** Each reader has a bounded in-memory channel (32 chunks of 64 KiB).
+  A reader that leaves it full for 20 seconds, including a viewer that never
+  opens its URL, is evicted: its stream ends with an error and its job fails
+  with `processing_failed`. The shared replay keeps its own time and byte
+  window and deletes segments regardless of reader position, so a slow or
+  stalled reader never retains shared storage or delays another viewer.
+- **Lifecycle.** Each viewer has its own media token, lease, expiry and release.
+  A closed client connection ends that viewer's reader. Releasing or expiring a
+  viewer stops only its reader after the normal idle grace. When the last reader
+  of an input is torn down, the ingest is cancelled, its process reaped and its
+  storage removed; reservations are released only after that teardown.
+- **Quotas.** Every progressive viewer uses one output reservation. All outputs
+  of one live input, progressive or HLS, use one input reservation.
 
 ### Shared live text subtitles
 

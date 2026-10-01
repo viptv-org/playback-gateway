@@ -177,7 +177,16 @@ impl Workers {
         .map_err(|_| "startup_timeout")?
         .map_err(|_| "source_preparation_failed")?;
         let plan = prepared.plan.as_ref().ok_or("unsupported_output")?;
-        if (plan.format == "hls") == progressive || !plan.shareable {
+        // Live progressive is the same-container remux subset only. On-demand
+        // progressive keeps its pre-existing original-file transport.
+        let accepted = if progressive && request.input.live {
+            crate::sessions::single_consumer(plan)
+        } else if progressive {
+            plan.format != "hls" && plan.shareable
+        } else {
+            plan.format == "hls" && plan.shareable
+        };
+        if !accepted {
             return Err("unsupported_output");
         }
         let timestamp = now.saturating_add(started.elapsed().as_secs());
@@ -1080,6 +1089,316 @@ pub(crate) mod tests {
         workers.reap(56).await.unwrap();
         expect_connections(&source, 0).await;
         assert_eq!(workers.sessions.lock().unwrap().job_count(), 0);
+        workers.shutdown().await;
+    }
+
+    /// Read at least `limit` more bytes of a live progressive body.
+    async fn read_live(body: &mut axum::body::Body, limit: usize) -> Vec<u8> {
+        use axum::body::HttpBody;
+        let mut bytes = Vec::new();
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while bytes.len() < limit {
+                let frame =
+                    std::future::poll_fn(|cx| std::pin::Pin::new(&mut *body).poll_frame(cx))
+                        .await
+                        .expect("live body ended early")
+                        .expect("live body failed");
+                if let Ok(data) = frame.into_data() {
+                    bytes.extend_from_slice(&data);
+                }
+            }
+        })
+        .await
+        .expect("progressive body must keep flowing");
+        bytes
+    }
+
+    #[tokio::test]
+    #[ignore = "requires real FFmpeg/ffprobe; isolated plain-HTTP progressive live fixture"]
+    async fn real_progressive_viewers_share_one_upstream_late_join_decodes_and_last_release_reaps()
+    {
+        let ffmpeg = std::env::var("PLAYBACK_TEST_FFMPEG").unwrap();
+        let ffprobe = std::env::var("PLAYBACK_TEST_FFPROBE").unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let input = root.path().join("input.ts");
+        let output = tokio::time::timeout(
+            Duration::from_secs(20),
+            tokio::process::Command::new(&ffmpeg)
+                .kill_on_drop(true)
+                .args([
+                    "-v",
+                    "error",
+                    "-nostdin",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc2=size=320x180:rate=25",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=frequency=440:sample_rate=48000",
+                    "-t",
+                    "12",
+                    "-c:v",
+                    "libx264",
+                    "-threads",
+                    "2",
+                    "-preset",
+                    "ultrafast",
+                    "-g",
+                    "25",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "64k",
+                    "-f",
+                    "mpegts",
+                ])
+                .arg(&input)
+                .output(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(output.status.success(), "fixture generation must succeed");
+        let source = http_source(std::fs::read(input).unwrap()).await;
+        let media_root = root.path().join("media");
+        let engine = PlaybackManager::new(playback_engine::Config {
+            ffmpeg: ffmpeg.clone().into(),
+            ffprobe: ffprobe.clone().into(),
+            root: media_root.clone(),
+            max_sessions: 4,
+            ttl: Duration::from_secs(120),
+        });
+        let credentials = Arc::new(
+            Credentials::from_connection(
+                rusqlite::Connection::open_in_memory().unwrap(),
+                BOOTSTRAP,
+            )
+            .unwrap(),
+        );
+        let spec = KeySpec {
+            label: "real progressive fixture".into(),
+            namespaces: vec!["fixture".into()],
+            scopes: vec![Scope::Create, Scope::Read, Scope::Renew, Scope::Release],
+            quotas: Quotas {
+                inputs: 1,
+                outputs: 3,
+                viewers: 5,
+            },
+            expires_at: None,
+        };
+        let key = credentials.issue(BOOTSTRAP, spec, 0).unwrap();
+        let principal = credentials.authenticate(&key.secret, 0).unwrap();
+        let workers = Workers::new(engine, credentials, NetworkPolicy::loopback_fixture())
+            .await
+            .unwrap();
+        let mut request = request(1920);
+        request.input.url = source.url.clone();
+        request.output.protocol = OutputProtocol::Progressive;
+
+        // Decoders the client cannot use fail explicitly, never via HLS.
+        let mut undecodable = request.clone();
+        undecodable.output.video_codecs = vec!["hevc".into()];
+        assert_eq!(
+            workers
+                .create(&principal, &undecodable, "undecodable", 0)
+                .await
+                .unwrap_err(),
+            "unsupported_output"
+        );
+
+        let first = workers
+            .create(&principal, &request, "first", 0)
+            .await
+            .unwrap();
+        expect_connections(&source, 1).await;
+        let opened = source.requests.load(std::sync::atomic::Ordering::SeqCst);
+        let delivery = workers.delivery(&principal, &first, 0).unwrap().unwrap();
+        assert_eq!(delivery.format, "mpegts");
+        assert_eq!(delivery.mode, "remux");
+        assert_eq!(
+            (delivery.video_mode.as_str(), delivery.audio_mode.as_str()),
+            ("copy", "copy")
+        );
+        assert!(delivery.url.ends_with("/stream.ts"));
+        let first_token = delivery.url.split('/').nth(3).unwrap().to_owned();
+        let head = workers
+            .media(
+                &first.id,
+                &first_token,
+                "stream.ts",
+                0,
+                axum::http::Method::HEAD,
+                axum::http::HeaderMap::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(head.headers()["content-type"], "video/mp2t");
+        assert_eq!(head.headers()["accept-ranges"], "none");
+        let first_body = workers
+            .media(
+                &first.id,
+                &first_token,
+                "stream.ts",
+                0,
+                axum::http::Method::GET,
+                axum::http::HeaderMap::new(),
+            )
+            .await
+            .unwrap();
+        let mut first_body = first_body.into_body();
+        let first_bytes = read_live(&mut first_body, 256 * 1024).await;
+        assert_eq!(first_bytes[0], 0x47, "fresh MPEG-TS packets");
+        // The first viewer keeps consuming while another viewer joins.
+        let first_reader = tokio::spawn(async move {
+            use axum::body::HttpBody;
+            // Ends when the release tears this viewer's reader down.
+            while let Some(Ok(_)) =
+                std::future::poll_fn(|cx| std::pin::Pin::new(&mut first_body).poll_frame(cx)).await
+            {
+            }
+        });
+
+        // A late viewer gets a private reader over the same ingest.
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        let late = workers
+            .create(&principal, &request, "late", 3)
+            .await
+            .unwrap();
+        assert_ne!(late.job_id, first.job_id);
+        expect_connections(&source, 1).await;
+        assert_eq!(
+            source.requests.load(std::sync::atomic::Ordering::SeqCst),
+            opened,
+            "a progressive late join must not re-open the provider"
+        );
+        let late_delivery = workers.delivery(&principal, &late, 3).unwrap().unwrap();
+        let late_token = late_delivery.url.split('/').nth(3).unwrap().to_owned();
+        // Viewer media authorization is independent.
+        assert!(workers
+            .media(
+                &late.id,
+                &first_token,
+                "stream.ts",
+                3,
+                axum::http::Method::GET,
+                axum::http::HeaderMap::new()
+            )
+            .await
+            .is_err());
+        let late_body = workers
+            .media(
+                &late.id,
+                &late_token,
+                "stream.ts",
+                3,
+                axum::http::Method::GET,
+                axum::http::HeaderMap::new(),
+            )
+            .await
+            .unwrap();
+        let mut late_body = late_body.into_body();
+        let late_bytes = read_live(&mut late_body, 512 * 1024).await;
+        assert!(
+            !first_reader.is_finished(),
+            "the first viewer keeps receiving media"
+        );
+        let decoded = root.path().join("late.ts");
+        std::fs::write(&decoded, &late_bytes).unwrap();
+        // The late output starts at a keyframe with fresh headers and decodes.
+        let probe = tokio::process::Command::new(&ffprobe)
+            .args([
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-read_intervals",
+                "%+#1",
+                "-show_entries",
+                "packet=flags",
+                "-show_entries",
+                "stream=codec_name",
+                "-of",
+                "csv=p=0",
+            ])
+            .arg(&decoded)
+            .output()
+            .await
+            .unwrap();
+        let facts = String::from_utf8_lossy(&probe.stdout);
+        assert!(
+            facts.contains("h264"),
+            "late output carries the original codec: {facts}"
+        );
+        assert!(
+            facts.lines().any(|line| line.starts_with('K')),
+            "first video packet is a keyframe: {facts}"
+        );
+        let decode = tokio::process::Command::new(&ffmpeg)
+            .args(["-v", "error", "-xerror", "-i"])
+            .arg(&decoded)
+            .args(["-map", "0:v:0", "-map", "0:a:0", "-f", "null", "-"])
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            decode.status.success(),
+            "late progressive output must decode"
+        );
+        // A stream is single-consumer: a second GET on one viewer is refused.
+        assert!(workers
+            .media(
+                &late.id,
+                &late_token,
+                "stream.ts",
+                3,
+                axum::http::Method::GET,
+                axum::http::HeaderMap::new()
+            )
+            .await
+            .is_err());
+
+        // Releasing one viewer leaves the other reader and the ingest running.
+        workers
+            .sessions
+            .lock()
+            .unwrap()
+            .release(&principal, &first.id, 5)
+            .unwrap();
+        workers.reap(21).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), first_reader)
+            .await
+            .expect("a released viewer's stream ends")
+            .unwrap();
+        expect_connections(&source, 1).await;
+        assert!(workers
+            .media_target(&late.id, &late_token, 21)
+            .await
+            .is_ok());
+        read_live(&mut late_body, 128 * 1024).await;
+        drop(late_body);
+        // The last release cancels the reader, then the ingest and its storage.
+        workers
+            .sessions
+            .lock()
+            .unwrap()
+            .release(&principal, &late.id, 21)
+            .unwrap();
+        workers.reap(37).await.unwrap();
+        expect_connections(&source, 0).await;
+        assert_eq!(workers.sessions.lock().unwrap().job_count(), 0);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let mut entries = std::fs::read_dir(&media_root).unwrap();
+                if entries.next().is_none() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("replay storage is reclaimed after teardown");
         workers.shutdown().await;
     }
 

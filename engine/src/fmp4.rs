@@ -1,4 +1,5 @@
-//! Bounded, consumption-paced fragmented MP4 for a single on-demand viewer.
+//! Bounded, consumption-paced single-consumer media streams: fragmented MP4 for
+//! one on-demand viewer, and progressive same-container live remux readers.
 //! The output never accumulates on disk or waits for the complete source.
 use super::*;
 use axum::{
@@ -18,13 +19,37 @@ pub(super) struct Stream {
     consumed: AtomicU64,
     origin: f64,
     backpressured: Arc<AtomicBool>,
+    evicted: Arc<AtomicBool>,
+    pub(super) file: &'static str,
+    content_type: &'static str,
 }
 impl Stream {
     pub(super) fn new(
-        mut output: tokio::process::ChildStdout,
-        mut progress: tokio::process::ChildStderr,
+        output: tokio::process::ChildStdout,
+        progress: tokio::process::ChildStderr,
         origin: f64,
         permits: Arc<InputPermits>,
+    ) -> Arc<Self> {
+        Self::with_transport(
+            output,
+            progress,
+            origin,
+            permits,
+            ("stream.mp4", "video/mp4"),
+            None,
+        )
+    }
+    /// `evict_after` bounds how long a reader may leave the bounded channel
+    /// full. A live reader that stays full that long is evicted: the producer
+    /// stops reading its child, and the heartbeat reports the output failed so
+    /// the coordinator tears it down. Other viewers never wait on it.
+    pub(super) fn with_transport(
+        mut output: impl tokio::io::AsyncRead + Send + Unpin + 'static,
+        mut progress: impl tokio::io::AsyncRead + Send + Unpin + 'static,
+        origin: f64,
+        permits: Arc<InputPermits>,
+        (file, content_type): (&'static str, &'static str),
+        evict_after: Option<Duration>,
     ) -> Arc<Self> {
         let (send, receiver) = mpsc::channel(32); // 32 * 64 KiB, plus one reader block.
         let (ready, ready_rx) = watch::channel(false);
@@ -60,6 +85,8 @@ impl Stream {
         });
         let backpressured = Arc::new(AtomicBool::new(false));
         let blocked = backpressured.clone();
+        let evicted = Arc::new(AtomicBool::new(false));
+        let eviction = evicted.clone();
         tokio::spawn(async move {
             let _permits = permits;
             let mut bytes = vec![0; 64 * 1024];
@@ -85,7 +112,24 @@ impl Stream {
                     Ok(n) => {
                         ready.send_replace(true);
                         blocked.store(send.capacity() == 0, Ordering::Release);
-                        tokio::select! { result = send.send(Ok(Bytes::copy_from_slice(&bytes[..n]))) => { if result.is_err() { break; } }, _ = cancelled.changed() => break }
+                        let chunk = Ok(Bytes::copy_from_slice(&bytes[..n]));
+                        let sent = async {
+                            match evict_after {
+                                Some(limit) => timeout(limit, send.send(chunk)).await.ok(),
+                                None => Some(send.send(chunk).await),
+                            }
+                        };
+                        tokio::select! {
+                            result = sent => match result {
+                                Some(Ok(())) => {}
+                                Some(Err(_)) => break,
+                                None => {
+                                    eviction.store(true, Ordering::Release);
+                                    break;
+                                }
+                            },
+                            _ = cancelled.changed() => break,
+                        }
                         blocked.store(false, Ordering::Release);
                     }
                     Err(_) => {
@@ -105,7 +149,14 @@ impl Stream {
             consumed: AtomicU64::new(0),
             origin,
             backpressured,
+            evicted,
+            file,
+            content_type,
         })
+    }
+    /// A slow reader exceeded its bound and no longer receives media.
+    pub(super) fn evicted(&self) -> bool {
+        self.evicted.load(Ordering::Acquire)
     }
     pub(super) async fn ready(&self) -> Result<(), String> {
         let mut ready = self.ready.clone();
@@ -147,7 +198,7 @@ impl Stream {
     }
     pub(super) async fn serve(self: Arc<Self>, method: Method) -> Result<Response, String> {
         let builder = Response::builder()
-            .header("Content-Type", "video/mp4")
+            .header("Content-Type", self.content_type)
             .header("Cache-Control", "no-store")
             .header("Accept-Ranges", "none");
         if method == Method::HEAD {
@@ -166,7 +217,10 @@ impl Stream {
             loop {
                 if *closed.borrow() { Err(std::io::Error::other("Media access revoked"))?; }
                 let next = tokio::select! { next = receive.recv() => Ok(next), _ = closed.changed() => Err(std::io::Error::other("Media access revoked")) };
-                let Some(chunk) = next? else { break };
+                let Some(chunk) = next? else {
+                    if self.evicted() { Err(std::io::Error::other("Media reader evicted"))?; }
+                    break;
+                };
                 yield chunk?;
             }
         };

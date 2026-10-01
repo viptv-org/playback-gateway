@@ -29,7 +29,7 @@ pub(super) fn direct_file_extension(format: &str) -> Option<&'static str> {
 }
 
 /// ffprobe's codec name against the codec identifiers a WebCodecs client reports.
-fn declared_codec(declared: &[String], codec: Option<&str>) -> bool {
+pub(super) fn declared_codec(declared: &[String], codec: Option<&str>) -> bool {
     let Some(codec) = codec else {
         return false;
     };

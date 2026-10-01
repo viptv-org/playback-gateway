@@ -30,8 +30,9 @@ pub struct OutputPlan {
 }
 
 pub struct PreparedPlayback<'a> {
-    /// None only for the legacy client-inspection path, whose output is not yet
-    /// known. A gateway coordinator must not use that path for shared workers.
+    /// None for the legacy client-inspection path, whose output is not yet
+    /// known, and for a scoped progressive request outside the supported
+    /// subset. A gateway coordinator reports None as an unsupported output.
     pub plan: Option<OutputPlan>,
     run: Pin<Box<dyn Future<Output = Result<PlaybackResponse, String>> + Send + 'a>>,
 }
