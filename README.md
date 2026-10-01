@@ -47,7 +47,7 @@ Sources containing unqualified subtitle formats or other video/audio codecs
 retain their existing independent execution paths. They are not yet
 qualified for cross-output single-ingest. Progressive live delivery is a
 same-container lossless remux of the shared replay for a narrow supported subset
-only; see [progressive live delivery](API_V1.md#progressive-live-delivery). Different fallback output plans reserve
+only (live MPEG-TS, and live Matroska with a Matroska replay); see [progressive live delivery](API_V1.md#progressive-live-delivery). Different fallback output plans reserve
 separate physical input slots; identical plans still share their existing job.
 VOD seek origins remain distinct. The
 replay has 12 retained segments plus deletion grace, a 20-second first-segment deadline

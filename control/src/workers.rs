@@ -1424,6 +1424,45 @@ pub(crate) mod tests {
             .await
             .is_err());
 
+        // A viewer that opens its body and never reads it is evicted once its
+        // bounded channel stays full, while the other viewers keep flowing.
+        let stalled = workers
+            .create(&principal, &request, "stalled", 4)
+            .await
+            .unwrap();
+        let stalled_delivery = workers.delivery(&principal, &stalled, 4).unwrap().unwrap();
+        let stalled_token = stalled_delivery.url.split('/').nth(3).unwrap().to_owned();
+        let stalled_body = workers
+            .media(
+                &stalled.id,
+                &stalled_token,
+                file,
+                4,
+                axum::http::Method::GET,
+                axum::http::HeaderMap::new(),
+            )
+            .await
+            .unwrap();
+        let engine_id = workers.active.lock().unwrap()[&stalled.job_id].id.clone();
+        let stall = std::time::Instant::now();
+        tokio::time::timeout(Duration::from_secs(90), async {
+            while workers.engine.heartbeat(&engine_id).await {
+                read_live(&mut late_body, 8 * 1024).await;
+            }
+        })
+        .await
+        .expect("a never-read progressive viewer is evicted");
+        println!(
+            "{container}: never-read viewer evicted after {:?}",
+            stall.elapsed()
+        );
+        drop(stalled_body);
+        workers
+            .sessions
+            .lock()
+            .unwrap()
+            .release(&principal, &stalled.id, 5)
+            .unwrap();
         // Releasing one viewer leaves the other reader and the ingest running.
         workers
             .sessions

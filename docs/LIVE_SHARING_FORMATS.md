@@ -122,25 +122,44 @@ physical decoder or hardware acceptance.
   output. Other subtitle formats/platforms retain independent pipelines and
   truthful physical-input accounting; none are silently discarded.
 - Progressive v1 is a same-container lossless remux of the shared private
-  replay for live MPEG-TS inputs with an MPEG-TS replay only (see
+  replay for live MPEG-TS inputs with an MPEG-TS replay and live Matroska
+  inputs with a Matroska replay (see
   [API v1](../API_V1.md#progressive-live-delivery)). Each viewer owns one
   bounded copy-only reader; other inputs fail with `unsupported_output`, with no
-  silent switch to HLS. Live Matroska progressive is refused at request time:
-  the private Matroska replay writes every segment as a complete Matroska file,
-  which a copy-only reader cannot join (see
-  [progressive qualification](PROGRESSIVE_QUALIFICATION.md)). The private
-  Matroska adapter and its shared HLS outputs are unchanged. Arbitrary byte ranges, seeking and HLS or MP4 inputs
+  silent switch to HLS. Arbitrary byte ranges, seeking and HLS or MP4 inputs
   remain unsupported. Existing continuous fMP4 is single-consumer and not a
   shareable gateway output; flipping its eligibility is not fanout.
+- **Joining the private Matroska replay (#11).** The segment muxer writes every
+  `segment-*.mkv` as a complete Matroska file. FFmpeg's HLS demuxer joins the
+  files into one byte stream for one Matroska demuxer, which meets a second
+  EBML header at each boundary, resyncs about one segment backwards and either
+  loses media or produces backward timestamps; a copy-only Matroska muxer
+  stalled on that. A progressive Matroska reader therefore never uses the HLS
+  demuxer. The gateway follows the private playlist itself and writes the
+  reader's stdin one continuous stream: the EBML header, an unknown-size
+  Segment, Info and Tracks once, then only the Clusters of each listed segment
+  (SeekHead, Cues, Tags and Void describe one file and are dropped). Clusters
+  carry absolute timestamps and every segment starts on a keyframe, so the
+  header plus any later run of segments is valid Matroska. The reader's input
+  is limited to that pipe. Unexpected layouts, truncated or unfinished
+  segments, an evicted segment the reader has not reached, and a removed
+  replay all fail the join instead of skipping media. The replay on disk and
+  its shared HLS outputs are unchanged; the three named Matroska HLS fixtures
+  above pass with the joiner in place.
 - Progressive evidence is the real-FFmpeg fixture
   `real_progressive_viewers_share_one_upstream_late_join_decodes_and_last_release_reaps`
   (MPEG-TS H264/AAC over plain loopback HTTP: two viewers, one upstream, a late
-  join that starts on a keyframe and decodes, and last-release cleanup).
+  join that starts on a keyframe and decodes, and last-release cleanup), with
+  the same assertions for Matroska in
+  `real_matroska_ffv1_flac_progressive_viewers_share_late_join_decodes_and_reap`
+  and `real_matroska_h264_flac_progressive_viewers_share_late_join_decodes_and_reap`.
+  `joinable::tests::real_matroska_replay_joins_into_continuous_copy_only_output`
+  runs the exact private segment muxer for FFV1/FLAC and H264/FLAC, shows that
+  the HLS-demuxer reader loses media or jumps backwards, and that the joined
+  reader delivers every segment with no backward timestamp, starts on a
+  keyframe and decodes with `-xerror`.
   [Progressive qualification](PROGRESSIVE_QUALIFICATION.md) records the
-  built-image evidence: MPEG-TS progressive passes over HTTP and HTTPS and
-  under a 2 MiB media tmpfs, where a failed viewer's body ends with an error;
-  Matroska progressive stalled on the built image and is now refused with
-  `unsupported_output`.
+  built-image evidence.
 
 Before the shared subtitle implementation, a bounded local experiment with the same FFmpeg 9 binaries verified that the
 official segment-muxer Matroska/M3U8 seam retains H264, FLAC and subrip as indices
