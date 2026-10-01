@@ -59,11 +59,19 @@ pub(super) struct Direct {
     size: Option<u64>,
     pub(super) format: String,
     validator: Option<String>,
-    permits: Arc<InputPermits>,
+    // A gateway-internal reader (the ingest sanitizer) may have no admission
+    // of its own; its FFmpeg child holds the caller's reservations instead.
+    permits: Option<Arc<InputPermits>>,
 }
 
+/// Response extension: the disguise prefix length removed from a whole
+/// (un-ranged) HLS media body. The ingest sanitizer maps a later reconnect
+/// range in cleaned coordinates back to origin coordinates with it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct StrippedPrefix(pub(super) u64);
+
 impl Direct {
-    pub(super) fn inspection_source(&self) -> (String, String, Arc<InputPermits>) {
+    pub(super) fn inspection_source(&self) -> (String, String, Option<Arc<InputPermits>>) {
         let mut headers = self
             .headers
             .iter()
@@ -88,6 +96,14 @@ impl Direct {
         headers: &HashMap<String, String>,
         format: &str,
         permits: Arc<InputPermits>,
+    ) -> Result<Arc<Self>, String> {
+        Self::prepare_with(url, headers, format, Some(permits)).await
+    }
+    pub(super) async fn prepare_with(
+        url: Url,
+        headers: &HashMap<String, String>,
+        format: &str,
+        permits: Option<Arc<InputPermits>>,
     ) -> Result<Arc<Self>, String> {
         let mut public = HeaderMap::new();
         for (name, value) in headers {
@@ -579,6 +595,7 @@ impl Direct {
             }
         }
         let cacheable = range.is_none();
+        let stripped = (cacheable && offset > 0).then_some(StrippedPrefix(offset as u64));
         // Sixteen chunks of slack absorb player jitter without pinning a permit.
         let (send, mut receive) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(16);
         tokio::spawn(async move {
@@ -622,9 +639,13 @@ impl Direct {
         });
         let stream =
             async_stream::stream! {while let Some(chunk)=receive.recv().await {yield chunk;}};
-        builder
+        let mut response = builder
             .body(Body::from_stream(stream))
-            .map_err(|_| "Invalid media response".into())
+            .map_err(|_| "Invalid media response".to_owned())?;
+        if let Some(stripped) = stripped {
+            response.extensions_mut().insert(stripped);
+        }
+        Ok(response)
     }
 
     pub async fn progress(&self) -> Option<String> {

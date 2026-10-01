@@ -5,10 +5,12 @@ pub(super) struct Probe {
     pub(super) streams: Vec<ProbeStream>,
     #[serde(default)]
     pub(super) format: serde_json::Value,
-    /// The source is HLS whose segment names FFmpeg's `extension_picky`
-    /// refused; every later reader must relax that check the same way.
+    /// The source is HLS whose segments FFmpeg could only read through the
+    /// loopback sanitizer (refused segment names or image-disguised media).
+    /// Every later reader starts its own sanitizer; the probe never carries
+    /// one, because probe copies outlive the reader that needed it.
     #[serde(skip)]
-    pub(super) relaxed_hls_segments: bool,
+    pub(super) disguised_hls: bool,
 }
 #[derive(Clone, Debug, Deserialize)]
 pub(super) struct ProbeStream {
@@ -242,6 +244,22 @@ impl Probe {
                 stream.index.unwrap_or(u32::MAX),
             )
         }))
+    }
+    /// An HLS source whose every stream is a still-image codec and which has
+    /// no audio: a segment with an image disguise prefix that FFmpeg
+    /// typefound as the image instead of the media behind it.
+    pub(super) fn image_only_hls(&self) -> bool {
+        self.format["format_name"]
+            .as_str()
+            .is_some_and(|names| names.split(',').any(|name| name == "hls"))
+            && !self.streams.is_empty()
+            && self.streams.iter().all(|stream| {
+                stream.codec_type.as_deref() == Some("video")
+                    && matches!(
+                        stream.codec_name.as_deref(),
+                        Some("mjpeg" | "png" | "apng" | "gif" | "bmp" | "webp")
+                    )
+            })
     }
     pub(super) fn video(&self) -> Result<&ProbeStream, String> {
         self.streams

@@ -99,6 +99,12 @@ Independent fallback or VOD output pipelines each consume an input reservation;
 viewers joining an identical existing job do not reserve another input. This
 accounting does not promise universal single-ingest for every source/transport.
 
+Disguised HLS inputs (segments named or typed as images/stylesheets, or with
+an image/CSS prefix before the media) need no integration change: the engine
+reads them through a private loopback sanitizer that applies the input's
+headers and egress route itself. A disguised input whose segments are on
+another origin behind an egress proxy is refused at inspection.
+
 ### Progressive live delivery
 
 Decision recorded 2026-09-30 (playback-gateway#1): original progressive

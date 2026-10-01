@@ -29,6 +29,9 @@ pub(super) struct Session {
     pub(super) stream: Option<Arc<fmp4::Stream>>,
     // Keep inspected VOD facts alive while this input is in use.
     pub(super) _source_probe: Option<Arc<Probe>>,
+    // The loopback sanitizer this session's FFmpeg input reads a disguised
+    // HLS source through; it closes with the session.
+    pub(super) sanitizer: Option<Arc<sanitize::HlsSanitizer>>,
     pub(super) direct: Option<Arc<direct::Direct>>,
     pub(super) capability: String,
     pub(super) dir: PathBuf,
@@ -165,6 +168,9 @@ pub(super) async fn cleanup_orphans(root: &std::path::Path) -> Result<(), String
 }
 
 pub(super) fn input_args(cmd: &mut Command, headers: &str) {
+    network_input_args(cmd, headers, "http,https,httpproxy,tcp,tls,crypto");
+}
+fn network_input_args(cmd: &mut Command, headers: &str, protocols: &str) {
     contain_media_process(cmd);
     // The engine's explicit egress policy must not be bypassed by host shell
     // proxy exclusions or silently replaced by an inherited system proxy.
@@ -181,9 +187,8 @@ pub(super) fn input_args(cmd: &mut Command, headers: &str) {
         cmd.env_remove(variable);
     }
     // Restrict nested playlists/redirects to network protocols, never local files or devices.
+    cmd.args(["-protocol_whitelist", protocols]);
     cmd.args([
-        "-protocol_whitelist",
-        "http,https,httpproxy,tcp,tls,crypto",
         "-rw_timeout",
         "10000000",
         // Recover premature HTTP bodies at their byte offset, with short bounded backoff.
@@ -210,16 +215,28 @@ pub(super) fn input_args(cmd: &mut Command, headers: &str) {
         cmd.arg("-headers").arg(public);
     }
 }
-/// IPTV origins serve MPEG-TS segments named .png/.jpg/.css/.woff or without
-/// a suffix, which FFmpeg 7.1+ refuses before reading a byte ("not in
-/// allowed_segment_extensions"). For a source the probe found that way,
-/// segments are classified by content instead. Local files stay unreachable
-/// through the `input_args` protocol whitelist. The option is never sent
-/// otherwise: the ffmpeg CLI fails on a demuxer option its input does not
-/// consume, and FFmpeg before 7.1 does not know it.
-pub(super) fn relaxed_hls_args(cmd: &mut Command, relaxed: bool) {
-    if relaxed {
-        cmd.args(["-extension_picky", "0"]);
+/// Apply the input arguments for `source` and return the URL to pass to
+/// `-i`. A disguised HLS source is read through its loopback sanitizer: FFmpeg
+/// gets the capability URL, no header block (credentials stay in the gateway),
+/// no `-http_proxy` (upstream egress belongs to the sanitizer's own client),
+/// and only plain HTTP to loopback plus `crypto` for AES-128 keys. Rewritten
+/// resource names are already `.ts`/`.m4s`/`.aac`/…, so no
+/// `-extension_picky` relaxation is needed and FFmpeg before 7.1 works too.
+pub(super) fn source_input(
+    cmd: &mut Command,
+    source: &str,
+    header_block: &str,
+    sanitizer: Option<&sanitize::HlsSanitizer>,
+) -> String {
+    match sanitizer {
+        Some(sanitizer) => {
+            network_input_args(cmd, "", "http,tcp,crypto");
+            sanitizer.url()
+        }
+        None => {
+            input_args(cmd, header_block);
+            source.to_owned()
+        }
     }
 }
 pub(super) fn header_block(headers: &HashMap<String, String>) -> Result<String, String> {

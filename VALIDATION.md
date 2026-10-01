@@ -277,6 +277,20 @@ cross-output ingest sharing and other open acceptance requirements remain open.
 - Real subprocess fixtures exercise proxy use for root URLs, redirects, HLS
   segments and AES keys, including hostile inherited proxy variables. Raw TCP/TLS
   HLS segment attempts do not contact the protected destination.
+- Disguised HLS ingest (playback-gateway#9): with FFmpeg/ffprobe n9.0.2, real
+  fixtures serve h264/aac segments behind real JPEG, GIF (leading `G`), PNG and
+  CSS prefixes with `.jpg`/`.gif`/`.png`/`.css`/no-extension names and lying
+  types. The probe finds h264 and aac through the loopback sanitizer, and
+  `-map 0 -c copy` through it demuxes exactly as many packets as the clean
+  source; a live window (no `ENDLIST`, advancing media sequence) reloads
+  through loopback with the same exact count, and JPEG-prefixed `.ts`
+  segments demux completely. Unit tests prove token-only access (wrong,
+  shortened, absent tokens are 404), refusal after drop, refusal of private
+  cross-origin children, sanitized arguments without `-headers`,
+  `-http_proxy` or `-extension_picky` and with `http,tcp,crypto`, redaction of
+  the loopback URL and token, and selection only for refusal/image signals.
+  FFmpeg before 7.1 (image-only probes) is covered by selection tests, not a
+  real old binary.
 - Real TLS fixtures accept a matching, explicitly trusted HTTPS media source,
   reject untrusted certificates and trusted-but-wrong hostnames, and reject
   untrusted HTTPS segments nested inside plain-HTTP HLS. Both FFmpeg and ffprobe
