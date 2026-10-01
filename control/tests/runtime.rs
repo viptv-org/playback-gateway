@@ -1722,7 +1722,12 @@ async fn refuse_matroska_progressive(mut fixture: Fixture) {
     assert_eq!(refused["error"]["code"], "unsupported_output");
     connections(&fixture.source, 0).await;
     assert!(children(service).is_empty(), "no ingest or reader starts");
-    assert!(fixture.media_dirs().is_empty(), "no private replay");
+    // The media root may not even exist yet: nothing was ever started.
+    let media = state_root(fixture.root.path()).join("media");
+    assert!(
+        !media.exists() || fixture.media_dirs().is_empty(),
+        "no private replay"
+    );
     available(&fixture, 1, 4, 5).await;
     println!("Live Matroska progressive refused: unsupported_output");
     fixture.signal("-TERM").await;
