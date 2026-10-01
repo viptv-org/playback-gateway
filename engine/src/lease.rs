@@ -209,6 +209,18 @@ pub(super) fn input_args(cmd: &mut Command, headers: &str) {
         cmd.arg("-headers").arg(public);
     }
 }
+/// IPTV origins serve MPEG-TS segments named .png/.jpg/.css/.woff or without
+/// a suffix, which FFmpeg 7.1+ refuses before reading a byte ("not in
+/// allowed_segment_extensions"). For a source the probe found that way,
+/// segments are classified by content instead. Local files stay unreachable
+/// through the `input_args` protocol whitelist. The option is never sent
+/// otherwise: the ffmpeg CLI fails on a demuxer option its input does not
+/// consume, and FFmpeg before 7.1 does not know it.
+pub(super) fn relaxed_hls_args(cmd: &mut Command, relaxed: bool) {
+    if relaxed {
+        cmd.args(["-extension_picky", "0"]);
+    }
+}
 pub(super) fn header_block(headers: &HashMap<String, String>) -> Result<String, String> {
     let mut pairs: Vec<_> = headers.iter().collect();
     pairs.sort_by(|a, b| a.0.cmp(b.0));

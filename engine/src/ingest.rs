@@ -336,6 +336,7 @@ impl PlaybackManager {
             .stderr(Stdio::null());
         cmd.args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y"]);
         input_args(&mut cmd, headers);
+        relaxed_hls_args(&mut cmd, probe.relaxed_hls_segments);
         cmd.arg("-i").arg(source);
         let mut ordered: Vec<_> = indices.iter().collect();
         ordered.sort_by_key(|(_, replay)| **replay);
