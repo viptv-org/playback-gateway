@@ -2039,9 +2039,15 @@ async fn real_progressive_image_share_late_join_evict_isolate_and_reap() {
         !(200..300).contains(&status),
         "other namespace cannot read a viewer"
     );
-    assert!(
-        !(200..300).contains(&release(&fixture, &other_key, first["id"].as_str().unwrap()).await)
+    // A foreign release is an idempotent no-op, never an existence oracle.
+    assert_eq!(
+        release(&fixture, &other_key, first["id"].as_str().unwrap()).await,
+        204
     );
+    let (status, state) =
+        session_state(&fixture, &fixture.key, first["id"].as_str().unwrap()).await;
+    assert_eq!((status, state["status"].as_str()), (200, Some("ready")));
+    first_reader.advances().await;
     let (status, _) = session_state(&fixture, &fixture.key, other["id"].as_str().unwrap()).await;
     assert!(!(200..300).contains(&status));
     let other_path = other["playback"]["url"].as_str().unwrap().to_owned();
