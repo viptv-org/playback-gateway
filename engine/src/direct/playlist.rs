@@ -83,6 +83,7 @@ fn resource(
     base: &Url,
     raw: &str,
     playlist: bool,
+    opaque: bool,
     map: &mut HashMap<String, Url>,
 ) -> Result<String, String> {
     if raw.contains("{$") {
@@ -99,7 +100,16 @@ fn resource(
         .next()
         .filter(|s| ["ts", "m4s", "mp4", "aac", "vtt", "key"].contains(s))
         .unwrap_or("ts");
-    let key = format!("d-{:x}.{}", hash, if playlist { "m3u8" } else { suffix });
+    // Keys and session data are served byte-for-byte; the suffix tells the
+    // segment path not to sniff them for disguise prefixes.
+    let suffix = if playlist {
+        "m3u8"
+    } else if opaque {
+        "key"
+    } else {
+        suffix
+    };
+    let key = format!("d-{hash:x}.{suffix}");
     map.insert(key.clone(), url);
     Ok(key)
 }
@@ -147,6 +157,7 @@ pub(super) fn rewrite(text: &str, base: &Url) -> Result<(String, HashMap<String,
                 base,
                 line,
                 std::mem::take(&mut variant),
+                false,
                 &mut map,
             )?);
         } else if line.starts_with("#EXT-X-STREAM-INF") {
@@ -164,7 +175,16 @@ pub(super) fn rewrite(text: &str, base: &Url) -> Result<(String, HashMap<String,
             let start = at + 5;
             let end = start + line[start..].find('"').ok_or("Invalid HLS URI")?;
             out.push_str(&line[..start]);
-            out.push_str(&resource(base, &line[start..end], playlist, &mut map)?);
+            let opaque = ["#EXT-X-KEY:", "#EXT-X-SESSION-KEY:", "#EXT-X-SESSION-DATA:"]
+                .iter()
+                .any(|tag| line.starts_with(tag));
+            out.push_str(&resource(
+                base,
+                &line[start..end],
+                playlist,
+                opaque,
+                &mut map,
+            )?);
             out.push_str(&line[end..]);
         } else {
             if line.contains("URI=") {

@@ -3,7 +3,7 @@
 use super::*;
 use axum::{
     body::{Body, Bytes},
-    http::{header, HeaderMap, Method, StatusCode},
+    http::{header, HeaderMap, HeaderValue, Method, StatusCode},
     response::Response,
 };
 use futures::StreamExt;
@@ -16,6 +16,7 @@ use url::Url;
 mod playlist;
 #[cfg(test)]
 mod real_tests;
+mod sniff;
 #[cfg(test)]
 mod tests;
 mod transport;
@@ -442,8 +443,16 @@ impl Direct {
         if range.is_none() {
             if let Some((at, bytes)) = self.cache.lock().await.get(&key) {
                 if at.elapsed() < Duration::from_secs(15) {
+                    // Cached bytes are already cleaned; their type is their content's.
+                    let kind = sniff::sniff(bytes, true).kind;
                     return Ok(Response::builder()
-                        .header(header::CONTENT_TYPE, "application/octet-stream")
+                        .header(
+                            header::CONTENT_TYPE,
+                            kind.map_or(
+                                "application/octet-stream",
+                                sniff::SegmentKind::content_type,
+                            ),
+                        )
                         .header(header::CACHE_CONTROL, "public, max-age=3600")
                         .body(if method == Method::HEAD {
                             Body::empty()
@@ -472,22 +481,72 @@ impl Direct {
         let mut builder = Response::builder()
             .status(response.status())
             .header(header::CACHE_CONTROL, "public, max-age=3600");
-        for name in [
-            header::CONTENT_TYPE,
-            header::CONTENT_RANGE,
-            header::ACCEPT_RANGES,
-        ] {
+        // IPTV origins disguise whole segments as images, stylesheets or
+        // fonts: a lying Content-Type and often a real image header or CSS
+        // text before the media. A whole media resource (not a key, caption
+        // or byte range) is classified by its first bytes instead, the junk
+        // prefix is dropped and the real type is served.
+        let sniffable = range.is_none() && !file.ends_with(".key") && !file.ends_with(".vtt");
+        let upstream_type = response.headers().get(header::CONTENT_TYPE).cloned();
+        for name in [header::CONTENT_RANGE, header::ACCEPT_RANGES] {
             if let Some(value) = response.headers().get(&name) {
                 builder = builder.header(name, value);
             }
         }
-        if let Some(value) = response.headers().get(header::CONTENT_LENGTH) {
-            builder = builder.header(header::CONTENT_LENGTH, value);
-        }
+        let upstream_length = response.content_length();
         if method == Method::HEAD {
+            if let Some(value) =
+                upstream_type.filter(|value| !sniffable || !sniff::disguise_type(value))
+            {
+                builder = builder.header(header::CONTENT_TYPE, value);
+            }
+            // The prefix is unknown without reading the body.
+            if let Some(length) = upstream_length.filter(|_| !sniffable) {
+                builder = builder.header(header::CONTENT_LENGTH, length);
+            }
             return builder
                 .body(Body::empty())
                 .map_err(|_| "Invalid media response".into());
+        }
+        let mut chunks = response.bytes_stream();
+        let mut head = Bytes::new();
+        let mut offset = 0;
+        let mut kind = None;
+        if sniffable {
+            let mut buffer = Vec::new();
+            let mut ended = false;
+            while buffer.len() < sniff::SNIFF_LIMIT {
+                match chunks.next().await {
+                    Some(Ok(chunk)) => buffer.extend_from_slice(&chunk),
+                    Some(Err(_)) => {
+                        self.failed.store(true, Ordering::Release);
+                        return Err("Media body failed".into());
+                    }
+                    None => {
+                        ended = true;
+                        break;
+                    }
+                }
+            }
+            let found = sniff::sniff(&buffer, ended);
+            if found.offset > 0 {
+                tracing::debug!(
+                    stripped = found.offset,
+                    "Removed a disguise prefix from an HLS resource"
+                );
+            }
+            (offset, kind) = (found.offset, found.kind);
+            head = Bytes::from(buffer).slice(offset..);
+        }
+        let content_type = match kind {
+            Some(kind) => Some(HeaderValue::from_static(kind.content_type())),
+            None => upstream_type.filter(|value| !sniffable || !sniff::disguise_type(value)),
+        };
+        if let Some(value) = content_type {
+            builder = builder.header(header::CONTENT_TYPE, value);
+        }
+        if let Some(length) = upstream_length {
+            builder = builder.header(header::CONTENT_LENGTH, length.saturating_sub(offset as u64));
         }
         let cacheable = range.is_none();
         // Sixteen chunks of slack absorb player jitter without pinning a permit.
@@ -496,9 +555,10 @@ impl Direct {
             let _permit = permit;
             let _permits = self.permits.clone();
             let result = async {
-                let mut chunks = response.bytes_stream();
                 let mut saved = Vec::new();
                 let mut cacheable = cacheable;
+                let first = (!head.is_empty()).then_some(Ok(head));
+                let mut chunks = futures::stream::iter(first).chain(chunks);
                 while let Some(chunk) = chunks.next().await {
                     if self.closed.load(Ordering::Acquire) {
                         return Err(std::io::Error::other("Media expired"));

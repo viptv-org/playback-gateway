@@ -742,7 +742,8 @@ fn master_playlist_variants_and_renditions_rewrite_to_opaque_keys() {
         ("#EXT-X-I-FRAME-STREAM-INF:", ".m3u8\""),
         ("#EXT-X-RENDITION-REPORT:", ".m3u8\""),
         ("#EXT-X-SESSION-KEY:", ".key\""),
-        ("#EXT-X-SESSION-DATA:", ".ts\""),
+        // Opaque data is never sniffed for disguise prefixes.
+        ("#EXT-X-SESSION-DATA:", ".key\""),
         ("#EXT-X-PART:", ".m4s\""),
         ("#EXT-X-PRELOAD-HINT:", ".m4s\""),
     ] {
@@ -810,5 +811,94 @@ async fn sequential_live_reports_bytes_backpressure_and_eof() {
         direct.failed.load(Ordering::Acquire),
         "live EOF requires recovery"
     );
+    task.abort();
+}
+
+fn disguised_segment() -> (Vec<u8>, Vec<u8>) {
+    let mut media = Vec::new();
+    for index in 0..6u8 {
+        let mut packet = vec![0xffu8; 188];
+        packet[0] = 0x47;
+        packet[3] = 0x10 | index;
+        media.extend(packet);
+    }
+    // A real PNG header and chunk before the transport stream.
+    let mut body = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x01\0\0\0\x01\x08\x06\0\0\0\x1f\x15\xc4\x89\0\0\0\0IEND\xaeB`\x82".to_vec();
+    body.extend(&media);
+    (body, media)
+}
+
+#[tokio::test]
+async fn disguised_hls_segments_lose_their_prefix_and_lying_type_but_keys_do_not() {
+    let (body, media) = disguised_segment();
+    let app = Router::new()
+        .route(
+            "/list.m3u8",
+            get(|| async {
+                "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-KEY:METHOD=AES-128,URI=\"k.png\"\n#EXTINF:2,\nseg0.png?sig=1\n#EXT-X-ENDLIST\n"
+            }),
+        )
+        .route(
+            "/seg0.png",
+            get(move || {
+                let body = body.clone();
+                async move { ([(header::CONTENT_TYPE, "image/png")], body) }
+            }),
+        )
+        .route(
+            "/k.png",
+            get(|| async { ([(header::CONTENT_TYPE, "image/png")], b"GGGG0123456789ab".to_vec()) }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = Url::parse(&format!("http://{}", listener.local_addr().unwrap())).unwrap();
+    let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let direct = Direct::prepare(
+        base.join("/list.m3u8").unwrap(),
+        &HashMap::new(),
+        "hls",
+        permits(),
+    )
+    .await
+    .unwrap();
+    let playlist = direct
+        .clone()
+        .serve("index.m3u8", Method::GET, HeaderMap::new())
+        .await
+        .unwrap();
+    let text = String::from_utf8(bytes(playlist).await.to_vec()).unwrap();
+    let key = text
+        .split("URI=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap()
+        .to_owned();
+    assert!(key.ends_with(".key"), "{text}");
+    let segment = text
+        .lines()
+        .find(|l| l.starts_with("d-"))
+        .unwrap()
+        .to_owned();
+    assert!(segment.ends_with(".ts"));
+    for _ in 0..2 {
+        // The second request is answered from the shared segment cache.
+        let response = direct
+            .clone()
+            .serve(&segment, Method::GET, HeaderMap::new())
+            .await
+            .unwrap();
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "video/mp2t");
+        if let Some(length) = response.headers().get(header::CONTENT_LENGTH) {
+            assert_eq!(length.to_str().unwrap(), media.len().to_string());
+        }
+        assert_eq!(bytes(response).await, media);
+    }
+    let response = direct
+        .clone()
+        .serve(&key, Method::GET, HeaderMap::new())
+        .await
+        .unwrap();
+    assert_eq!(bytes(response).await, "GGGG0123456789ab");
     task.abort();
 }

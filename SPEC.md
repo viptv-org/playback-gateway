@@ -18,6 +18,15 @@ Contract: [API_V1.md](API_V1.md). Evidence: [VALIDATION.md](VALIDATION.md) and
 - **Ingestion:** HTTP and HTTPS inputs with private/reserved upstream addresses
   denied (including redirects and child resources), bounded upstream headers,
   and qualified GnuTLS FFmpeg/ffprobe with TLS verification on.
+- **Disguised HLS:** original (direct) HLS delivery classifies each whole
+  segment, init section or part by its first 64 KiB, drops junk before the
+  first MPEG-TS packet run, fMP4 box chain or ADTS/ID3 audio (IPTV origins
+  prepend PNG/JPEG/GIF headers or CSS text), and serves `video/mp2t`,
+  `video/mp4` or `audio/aac` instead of the origin's lying type. Keys and
+  session data (`.key` resources), WebVTT and byte-range requests pass
+  through unchanged. FFmpeg ingest relaxes segment-name checks
+  (`-extension_picky 0`) but still reads origin bytes directly: a segment
+  with a prepended JPEG or GIF header is not yet cleaned before FFmpeg.
 - **Output jobs:** inspected, normalized output plans with closed conversion
   choices (`auto`, `audio`, `video`, `audio_video`) and explicit track/language
   selection; compatible viewers share one job; eligible live outputs share one
