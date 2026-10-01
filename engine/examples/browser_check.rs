@@ -6,11 +6,9 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
+use playback_engine::{Capabilities, Config, PlaybackManager, PlaybackResponse, TrackSelection};
 use serde::Deserialize;
 use std::{collections::HashMap, sync::Arc, time::Duration};
-use playback_engine::{
-    Capabilities, Config, PlaybackManager, PlaybackResponse, TrackSelection,
-};
 
 #[derive(Clone)]
 struct Check {

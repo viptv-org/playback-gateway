@@ -245,7 +245,7 @@ impl Direct {
                     .status(416)
                     .header(header::CONTENT_RANGE, format!("bytes */{size}"))
                     .body(Body::empty())
-                    .unwrap());
+                    .map_err(|_| "Invalid media response")?);
             };
             // The validated original file is immutable; ranges may cache.
             let mut builder = Response::builder()
@@ -354,18 +354,19 @@ impl Direct {
             if file != "source.bin" {
                 return Err("Media not found".into());
             }
-            let response = self.request(self.root.clone(), None).await?;
             let mut builder = Response::builder()
                 .status(200)
                 .header(header::CONTENT_TYPE, "application/octet-stream")
                 .header(header::CACHE_CONTROL, "no-store");
-            if let Some(length) = response.content_length() {
-                builder = builder.header(header::CONTENT_LENGTH, length);
-            }
+            // A HEAD probe must not open (and pin) an upstream live read.
             if method == Method::HEAD {
                 return builder
                     .body(Body::empty())
                     .map_err(|_| "Invalid media response".into());
+            }
+            let response = self.request(self.root.clone(), None).await?;
+            if let Some(length) = response.content_length() {
+                builder = builder.header(header::CONTENT_LENGTH, length);
             }
             let stream = async_stream::try_stream! {
                 let _permits = self.permits.clone();
@@ -428,7 +429,7 @@ impl Direct {
                 } else {
                     Body::from(bytes)
                 })
-                .unwrap());
+                .map_err(|_| "Invalid media response")?);
         }
         // Cached segments are shared between viewers without sharing their
         // capability URLs, and answer before any upstream admission.
@@ -449,7 +450,7 @@ impl Direct {
                         } else {
                             Body::from(bytes.clone())
                         })
-                        .unwrap());
+                        .map_err(|_| "Invalid media response")?);
                 }
             }
         }

@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: GPL-2.0-only
 set -euo pipefail
 image="${1:?Usage: bash scripts/check-bounded-media-container.sh LOCAL_GATEWAY_IMAGE}"
-case "${2:-ts}" in ts) matroska=0 ;; matroska) matroska=1 ;; *) echo 'Fixture mode must be ts or matroska' >&2; exit 2 ;; esac
+captions=0
+case "${2:-ts}" in ts) matroska=0 ;; matroska) matroska=1 ;; subtitles) matroska=0; captions=1 ;; *) echo 'Fixture mode must be ts, matroska or subtitles' >&2; exit 2 ;; esac
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 revision=$(git -C "$root" rev-parse HEAD)
 digest=$(docker image inspect "$image" --format '{{.Id}}')
@@ -20,6 +21,7 @@ id=$(docker run --detach --pull=never --init --user 0:0 --network none --read-on
  --tmpfs /var/lib/playback-gateway/media:rw,size=2m,uid=10001,gid=10001,mode=0700,noexec,nosuid,nodev \
  --env PLAYBACK_TEST_DATA_DIR=/var/lib/playback-gateway \
  --env "PLAYBACK_TEST_MATROSKA_AV=$matroska" \
+ --env "PLAYBACK_TEST_SUBTITLES=$captions" \
  --memory 1g --memory-swap 1g --pids-limit 256 --cpus 2 \
  "$fixture" real_kernel_bounded_media_full_failure_reclaims_capacity_and_restarts --ignored --exact --nocapture)
 [[ "$id" =~ ^[0-9a-f]{64}$ ]]

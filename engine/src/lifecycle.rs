@@ -367,7 +367,7 @@ impl PlaybackManager {
         file: &str,
     ) -> Result<axum::response::Response, String> {
         let mime = media_type(file).ok_or_else(|| "Media not found".to_owned())?;
-        let (path, stable_target_duration) = {
+        let (path, stable_target_duration, shared_caption) = {
             let mut sessions = self.sessions.lock().await;
             let session = sessions
                 .get_mut(id)
@@ -379,8 +379,67 @@ impl PlaybackManager {
             session.touched = Instant::now();
             // Every fetched segment moves the throttle's resume point forward.
             session.throttle.observe(file);
-            (session.dir.join(file), session.stable_target_duration)
+            (
+                session.dir.join(file),
+                session.stable_target_duration,
+                session
+                    .ingest
+                    .as_ref()
+                    .and_then(|ingest| ingest.captions.clone())
+                    .zip(session.caption_track),
+            )
         };
+        if let Some((captions, track)) = shared_caption {
+            if file == "index_vtt.m3u8" {
+                let av = tokio::fs::read_to_string(path.with_file_name("index.m3u8"))
+                    .await
+                    .map_err(|_| "Media not found")?;
+                if av.len() > 128 * 1024 {
+                    return Err("Invalid HLS output".into());
+                }
+                let mut playlist = String::new();
+                for line in av.lines() {
+                    if let Some(number) = hls::segment_number(line) {
+                        playlist.push_str(&format!("index{number:09}.vtt\n"));
+                    } else if line.starts_with('#') {
+                        playlist.push_str(line);
+                        playlist.push('\n');
+                    } else if !line.is_empty() {
+                        return Err("Invalid HLS output".into());
+                    }
+                }
+                return Ok((
+                    [
+                        (header::CONTENT_TYPE, mime),
+                        (header::CACHE_CONTROL, "no-store"),
+                    ],
+                    stable_hls_target_duration(playlist.into_bytes()),
+                )
+                    .into_response());
+            }
+            if mime == "text/vtt" {
+                let number = file
+                    .strip_prefix("index")
+                    .and_then(|name| name.strip_suffix(".vtt"))
+                    .and_then(|number| number.parse::<u64>().ok())
+                    .ok_or("Media not found")?;
+                let bytes = self
+                    .caption_segment(
+                        &path.with_file_name(format!("segment-{number:09}.ts")),
+                        &captions,
+                        track,
+                    )
+                    .await?;
+                return Ok((
+                    [
+                        (header::CONTENT_TYPE, mime),
+                        (header::CACHE_CONTROL, "no-store"),
+                    ],
+                    bytes,
+                )
+                    .into_response());
+            }
+        }
         let metadata = tokio::fs::symlink_metadata(&path)
             .await
             .map_err(|_| "Media not found".to_owned())?;

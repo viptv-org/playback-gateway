@@ -117,17 +117,21 @@ physical decoder or hardware acceptance.
 
 - Unlisted video/audio codecs still require lossless replay that supports their
   actual codec. Do not replace this with an unrequested encode at the ingest.
-- Subtitle-bearing inputs still use independent pipelines. Subtitles must be
-  retained/remapped, not silently discarded even when the first output omits them.
-- Progressive v1 currently accepts compatible original-container transport,
-  with no silent switch to HLS. Existing continuous fMP4 is single-consumer and
-  not a shareable gateway output; flipping its eligibility is not fanout.
+- Linux SubRip-bearing inputs share the bounded cue adapter described in
+  [shared subtitles](SHARED_SUBTITLES.md), including an initially caption-disabled
+  output. Other subtitle formats/platforms retain independent pipelines and
+  truthful physical-input accounting; none are silently discarded.
+- Progressive v1 requests are currently rejected with `unsupported_output` for
+  every input, with no silent switch to HLS (see issue #1). Existing continuous
+  fMP4 is single-consumer and not a shareable gateway output; flipping its
+  eligibility is not fanout.
 
-A bounded local experiment with the same FFmpeg 9 binaries verified that the
+Before the shared subtitle implementation, a bounded local experiment with the same FFmpeg 9 binaries verified that the
 official segment-muxer Matroska/M3U8 seam retains H264, FLAC and subrip as indices
 0/1/2 and is readable with only `file` protocols and explicit `mkv,m3u8`
 extensions. This subtitle experiment is **not** a runtime implementation or full qualification.
-The implemented AV-only path deliberately still excludes this subtitle case.
+That historical AV-only path excluded the subtitle case; the qualified SubRip
+adapter now owns decoded cue carryover rather than relying on packets alone.
 The experiment exposed an active-cue late-join issue: a subtitle packet begins
 in an evicted segment but its display interval extends into the retained window.
 Plain segment replacement loses that still-active cue. A subtitle implementation
@@ -138,4 +142,5 @@ alone does not delete files.
 
 [Current official FFmpeg segment documentation](https://ffmpeg.org/ffmpeg-all.html#segment_002c-stream_005fsegment_002c-ssegment)
 documents Matroska segments with a live M3U8 list. Real cue, track, reload and
-teardown tests remain required before claiming the subtitle path shares live inputs.
+teardown tests were required beyond that experiment; the subsequently qualified
+SubRip path and its explicit unsupported formats are recorded in shared subtitles.

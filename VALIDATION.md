@@ -1,5 +1,34 @@
 # Validation checkpoint — 2026-09-30
 
+## Bounded shared SubRip cue carryover
+
+Linux SubRip-bearing live HLS inputs now use the private Matroska replay with
+deterministic verified source/local track maps and one decoded, bounded cue
+cache per ingest. Original absolute source identities survive; selected captions
+report actual WebVTT rendition stream zero. Shared AV retains the absolute cue
+clock. Active long overlapping cues survive original-segment eviction, including
+an initially caption-disabled output and late enabled output. Live control
+position remains zero; retained-window decoder seeking is qualified separately.
+
+Exact runtime image
+`sha256:5efbd97e78573879a696f4bd3c4c22165c3a65e500bf5695e1cb4881ca95eed8`
+passed public HTTP identity/demux, long overlap/late activation/eviction/real
+frame-seek, independent release/real60s expiry and actual PID/upstream/storage
+teardown. A real source exceeds the 1-MiB decoded cue cache budget and receives
+safe processing failure with admission reclamation. Actual UID10001/caps0
+SubRip replay under a 2-MiB kernel mount passed ENOSPC/reclaim/key persistence
+and fresh restart. Trusted HTTPS fixture qualification is recorded with the
+completed checks in [shared subtitles](docs/SHARED_SUBTITLES.md).
+
+The default workspace suite passes 104 tests/36 opt-in ignored and strict
+all-target Clippy. ASS/SSA/WebVTT, bitmap/teletext, other unqualified source
+formats and non-Linux subtitle replay retain independent paths; no silent
+discard, new live origin, UI, public deployment or native renderer is claimed.
+Later mechanical formatting passes scoped checks for all changed Rust files;
+the workspace formatter still reports five untouched baseline files listed in
+the qualification document. The exact image proof above predates that
+formatting-only commit; runtime behavior did not change.
+
 ## Supported Docker kernel-bounded media spool
 
 The supplied Compose deployment now mounts DATA_DIR/media on its own 256 MiB

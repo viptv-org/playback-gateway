@@ -61,9 +61,9 @@ language. Normalized output plans, including chosen tracks and conversion modes,
 still determine worker sharing; request preferences cannot merge incompatible
 outputs. Use matching control clients/gateway builds for these new fields.
 
-This is a schema example, not a playable public URL. `progressive` requests are
-accepted only when the selected original-container transport is compatible;
-there is no silent switch to HLS. Dimensions represent decoder capabilities,
+This is a schema example, not a playable public URL. `progressive` requests
+are currently rejected with `unsupported_output` for every input: no shared
+progressive output exists yet, and there is no silent switch to HLS. Dimensions represent decoder capabilities,
 not a product quality preference. Track indices are absolute input indices.
 Live sessions start at zero. Source URLs cannot contain embedded userinfo or
 fragments. At most 32 upstream headers, with 4096 bytes per value, are accepted;
@@ -96,6 +96,35 @@ Eligible live replay outputs share one input across differing normalized plans.
 Independent fallback or VOD output pipelines each consume an input reservation;
 viewers joining an identical existing job do not reserve another input. This
 accounting does not promise universal single-ingest for every source/transport.
+
+### Shared live text subtitles
+
+Subtitle metadata keeps the absolute source `input_index`. A selected HLS
+subtitle is a separate WebVTT rendition: `output_index` and
+`output_stream_index` are both zero within that rendition, never native player
+track IDs or indices in the AV segment. This corrects the earlier combined-map
+stream index; clients must resolve native tracks through their player.
+
+The Linux shared replay adapter qualifies SubRip alongside
+the eligible AV codecs listed in `docs/LIVE_SHARING_FORMATS.md`. All eligible
+caption tracks are retained even when the first output disables subtitles.
+Compatible viewers and differing HLS output plans share one input. Caption
+selection remains part of the output plan; release, expiry and credentials
+remain viewer scoped.
+
+Decoded WebVTT preserves cue intervals and overlapping cues across replay
+eviction, with stable cue IDs in dependent segments. Styling follows the
+existing conversion to plain WebVTT. Live control position remains zero; seeking
+here means a player seeking within currently retained HLS segments, not a new
+control API rewind origin. A reader outside retained media can fail.
+
+Caption blocks are bounded at 32 KiB and the shared cue cache at 1 MiB/8192 cues;
+completed cues retain 180 seconds of reader grace, while still-active cues remain
+until their end. Overflow or invalid caption timing fails the affected ingest
+safely, rather than silently dropping captions. The supported Docker media
+tmpfs bound also remains required. ASS/SSA/WebVTT, bitmap, DVB/PGS/teletext, mov_text/text,
+unqualified codecs and non-Linux subtitle replay keep the independent path.
+These are qualification boundaries, not a universal subtitle-format promise.
 
 ## Media and errors
 

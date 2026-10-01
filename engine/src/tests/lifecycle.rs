@@ -35,6 +35,7 @@ async fn open_segment_growth_and_stalled_leased_process_are_reaped() {
     manager.sessions.lock().await.insert(
         "id".into(),
         Session {
+            caption_track: None,
             ingest: None,
             stream: None,
             _source_probe: None,
@@ -435,6 +436,7 @@ async fn capabilities_expiry_and_cleanup_are_enforced() {
     manager.sessions.lock().await.insert(
         "id".into(),
         Session {
+            caption_track: None,
             ingest: None,
             stream: None,
             _source_probe: None,
@@ -519,6 +521,7 @@ async fn shutdown_reaps_children_and_cancelled_start_artifacts() {
         pids.push(child.id().unwrap());
         dirs.push(dir.clone());
         let session = Session {
+            caption_track: None,
             ingest: None,
             stream: None,
             _source_probe: None,

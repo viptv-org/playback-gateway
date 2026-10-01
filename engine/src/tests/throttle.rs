@@ -80,8 +80,10 @@ async fn throttle_suspends_resumes_and_still_kills_the_encoder() {
 #[ignore = "requires real FFmpeg/ffprobe binaries"]
 async fn on_demand_encoding_pauses_ahead_of_the_viewer_and_resumes() {
     use std::os::unix::fs::PermissionsExt;
-    let ffmpeg = PathBuf::from(std::env::var("PLAYBACK_TEST_FFMPEG").expect("PLAYBACK_TEST_FFMPEG"));
-    let ffprobe = PathBuf::from(std::env::var("PLAYBACK_TEST_FFPROBE").expect("PLAYBACK_TEST_FFPROBE"));
+    let ffmpeg =
+        PathBuf::from(std::env::var("PLAYBACK_TEST_FFMPEG").expect("PLAYBACK_TEST_FFMPEG"));
+    let ffprobe =
+        PathBuf::from(std::env::var("PLAYBACK_TEST_FFPROBE").expect("PLAYBACK_TEST_FFPROBE"));
     let root = tempfile::tempdir().unwrap();
     let fixture = root.path().join("movie.mkv");
     let status = Command::new(&ffmpeg)
