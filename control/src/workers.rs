@@ -2182,6 +2182,29 @@ printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","wi
     }
 
     #[tokio::test]
+    async fn live_matroska_progressive_is_refused_before_any_media_job() {
+        let (root, workers, p) = fixture(false).await;
+        std::fs::write(root.path().join("probe"), r#"#!/bin/sh
+printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"ffv1","width":640,"height":360,"pix_fmt":"yuv420p","avg_frame_rate":"25/1","r_frame_rate":"25/1","field_order":"progressive"},{"index":1,"codec_type":"audio","codec_name":"flac","channels":2}],"format":{"format_name":"matroska,webm"}}'
+"#).unwrap();
+        let mut matroska = request(1920);
+        matroska.output.protocol = OutputProtocol::Progressive;
+        matroska.output.video_codecs = vec!["ffv1".into()];
+        matroska.output.audio_codecs = vec!["flac".into()];
+        assert_eq!(
+            workers.create(&p, &matroska, "mkv", 0).await.unwrap_err(),
+            "unsupported_output"
+        );
+        assert!(
+            !root.path().join("encoder.count").exists(),
+            "refused at request time: no ingest or reader is started"
+        );
+        assert_eq!(workers.engine.active_count().await, 0);
+        assert_eq!(workers.sessions.lock().unwrap().job_count(), 0);
+        workers.engine.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn five_viewers_use_one_worker_and_media_is_independently_authorized() {
         let (root, workers, p) = fixture(false).await;
         let mut viewers = Vec::new();
