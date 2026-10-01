@@ -197,6 +197,7 @@ impl PlaybackManager {
                         ingest: None,
                         stream: None,
                         _source_probe: None,
+                        sanitizer: None,
                         direct: Some(direct),
                         capability,
                         dir: PathBuf::new(),
@@ -480,6 +481,7 @@ impl PlaybackManager {
                                 ingest: None,
                                 stream: None,
                                 _source_probe: Some(probe.clone()),
+                                sanitizer: None,
                                 direct: Some(transport),
                                 capability,
                                 dir: PathBuf::new(),
@@ -598,6 +600,20 @@ impl PlaybackManager {
                     })
                 });
         let compatible_video = probe.compatible_video(width, height, H264_COPY_LEVEL) || hevc_copy;
+        // A disguised HLS source is read through one loopback sanitizer per
+        // output job: the seek probe and the job's FFmpeg input share it, and
+        // it closes with the session. A shared replay owns its own instead.
+        let sanitizer = if shared_scope.is_none() {
+            sanitize::for_reader(
+                &probe,
+                validated.as_str(),
+                &header_block,
+                Some(permits.clone()),
+            )
+            .await?
+        } else {
+            None
+        };
         let seek_origin = if !force_video && continuous && compatible_video {
             self.copy_seek_position(
                 validated.as_str(),
@@ -608,7 +624,7 @@ impl PlaybackManager {
                     .and_then(|v| v.parse::<f64>().ok())
                     .unwrap_or(0.0),
                 permits.clone(),
-                probe.relaxed_hls_segments,
+                sanitizer.as_deref(),
             )
             .await
         } else {
@@ -705,6 +721,7 @@ impl PlaybackManager {
                 ingest: None,
                 stream: None,
                 _source_probe: Some(probe.clone()),
+                sanitizer,
                 direct: None,
                 capability: capability.clone(),
                 dir: dir.clone(),
@@ -775,6 +792,7 @@ impl PlaybackManager {
                         cmd.args(["-c:v", decoder]);
                     }
                 }
+                let mut network_input = String::new();
                 if let Some(ingest) = &session.ingest {
                     contain_media_process(&mut cmd);
                     // Trusted generated playlist only. Provider protocols and
@@ -791,8 +809,12 @@ impl PlaybackManager {
                         "-2",
                     ]);
                 } else {
-                    input_args(&mut cmd, &header_block);
-                    relaxed_hls_args(&mut cmd, probe.relaxed_hls_segments);
+                    network_input = source_input(
+                        &mut cmd,
+                        validated.as_str(),
+                        &header_block,
+                        session.sanitizer.as_deref(),
+                    );
                 }
                 // Input is never paced to realtime. A live input already arrives in
                 // realtime, and `-re` only withheld the upstream's initial burst (an
@@ -807,7 +829,7 @@ impl PlaybackManager {
                 if let Some(ingest) = &session.ingest {
                     cmd.arg(&ingest.playlist);
                 } else {
-                    cmd.arg(validated.as_str());
+                    cmd.arg(&network_input);
                 }
                 cmd.args(["-map", "0:v:0"]);
                 if shared_captions {

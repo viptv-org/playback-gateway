@@ -191,6 +191,7 @@ impl PlaybackManager {
             ingest: Some(ingest),
             stream: Some(stream.clone()),
             _source_probe: Some(probe),
+            sanitizer: None,
             direct: None,
             capability: capability.clone(),
             dir: PathBuf::new(),

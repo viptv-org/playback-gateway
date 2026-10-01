@@ -20,6 +20,8 @@ pub(super) enum ProbeFailure {
     Protocol,
     /// FFmpeg refused an HLS segment by its name before reading its bytes.
     SegmentExtension,
+    /// An HLS segment was typefound as a still image (a disguise prefix).
+    ImageSegment,
     Http(u16),
     Network,
     Timeout,
@@ -91,6 +93,20 @@ pub(super) fn probe_failure(stderr: &[u8]) -> ProbeFailure {
     {
         return ProbeFailure::SegmentExtension;
     }
+    if text.contains("hls")
+        && [
+            "jpeg_pipe",
+            "png_pipe",
+            "gif_pipe",
+            "bmp_pipe",
+            "webp_pipe",
+            "image2",
+        ]
+        .iter()
+        .any(|s| text.contains(s))
+    {
+        return ProbeFailure::ImageSegment;
+    }
     if [
         "not on whitelist",
         "protocol not found",
@@ -151,6 +167,16 @@ pub(super) fn probe_failure(stderr: &[u8]) -> ProbeFailure {
     ProbeFailure::Exit
 }
 
+/// FFmpeg could not read an HLS source's segments as media: their names were
+/// refused, or they were typefound as still images.
+pub(super) fn disguise_signal(result: &Result<Probe, ProbeFailure>) -> bool {
+    match result {
+        Err(ProbeFailure::SegmentExtension | ProbeFailure::ImageSegment) => true,
+        Ok(probe) => probe.image_only_hls(),
+        Err(_) => false,
+    }
+}
+
 pub(super) struct ProbeCacheEntry {
     pub(super) probe: Arc<Probe>,
     pub(super) inserted: Instant,
@@ -179,15 +205,14 @@ impl PlaybackManager {
         position: f64,
         origin: f64,
         permits: Arc<InputPermits>,
-        relaxed_hls: bool,
+        sanitizer: Option<&sanitize::HlsSanitizer>,
     ) -> Option<f64> {
         if position == 0.0 {
             return Some(0.0);
         }
         let mut cmd = Command::new(&self.config.ffprobe);
         cmd.args(["-v", "error"]);
-        input_args(&mut cmd, headers);
-        relaxed_hls_args(&mut cmd, relaxed_hls);
+        let input = source_input(&mut cmd, url, headers, sanitizer);
         cmd.args([
             "-select_streams",
             "v:0",
@@ -199,7 +224,7 @@ impl PlaybackManager {
             "-of",
             "json",
             "-i",
-            url,
+            &input,
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -371,20 +396,36 @@ impl PlaybackManager {
         permits: Option<Arc<InputPermits>>,
         reduced: bool,
     ) -> Result<Probe, ProbeFailure> {
+        let direct = self
+            .probe_command(url, headers, permits.clone(), reduced, None)
+            .await;
+        if !disguise_signal(&direct) {
+            return direct;
+        }
+        // Refused segment names (FFmpeg 7.1+) and image-typefound segments
+        // are read again through a loopback sanitizer that strips the
+        // disguise. It lives only for this probe; readers start their own.
+        let Ok(sanitizer) =
+            sanitize::HlsSanitizer::start(url, &sanitize::header_map(headers), permits.clone())
+                .await
+        else {
+            tracing::debug!("Disguised HLS sanitizer could not prepare the source");
+            return direct;
+        };
         match self
-            .probe_command(url, headers, permits.clone(), reduced, false)
+            .probe_command(url, headers, permits, reduced, Some(&sanitizer))
             .await
         {
-            // Only an FFmpeg that knows extension_picky emits this refusal,
-            // so the relaxed retry never sends it an unknown option.
-            Err(ProbeFailure::SegmentExtension) => {
-                let mut probe = self
-                    .probe_command(url, headers, permits, reduced, true)
-                    .await?;
-                probe.relaxed_hls_segments = true;
+            Ok(mut probe) if !probe.image_only_hls() => {
+                probe.disguised_hls = true;
+                tracing::info!("Disguised HLS source probed through the sanitizer");
                 Ok(probe)
             }
-            result => result,
+            Ok(_) => direct,
+            Err(failure) => match direct {
+                Ok(probe) => Ok(probe),
+                Err(_) => Err(failure),
+            },
         }
     }
 
@@ -394,15 +435,14 @@ impl PlaybackManager {
         headers: &str,
         permits: Option<Arc<InputPermits>>,
         reduced: bool,
-        relaxed_hls: bool,
+        sanitizer: Option<&sanitize::HlsSanitizer>,
     ) -> Result<Probe, ProbeFailure> {
         let mut cmd = Command::new(&self.config.ffprobe);
         cmd.kill_on_drop(true)
             .stdin(Stdio::null())
             .stderr(Stdio::piped());
         cmd.args(["-v", "error"]);
-        input_args(&mut cmd, headers);
-        relaxed_hls_args(&mut cmd, relaxed_hls);
+        let input = source_input(&mut cmd, url, headers, sanitizer);
         // The reduced form keeps every field the delivery decision needs, including
         // SDR/HDR transfer evidence, while shrinking a response that failed to parse.
         let entries = if reduced {
@@ -420,7 +460,7 @@ impl PlaybackManager {
             "-of",
             "json",
             "-i",
-            url,
+            &input,
         ]);
         cmd.stdout(Stdio::piped());
         let child = cmd.spawn().map_err(|_| ProbeFailure::Spawn)?;
@@ -458,6 +498,13 @@ impl PlaybackManager {
                 serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&bytes)
                     .map_err(|_| ProbeFailure::InvalidJson)?;
             }
+            // The capability never survives into anything a caller could log.
+            let stderr = match sanitizer {
+                Some(sanitizer) => sanitizer
+                    .redact(&String::from_utf8_lossy(&stderr))
+                    .into_bytes(),
+                None => stderr,
+            };
             return Err(probe_failure(&stderr));
         }
         serde_json::from_slice(&bytes).map_err(|_| ProbeFailure::InvalidJson)

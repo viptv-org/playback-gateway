@@ -15,7 +15,7 @@ impl PlaybackManager {
     ) -> Result<Response, String> {
         let (url, source_headers, permits) = direct.inspection_source();
         let probe = self
-            .cached_probe(&url, &source_headers, false, Some(permits.clone()))
+            .cached_probe(&url, &source_headers, false, permits.clone())
             .await
             .ok_or("Media metadata unavailable")?;
         if file == "tracks.json" {
@@ -64,16 +64,18 @@ impl PlaybackManager {
             return Err("Invalid subtitle position".into());
         }
         let start = (position / 60.0).floor() * 60.0;
+        // Owned by this extraction; it closes when the extraction returns.
+        let sanitizer =
+            sanitize::for_reader(&probe, &url, &source_headers, permits.clone()).await?;
         let mut command = Command::new(&self.config.ffmpeg);
         command.args(["-v", "error", "-nostdin"]);
-        input_args(&mut command, &source_headers);
-        relaxed_hls_args(&mut command, probe.relaxed_hls_segments);
+        let input = source_input(&mut command, &url, &source_headers, sanitizer.as_deref());
         command
             .args([
                 "-ss",
                 &start.to_string(),
                 "-i",
-                &url,
+                &input,
                 "-t",
                 "120",
                 "-map",
@@ -96,7 +98,7 @@ impl PlaybackManager {
         let stdout = child.stdout.take().ok_or("Subtitle output unavailable")?;
         let mut owned = ProbeChild {
             child: Some(child),
-            permits: Some(permits),
+            permits,
             cleanup_tasks: self.cleanup_tasks.clone(),
         };
         let result = timeout(Duration::from_secs(15), async {

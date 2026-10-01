@@ -317,6 +317,7 @@ impl PlaybackManager {
             caption_track: None,
             stream: None,
             _source_probe: Some(probe.clone()),
+            sanitizer: None,
             direct: None,
             ingest: None,
             capability: String::new(),
@@ -360,9 +361,10 @@ impl PlaybackManager {
         if captions.is_some() {
             cmd.arg("-copyts");
         }
-        input_args(&mut cmd, headers);
-        relaxed_hls_args(&mut cmd, probe.relaxed_hls_segments);
-        cmd.arg("-i").arg(source);
+        session.sanitizer =
+            sanitize::for_reader(&probe, source, headers, Some(session.permits.clone())).await?;
+        let input = source_input(&mut cmd, source, headers, session.sanitizer.as_deref());
+        cmd.arg("-i").arg(input);
         let mut ordered: Vec<_> = indices.iter().collect();
         ordered.sort_by_key(|(_, replay)| **replay);
         for (original, _) in ordered {

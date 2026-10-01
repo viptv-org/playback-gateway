@@ -27,9 +27,27 @@ Contract: [API_V1.md](API_V1.md). Evidence: [VALIDATION.md](VALIDATION.md) and
   from byte 0 is answered as the clean sub-range past the junk (its
   `Content-Range` and `Content-Length` say so), and a later range passes
   through. Keys and session data (`.key` resources) and WebVTT pass through
-  byte-for-byte. FFmpeg ingest relaxes segment-name checks
-  (`-extension_picky 0`) but still reads origin bytes directly: a segment
-  with a prepended JPEG or GIF header is not yet cleaned before FFmpeg.
+  byte-for-byte. FFmpeg readers of a disguised source (refused segment names,
+  an image-typefound segment, or an image-only HLS probe without audio) read
+  it through a gateway-internal loopback sanitizer built on the same
+  transport: `127.0.0.1` on an ephemeral port behind a 244-bit capability
+  token compared in constant time (any other path is 404), at most 16
+  concurrent requests, and the transport's bounds (6 upstream fetches, 8 MiB
+  segment cache, 4 MiB playlists, 4096 resources, private-destination
+  refusal, consumed egress-proxy route, cross-origin `Authorization`/`Cookie`
+  stripping, opaque resource names). FFmpeg receives only the loopback URL:
+  no headers, no `-http_proxy`, `-protocol_whitelist http,tcp,crypto` and no
+  `-extension_picky` (rewritten names are `.ts`/`.m4s`/`.aac`, so FFmpeg
+  before 7.1 works too). A reconnect range after a stripped whole segment is
+  shifted back to origin coordinates. The token is never logged and is
+  redacted from FFmpeg diagnostics. Lifecycle: the probe's sanitizer ends
+  with the probe; every reader (output job and its seek probe, shared replay
+  ingest — which also feeds progressive delivery — and each subtitle
+  extraction) starts its own and drops it with the job, child or session.
+  The probe result records only that the source is disguised, never a
+  sanitizer, so cached and session-held probe copies hold no listener or
+  reservations. A source the sanitizer cannot prepare (for example
+  cross-origin segments behind an egress proxy) fails inspection as before.
 - **Output jobs:** inspected, normalized output plans with closed conversion
   choices (`auto`, `audio`, `video`, `audio_video`) and explicit track/language
   selection; compatible viewers share one job; eligible live outputs share one
