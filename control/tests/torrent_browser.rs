@@ -12,6 +12,9 @@ const BOOTSTRAP: &str = "torrent-runtime-fixture-bootstrap-not-production";
 #[path = "support/torrent.rs"]
 mod torrent_fixture;
 use torrent_fixture::{seed_peer_observed, SeedProgress};
+#[allow(dead_code)]
+#[path = "support/magnet.rs"]
+mod magnet_fixture;
 mod support;
 use support::isolated_address;
 
@@ -263,25 +266,57 @@ async fn standalone_torrent_browser_uid10001() {
     assert!(reference.status.success());
     assert_eq!(reference.stdout.len(), 320 * 180 * 3);
     std::fs::write(shared.join("expected3.rgb"), reference.stdout).unwrap();
-    let bytes = std::fs::read(&movie).unwrap();
-    let progress = std::sync::Arc::new(SeedProgress::default());
-    let seed_progress = progress.clone();
-    let seed = tokio::spawn(async move {
-        loop {
-            if TcpStream::connect(peer_address).await.is_ok() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        seed_peer_observed(
-            peer_address,
-            info_hash,
-            bytes,
-            Duration::from_millis(80),
-            Some(seed_progress),
+    let magnet_mode = std::env::var("PLAYBACK_TEST_MAGNET").as_deref() == Ok("true");
+    let peer_count = std::env::var("PLAYBACK_TEST_SWARM_PEERS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1);
+    let swarm = if magnet_mode {
+        Some(
+            magnet_fixture::start(
+                info_hash,
+                metainfo.to_vec(),
+                std::fs::read(&movie).unwrap(),
+                peer_count,
+                Duration::from_millis(if peer_count > 1 { 200 } else { 80 }),
+            )
+            .await,
         )
-        .await;
-    });
+    } else {
+        None
+    };
+    let progress = std::sync::Arc::new(SeedProgress::default());
+    let seed = if magnet_mode {
+        None
+    } else {
+        let bytes = std::fs::read(&movie).unwrap();
+        let seed_progress = progress.clone();
+        Some(tokio::spawn(async move {
+            loop {
+                if TcpStream::connect(peer_address).await.is_ok() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            seed_peer_observed(
+                peer_address,
+                info_hash,
+                bytes,
+                Duration::from_millis(80),
+                Some(seed_progress),
+            )
+            .await;
+        }))
+    };
+    let private_hash = info_hash
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    let source_url = if magnet_mode {
+        format!("magnet:?xt=urn:btih:{private_hash}")
+    } else {
+        source_url
+    };
     let socket = tokio::net::UnixListener::bind(shared.join("gateway.sock")).unwrap();
     std::fs::set_permissions(
         shared.join("gateway.sock"),
@@ -303,7 +338,8 @@ async fn standalone_torrent_browser_uid10001() {
     });
     std::fs::write(
         shared.join("fixture.json"),
-        json!({"source":source_url,"key":key,"movie_size":movie_size}).to_string(),
+        json!({"source":source_url,"key":key,"movie_size":movie_size,"info_hash":private_hash})
+            .to_string(),
     )
     .unwrap();
     std::fs::set_permissions(
@@ -343,10 +379,54 @@ async fn standalone_torrent_browser_uid10001() {
     })
     .await
     .expect("browser fixture deadline");
-    let seeded_bytes = progress.bytes.load(std::sync::atomic::Ordering::Relaxed);
-    let seeded_millis = progress
-        .elapsed_millis
-        .load(std::sync::atomic::Ordering::Relaxed);
+    let (seeded_bytes, seeded_millis) = if let Some(swarm) = &swarm {
+        let bytes = swarm
+            .stats
+            .iter()
+            .map(|s| s.payload.load(std::sync::atomic::Ordering::Relaxed))
+            .sum();
+        let elapsed = swarm
+            .stats
+            .iter()
+            .map(|s| s.elapsed_millis.load(std::sync::atomic::Ordering::Relaxed))
+            .max()
+            .unwrap();
+        let metadata: u64 = swarm
+            .stats
+            .iter()
+            .map(|s| s.metadata.load(std::sync::atomic::Ordering::Relaxed))
+            .sum();
+        let queries: u64 = swarm
+            .stats
+            .iter()
+            .map(|s| s.queries.load(std::sync::atomic::Ordering::Relaxed))
+            .sum();
+        let contributing = swarm
+            .stats
+            .iter()
+            .filter(|s| s.payload.load(std::sync::atomic::Ordering::Relaxed) > 0)
+            .count();
+        if peer_count > 1 {
+            assert!(
+                contributing >= 2,
+                "multi-peer fixture requires actual payload from at least two peers"
+            );
+        }
+        println!("Controlled swarm contributing_peers={contributing}.");
+        assert!(
+            metadata > 0 && queries > 0,
+            "magnet must resolve through actual DHT and BEP9 metadata"
+        );
+        println!("Controlled magnet bootstrap metadata_bytes={metadata} dht_queries={queries} peers={peer_count}.");
+        (bytes, elapsed)
+    } else {
+        (
+            progress.bytes.load(std::sync::atomic::Ordering::Relaxed),
+            progress
+                .elapsed_millis
+                .load(std::sync::atomic::Ordering::Relaxed),
+        )
+    };
     assert!(
         seeded_bytes > 1024 * 1024,
         "bounded sustained peer must deliver more than one MiB"
@@ -378,10 +458,25 @@ async fn standalone_torrent_browser_uid10001() {
         .unwrap()
         .status()
         .is_success());
-    tokio::time::timeout(Duration::from_secs(5), seed)
+    if let Some(seed) = seed {
+        tokio::time::timeout(Duration::from_secs(5), seed)
+            .await
+            .expect("idle peer must stop")
+            .expect("peer fixture must not fail");
+    }
+    if let Some(swarm) = &swarm {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while swarm
+                .stats
+                .iter()
+                .any(|s| s.active.load(std::sync::atomic::Ordering::Relaxed) > 0)
+            {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
         .await
-        .expect("idle peer must stop")
-        .expect("peer fixture must not fail");
+        .expect("all controlled swarm transfers must stop");
+    }
     println!("Active cache payload observed; default service reaper removed idle payload and stopped peer after final release; readiness retained.");
     assert_eq!(
         unsafe { libc::kill(child.id().unwrap() as libc::pid_t, libc::SIGTERM) },
