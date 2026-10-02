@@ -182,3 +182,57 @@ universal peer compatibility or adverse Internet traffic claim.
 Protocol references: [BEP 5](https://www.bittorrent.org/beps/bep_0005.html),
 [BEP 9](https://www.bittorrent.org/beps/bep_0009.html) and
 [BEP 10](https://www.bittorrent.org/beps/bep_0010.html).
+
+## Packaged desktop authenticated HLS checkpoint — 2026-10-02
+
+A fresh Linux QA AppImage exercises the real synthetic backend App router,
+encrypted addon/gateway registration, backend-approved `.torrent` input with
+fileIdx0, and the actual enabled UID10001 service over trusted local HTTPS.
+The native app obtains a real device-code approval/token UUID session and
+selects its Owned profile. Approval uses the fixture's authorized synthetic
+browser principal; browser account login/password UI is not qualified.
+The short repeat uses unchanged release code and freshly copied fixture
+executables. A passive private HTTP relay records operation/status/format
+counts while forwarding real requests/responses unchanged; no release hook,
+mocked product response or production-policy change was introduced.
+
+Exact pins:
+
+- Desktop package source `0e044eda2ba5a873a302f33830e7c3359fdc488d`, TV-web
+  `ea1733497e0b8e0911fdc842aa597d2bfda32288`, Core
+  `f66c87e13a2c93b6dad3234da9694c57f8530b0a`, native plugin
+  `d80d0715241b3794157336f900fb7e290172db11`.
+- Local-HTTPS QA AppImage SHA256
+  `e8412eaa7e3cd479ea063832ee5cd1e0283f146834d10d26b5d0d8b61de25daf`.
+- Backend fixture archive `d52a9c1422c94ea4e2d866cef3e135484473595e`, gateway
+  driver archive `c186dec4836b5b3ad778297866b93354e4d3f0db`; the latter includes
+  the bounded per-attempt seeder retry from `20e515f`.
+- Actual runtime image
+  `sha256:3ed14fbbf179d9d4a326b6e798118ad62c209f01a7fdf3d0524233a52e367825`.
+
+The accepted private case `ste0TF` records one backend creation202, three ready
+HLS200 replies (including renewal), two renewal POST200 replies and one explicit
+lease DELETE200. Actual gateway requests include 32 playlist200 and99 MPEGTS
+segment200 responses, followed by remote release204. Native progress reports
+13.714962 →28.765692 seconds with total120.021; owned silent audio was present,
+runtime stderr stayed empty, and the exact native process exited0/audio0.
+
+The runner exits0 and its real driver passes: all2 input/2 output/4 viewer slots
+reclaim, an active cache payload is observed then removed by the unchanged
+prompt default reaper, the peer stops while readiness remains healthy, and
+owned service SIGTERM succeeds. The deterministic peer delivers4,014,640 bytes
+over19,909ms. All owned ingress listeners and the container are retired. The
+whole bounded fixture lasts490.26s including auth/operator setup; this is not a
+490-second playback or long-duration workload claim. The earlier `grQ6zF` case
+expired before native Close and supplies no explicit-release/cache/peer proof.
+
+A single existing public Forward-control attempt found no exposed action.
+**Packaged HLS decoded seek remains unverified.** Direct native +30-second seek,
+real gateway/browser decoded replacement and Android managed seek are distinct
+accepted evidence; they do not establish this remaining package/HLS interaction.
+Playing-overlay/Fit/resize pixel acceptance also remains separate. The agreed
+Android path is authenticated gateway HLS; the in-process facade/manual entry
+and its Kotlin/JNA/four-ABI/Range work are deferred, not completed by this result.
+Public/hostile swarms, clean-machine/physical hardware, signing and production
+rollback/cutover remain separate gates. No production access or deployment
+occurred; raw source/media URLs, credentials, argv, logs and captures stay private.
