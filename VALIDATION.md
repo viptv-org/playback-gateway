@@ -1,4 +1,40 @@
-# Validation checkpoint — 2026-09-30
+# Validation checkpoint — 2026-10-02
+
+## Joined Matroska progressive delivery (#11)
+
+Live Matroska progressive viewers now consume a joined private replay: fresh
+headers once and only media Clusters from subsequent segments. Same-container
+eligibility is explicit; other live containers, encoding, selected subtitles,
+seeking and ranges remain unsupported. Shared HLS Matroska readers retain their
+existing on-disk replay path.
+
+An isolated pre-torrent stage passes fmt, all-target Clippy with warnings denied,
+and the workspace suite: 105 engine, 28 control and one main binary test,
+45 real-media tests ignored by default. All five real Matroska worker fixtures
+pass together in 78.35 seconds, including existing HLS sharing/budget/teardown
+and both FFV1/FLAC and H264/FLAC progressive cases. MPEG-TS progressive passes in
+30.28 seconds; the exact FFmpeg join-reader test passes in 0.67 seconds with no
+backward timestamps, full segment coverage and late keyframe decode.
+
+Runtime source `0382030`, freshly built with Rust build jobs limited to two,
+produces local image
+`sha256:48be718a12d4e3641b38f28de76391f040c05a790fa7de45edd04c434ac82d6f`.
+All five image modes (`matroska`, `matroska-tls`, `bounded-matroska`, `ts` and
+`bounded`) pass using fixture/script source `133fa4a`. This qualifies actual
+Matroska delivery over HTTP and
+verified fixture HTTPS, independent viewer/namespace access, slow-reader
+failure with an aborted response and final process/upstream/storage/reservation
+reaping. Actual UID10001 Matroska ENOSPC under a 2-MiB media tmpfs fails the
+viewer with a transport error, reclaims capacity and permits fresh playback.
+See [progressive qualification](docs/PROGRESSIVE_QUALIFICATION.md) for exact
+modes, timings, image provenance and limits. No deployment is claimed.
+
+The fixture corrections preserve the real contract: repeating a short complete
+Matroska file introduced artificial headers/timestamp resets, and unrenewed
+60-second API leases expired before the low-rate image fixture filled its
+socket. Native sources now send one long container; the eviction scenario
+renews active viewers explicitly and stops renewing on release. Media reads
+still do not renew leases, and the separate real expiry fixture is unchanged.
 
 ## Bounded shared SubRip cue carryover
 

@@ -52,34 +52,34 @@ pub(super) fn generated_replay_file(file: &str) -> bool {
     matroska_segment_number(file).is_some()
 }
 
+/// Parses the private segment list: at most twelve generated segment names,
+/// strictly increasing. Anything else (paths, URLs, reordering) is refused.
+pub(super) fn matroska_playlist(text: &str) -> Result<Vec<u64>, ()> {
+    if text.len() > 16 * 1024 || !text.starts_with("#EXTM3U") {
+        return Err(());
+    }
+    let numbers: Vec<_> = text
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|name| matroska_segment_number(name).ok_or(()))
+        .collect::<Result<_, _>>()?;
+    if numbers.len() > 12 || numbers.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(());
+    }
+    Ok(numbers)
+}
+
 // The segment muxer limits its playlist, not files. Retain three evicted
 // segments for already-reading outputs; never delete an unlisted/open new file.
 async fn matroska_window(dir: &std::path::Path) -> Result<bool, ()> {
     let text = match tokio::fs::read_to_string(dir.join("index.m3u8")).await {
-        Ok(text) if text.len() <= 16 * 1024 => text,
-        Ok(_) => return Err(()),
+        Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(_) => return Err(()),
     };
-    let names: Vec<_> = text
-        .lines()
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .collect();
-    if !text.starts_with("#EXTM3U") {
-        return Err(());
-    }
-    if names.is_empty() {
+    let numbers = matroska_playlist(&text)?;
+    if numbers.is_empty() {
         return Ok(false);
-    }
-    if names.len() > 12 {
-        return Err(());
-    }
-    let numbers: Vec<_> = names
-        .iter()
-        .map(|name| matroska_segment_number(name).ok_or(()))
-        .collect::<Result<_, _>>()?;
-    if numbers.windows(2).any(|pair| pair[0] >= pair[1]) {
-        return Err(());
     }
     let keep = numbers[0].saturating_sub(3);
     let mut files = tokio::fs::read_dir(dir).await.map_err(|_| ())?;
@@ -97,8 +97,8 @@ async fn matroska_window(dir: &std::path::Path) -> Result<bool, ()> {
             }
         }
     }
-    for name in names {
-        if !tokio::fs::metadata(dir.join(name))
+    for number in numbers {
+        if !tokio::fs::metadata(dir.join(format!("segment-{number:09}.mkv")))
             .await
             .is_ok_and(|meta| meta.is_file() && meta.len() > 0)
         {
@@ -132,6 +132,29 @@ async fn within_budget(dir: &std::path::Path, limit: u64) -> bool {
     }
 }
 
+/// The private Matroska replay's segment muxer. Every segment is a complete
+/// Matroska file that starts on a keyframe; progressive readers join them with
+/// `joinable`, shared HLS outputs read the playlist directly.
+pub(super) fn matroska_replay_args(cmd: &mut Command, dir: &std::path::Path) {
+    cmd.args([
+        "-f",
+        "segment",
+        "-segment_format",
+        "matroska",
+        "-segment_time",
+        "2",
+        "-segment_list_type",
+        "m3u8",
+        "-segment_list_size",
+        "12",
+        "-segment_list_flags",
+        "+live",
+        "-segment_list",
+    ])
+    .arg(dir.join("index.m3u8"))
+    .arg(dir.join("segment-%09d.mkv"));
+}
+
 pub(super) struct SharedIngest {
     pub(super) playlist: PathBuf,
     indices: BTreeMap<u32, u32>,
@@ -151,6 +174,11 @@ impl SharedIngest {
             .get(&original)
             .copied()
             .ok_or_else(|| "Replay track unavailable".into())
+    }
+    /// The private replay is segmented Matroska, which a progressive reader
+    /// must join (see `joinable`) rather than read through the HLS demuxer.
+    pub(super) fn matroska(&self) -> bool {
+        self.kind == ReplayKind::Matroska
     }
     pub(super) fn running(&self) -> bool {
         self.running.load(std::sync::atomic::Ordering::Acquire)
@@ -400,25 +428,7 @@ impl PlaybackManager {
                 .arg(dir.join("segment-%09d.ts"))
                 .arg(&playlist);
             }
-            ReplayKind::Matroska => {
-                cmd.args([
-                    "-f",
-                    "segment",
-                    "-segment_format",
-                    "matroska",
-                    "-segment_time",
-                    "2",
-                    "-segment_list_type",
-                    "m3u8",
-                    "-segment_list_size",
-                    "12",
-                    "-segment_list_flags",
-                    "+live",
-                    "-segment_list",
-                ])
-                .arg(&playlist)
-                .arg(dir.join("segment-%09d.mkv"));
-            }
+            ReplayKind::Matroska => matroska_replay_args(&mut cmd, &dir),
         }
         #[cfg(target_os = "linux")]
         let mut caption_pipes = match &captions {

@@ -471,6 +471,13 @@ pub(crate) mod tests {
         http_source_with_interval(bytes, Duration::from_millis(30)).await
     }
     async fn http_source_with_interval(bytes: Vec<u8>, delay: Duration) -> HttpSource {
+        http_source_with_repetition(bytes, delay, true).await
+    }
+    async fn http_source_with_repetition(
+        bytes: Vec<u8>,
+        delay: Duration,
+        repeat: bool,
+    ) -> HttpSource {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -500,6 +507,13 @@ pub(crate) mod tests {
                                 for chunk in bytes.chunks(188 * 100) {
                                     if socket.write_all(chunk).await.is_err() { return; }
                                     tokio::time::sleep(delay).await;
+                                }
+                                if !repeat {
+                                    // Keep the live connection open without repeating container
+                                    // headers or regressing timestamps. Detect reader teardown.
+                                    let mut closed = [0u8; 1];
+                                    let _ = socket.read(&mut closed).await;
+                                    return;
                                 }
                             }
                         });
@@ -1117,10 +1131,72 @@ pub(crate) mod tests {
     #[ignore = "requires real FFmpeg/ffprobe; isolated plain-HTTP progressive live fixture"]
     async fn real_progressive_viewers_share_one_upstream_late_join_decodes_and_last_release_reaps()
     {
+        check_progressive_live(ProgressiveFixture::TS).await;
+    }
+    #[tokio::test]
+    #[ignore = "requires real FFmpeg/ffprobe; FFV1/FLAC private Matroska replay, joined"]
+    async fn real_matroska_ffv1_flac_progressive_viewers_share_late_join_decodes_and_reap() {
+        check_progressive_live(ProgressiveFixture::MATROSKA_FFV1).await;
+    }
+    #[tokio::test]
+    #[ignore = "requires real FFmpeg/ffprobe; H264/FLAC private Matroska replay, joined"]
+    async fn real_matroska_h264_flac_progressive_viewers_share_late_join_decodes_and_reap() {
+        check_progressive_live(ProgressiveFixture::MATROSKA_H264).await;
+    }
+    /// One same-container progressive fixture: source codecs and container,
+    /// and what the viewer must receive.
+    struct ProgressiveFixture {
+        video: &'static str,
+        encoder: &'static str,
+        audio: &'static str,
+        container: &'static str,
+        file: &'static str,
+        content_type: &'static str,
+        magic: &'static [u8],
+    }
+    impl ProgressiveFixture {
+        const TS: Self = Self {
+            video: "h264",
+            encoder: "libx264",
+            audio: "aac",
+            container: "mpegts",
+            file: "stream.ts",
+            content_type: "video/mp2t",
+            magic: &[0x47],
+        };
+        const MATROSKA_FFV1: Self = Self {
+            video: "ffv1",
+            encoder: "ffv1",
+            audio: "flac",
+            container: "matroska",
+            file: "stream.mkv",
+            content_type: "video/x-matroska",
+            magic: &[0x1a, 0x45, 0xdf, 0xa3],
+        };
+        const MATROSKA_H264: Self = Self {
+            video: "h264",
+            encoder: "libx264",
+            audio: "flac",
+            container: "matroska",
+            file: "stream.mkv",
+            content_type: "video/x-matroska",
+            magic: &[0x1a, 0x45, 0xdf, 0xa3],
+        };
+    }
+    async fn check_progressive_live(fixture: ProgressiveFixture) {
+        let ProgressiveFixture {
+            video,
+            encoder,
+            audio,
+            container,
+            file,
+            content_type,
+            magic,
+        } = fixture;
         let ffmpeg = std::env::var("PLAYBACK_TEST_FFMPEG").unwrap();
         let ffprobe = std::env::var("PLAYBACK_TEST_FFPROBE").unwrap();
         let root = tempfile::tempdir().unwrap();
-        let input = root.path().join("input.ts");
+        let input = root.path().join(format!("input.{container}"));
         let output = tokio::time::timeout(
             Duration::from_secs(20),
             tokio::process::Command::new(&ffmpeg)
@@ -1138,22 +1214,23 @@ pub(crate) mod tests {
                     "-i",
                     "sine=frequency=440:sample_rate=48000",
                     "-t",
-                    "12",
+                    "240",
                     "-c:v",
-                    "libx264",
+                    encoder,
                     "-threads",
                     "2",
-                    "-preset",
-                    "ultrafast",
                     "-g",
                     "25",
                     "-c:a",
-                    "aac",
-                    "-b:a",
-                    "64k",
+                    audio,
                     "-f",
-                    "mpegts",
+                    container,
                 ])
+                .args(if encoder == "libx264" {
+                    &["-preset", "ultrafast"][..]
+                } else {
+                    &[]
+                })
                 .arg(&input)
                 .output(),
         )
@@ -1161,7 +1238,14 @@ pub(crate) mod tests {
         .unwrap()
         .unwrap();
         assert!(output.status.success(), "fixture generation must succeed");
-        let source = http_source(std::fs::read(input).unwrap()).await;
+        // One continuous container: repeating a short Matroska file emits new
+        // EBML headers and resets its timestamps, unlike a live source.
+        let source = http_source_with_repetition(
+            std::fs::read(input).unwrap(),
+            Duration::from_millis(30),
+            false,
+        )
+        .await;
         let media_root = root.path().join("media");
         let engine = PlaybackManager::new(playback_engine::Config {
             ffmpeg: ffmpeg.clone().into(),
@@ -1196,6 +1280,8 @@ pub(crate) mod tests {
         let mut request = request(1920);
         request.input.url = source.url.clone();
         request.output.protocol = OutputProtocol::Progressive;
+        request.output.video_codecs = vec![video.into()];
+        request.output.audio_codecs = vec![audio.into()];
 
         // Decoders the client cannot use fail explicitly, never via HLS.
         let mut undecodable = request.clone();
@@ -1215,32 +1301,32 @@ pub(crate) mod tests {
         expect_connections(&source, 1).await;
         let opened = source.requests.load(std::sync::atomic::Ordering::SeqCst);
         let delivery = workers.delivery(&principal, &first, 0).unwrap().unwrap();
-        assert_eq!(delivery.format, "mpegts");
+        assert_eq!(delivery.format, container);
         assert_eq!(delivery.mode, "remux");
         assert_eq!(
             (delivery.video_mode.as_str(), delivery.audio_mode.as_str()),
             ("copy", "copy")
         );
-        assert!(delivery.url.ends_with("/stream.ts"));
+        assert!(delivery.url.ends_with(&format!("/{file}")));
         let first_token = delivery.url.split('/').nth(3).unwrap().to_owned();
         let head = workers
             .media(
                 &first.id,
                 &first_token,
-                "stream.ts",
+                file,
                 0,
                 axum::http::Method::HEAD,
                 axum::http::HeaderMap::new(),
             )
             .await
             .unwrap();
-        assert_eq!(head.headers()["content-type"], "video/mp2t");
+        assert_eq!(head.headers()["content-type"], content_type);
         assert_eq!(head.headers()["accept-ranges"], "none");
         let first_body = workers
             .media(
                 &first.id,
                 &first_token,
-                "stream.ts",
+                file,
                 0,
                 axum::http::Method::GET,
                 axum::http::HeaderMap::new(),
@@ -1249,7 +1335,7 @@ pub(crate) mod tests {
             .unwrap();
         let mut first_body = first_body.into_body();
         let first_bytes = read_live(&mut first_body, 256 * 1024).await;
-        assert_eq!(first_bytes[0], 0x47, "fresh MPEG-TS packets");
+        assert!(first_bytes.starts_with(magic), "fresh container headers");
         // The first viewer keeps consuming while another viewer joins.
         let first_reader = tokio::spawn(async move {
             use axum::body::HttpBody;
@@ -1280,7 +1366,7 @@ pub(crate) mod tests {
             .media(
                 &late.id,
                 &first_token,
-                "stream.ts",
+                file,
                 3,
                 axum::http::Method::GET,
                 axum::http::HeaderMap::new()
@@ -1291,7 +1377,7 @@ pub(crate) mod tests {
             .media(
                 &late.id,
                 &late_token,
-                "stream.ts",
+                file,
                 3,
                 axum::http::Method::GET,
                 axum::http::HeaderMap::new(),
@@ -1304,7 +1390,7 @@ pub(crate) mod tests {
             !first_reader.is_finished(),
             "the first viewer keeps receiving media"
         );
-        let decoded = root.path().join("late.ts");
+        let decoded = root.path().join(format!("late.{container}"));
         std::fs::write(&decoded, &late_bytes).unwrap();
         // The late output starts at a keyframe with fresh headers and decodes.
         let probe = tokio::process::Command::new(&ffprobe)
@@ -1328,7 +1414,7 @@ pub(crate) mod tests {
             .unwrap();
         let facts = String::from_utf8_lossy(&probe.stdout);
         assert!(
-            facts.contains("h264"),
+            facts.contains(video),
             "late output carries the original codec: {facts}"
         );
         assert!(
@@ -1351,7 +1437,7 @@ pub(crate) mod tests {
             .media(
                 &late.id,
                 &late_token,
-                "stream.ts",
+                file,
                 3,
                 axum::http::Method::GET,
                 axum::http::HeaderMap::new()
@@ -1359,6 +1445,45 @@ pub(crate) mod tests {
             .await
             .is_err());
 
+        // A viewer that opens its body and never reads it is evicted once its
+        // bounded channel stays full, while the other viewers keep flowing.
+        let stalled = workers
+            .create(&principal, &request, "stalled", 4)
+            .await
+            .unwrap();
+        let stalled_delivery = workers.delivery(&principal, &stalled, 4).unwrap().unwrap();
+        let stalled_token = stalled_delivery.url.split('/').nth(3).unwrap().to_owned();
+        let stalled_body = workers
+            .media(
+                &stalled.id,
+                &stalled_token,
+                file,
+                4,
+                axum::http::Method::GET,
+                axum::http::HeaderMap::new(),
+            )
+            .await
+            .unwrap();
+        let engine_id = workers.active.lock().unwrap()[&stalled.job_id].id.clone();
+        let stall = std::time::Instant::now();
+        tokio::time::timeout(Duration::from_secs(90), async {
+            while workers.engine.heartbeat(&engine_id).await {
+                read_live(&mut late_body, 8 * 1024).await;
+            }
+        })
+        .await
+        .expect("a never-read progressive viewer is evicted");
+        println!(
+            "{container}: never-read viewer evicted after {:?}",
+            stall.elapsed()
+        );
+        drop(stalled_body);
+        workers
+            .sessions
+            .lock()
+            .unwrap()
+            .release(&principal, &stalled.id, 5)
+            .unwrap();
         // Releasing one viewer leaves the other reader and the ingest running.
         workers
             .sessions
@@ -2181,16 +2306,18 @@ printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","wi
         }
     }
 
+    // H264/AAC in Matroska has an MPEG-TS private replay: a same-container
+    // remux is impossible, so it is refused rather than converted.
     #[tokio::test]
-    async fn live_matroska_progressive_is_refused_before_any_media_job() {
+    async fn matroska_progressive_without_a_matroska_replay_is_refused_before_any_media_job() {
         let (root, workers, p) = fixture(false).await;
         std::fs::write(root.path().join("probe"), r#"#!/bin/sh
-printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"ffv1","width":640,"height":360,"pix_fmt":"yuv420p","avg_frame_rate":"25/1","r_frame_rate":"25/1","field_order":"progressive"},{"index":1,"codec_type":"audio","codec_name":"flac","channels":2}],"format":{"format_name":"matroska,webm"}}'
+printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","width":640,"height":360,"pix_fmt":"yuv420p","avg_frame_rate":"25/1","r_frame_rate":"25/1","field_order":"progressive"},{"index":1,"codec_type":"audio","codec_name":"aac","channels":2}],"format":{"format_name":"matroska,webm"}}'
 "#).unwrap();
         let mut matroska = request(1920);
         matroska.output.protocol = OutputProtocol::Progressive;
-        matroska.output.video_codecs = vec!["ffv1".into()];
-        matroska.output.audio_codecs = vec!["flac".into()];
+        matroska.output.video_codecs = vec!["h264".into()];
+        matroska.output.audio_codecs = vec!["aac".into()];
         assert_eq!(
             workers.create(&p, &matroska, "mkv", 0).await.unwrap_err(),
             "unsupported_output"

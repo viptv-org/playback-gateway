@@ -107,34 +107,42 @@ another origin behind an egress proxy is refused at inspection.
 
 ### Progressive live delivery
 
-Decision recorded 2026-09-30 (playback-gateway#1): original progressive
+Decision recorded 2026-09-30 (playback-gateway#1), extended to Matroska on
+2026-10-02 (playback-gateway#11): original progressive
 delivery is a same-container lossless remux, not byte-identical forwarding.
 
 - **Supported subset.** `input.live` is `true`; the input container is
   MPEG-TS whose private replay is MPEG-TS (delivered as MPEG-TS, `video/mp2t`,
-  `stream.ts`); the video and the selected audio codecs are inside the private
+  `stream.ts`), or Matroska whose private replay is Matroska (FFV1 video, FLAC
+  audio or text subtitles; delivered as Matroska, `video/x-matroska`,
+  `stream.mkv`); the video and the selected audio codecs are inside the private
   replay set and in the request's `video_codecs`/`audio_codecs`; the picture is
   progressive and within `max_width`/`max_height`; `conversion` is `auto`; and
-  no subtitle track or preferred subtitle language is requested. Live HLS, MP4,
-  **Matroska** and other inputs, MPEG-TS inputs whose replay would be Matroska
-  (FFV1 video, FLAC audio or subtitle streams), and any live request needing an
-  encode fail at request time with `unsupported_output`, before any ingest,
-  reader or reservation starts. Live Matroska progressive is unsupported until
-  the private Matroska replay is joinable by a copy-only reader (see
-  [progressive qualification](docs/PROGRESSIVE_QUALIFICATION.md)); shared HLS
-  outputs of Matroska-replay inputs are unaffected. On-demand `progressive` requests are outside this
-  contract: they keep the pre-existing original-file transport when the
-  original container and codecs are compatible, and otherwise fail with
-  `unsupported_output`.
+  no subtitle track or preferred subtitle language is requested. Live HLS, MP4
+  and other inputs, mismatched container families (for example H264/AAC in
+  Matroska, whose replay is MPEG-TS, or an MPEG-TS input whose replay would be
+  Matroska), and any live request needing an encode fail at request time with
+  `unsupported_output`, before any ingest, reader or reservation starts.
+  On-demand `progressive` requests are outside this contract: they keep the
+  pre-existing original-file transport when the original container and codecs
+  are compatible, and otherwise fail with `unsupported_output`.
 - **Execution.** Compatible viewers in one namespace with the same source and
   headers share one authenticated upstream ingest, the same one shared HLS
   outputs use. Each viewer gets its own job: a copy-only FFmpeg reader of the
-  private replay that can open only gateway-generated local files. The output
+  private replay that can open only gateway-generated local files. An MPEG-TS
+  reader reads the private playlist. A Matroska reader opens nothing but its
+  own stdin: the gateway follows the private Matroska playlist and writes one
+  continuous Matroska stream to it (the EBML header, an unknown-size Segment,
+  Info and Tracks once, then only the Clusters of each listed segment in
+  order), because the private segments are complete Matroska files that a
+  single demuxer cannot read back to back. The output
   carries the first video and the one selected audio track (or none);
   metadata, chapters, data and subtitle streams are dropped. No packet is
   re-encoded.
-- **Join and seek.** A reader starts two replay segments behind the live edge,
+- **Join and seek.** A reader starts at the second-newest listed replay segment,
   at a segment boundary, which is a keyframe, and writes fresh container headers.
+  A Matroska reader that falls so far behind that a segment it has not read was
+  evicted fails rather than skip media.
   There are no byte ranges (`Accept-Ranges: none`), no seeking and no content
   length. Each viewer's media URL can be opened once with `GET` (`HEAD` is
   answered without consuming it). A second `GET` on the same viewer fails, so

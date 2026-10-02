@@ -80,9 +80,10 @@ implements the generic mechanism.
 Qualified: shared live HLS/TS ingest for the documented H.264/HEVC/MPEG-2 video
 and AAC/MP2/MP3/AC3/EAC3 audio sets, private lossless Matroska replay for
 verified FFV1/FLAC, and Linux SubRip shared cue carryover (issue #2). Progressive
-live delivery is a same-container lossless remux for live MPEG-TS only (issue #1,
-decision recorded 2026-09-30); every other progressive live request, including
-Matroska, is rejected with `unsupported_output`.
+live delivery is a same-container lossless remux for live MPEG-TS and for live
+Matroska whose private replay is Matroska (issues #1 and #11, decision recorded
+2026-09-30); every other progressive live request is rejected with
+`unsupported_output`.
 
 ## Acceptance
 

@@ -13,6 +13,7 @@ mod fmp4;
 mod hardware;
 mod hls;
 mod ingest;
+mod joinable;
 mod lease;
 mod lifecycle;
 mod manager;

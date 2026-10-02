@@ -1709,30 +1709,6 @@ async fn start_progressive(fixture: &Fixture, key: &str, namespace: &str, id: &s
     );
     viewer
 }
-/// Live Matroska progressive is outside the supported subset (see
-/// docs/PROGRESSIVE_QUALIFICATION.md). Matroska fixture modes prove the
-/// explicit request-time refusal on the built image, and that it starts no
-/// ingest, reader, replay or reservation, then exit cleanly.
-async fn refuse_matroska_progressive(mut fixture: Fixture) {
-    let (video, _, _, _) = progressive_codecs();
-    let service = fixture.child.id().unwrap();
-    let refused = create_progressive(&fixture, &fixture.key, "fixture", "matroska", video).await;
-    assert_eq!(refused.status().as_u16(), 422, "explicit refusal");
-    let refused: Value = refused.json().await.unwrap();
-    assert_eq!(refused["error"]["code"], "unsupported_output");
-    connections(&fixture.source, 0).await;
-    assert!(children(service).is_empty(), "no ingest or reader starts");
-    // The media root may not even exist yet: nothing was ever started.
-    let media = state_root(fixture.root.path()).join("media");
-    assert!(
-        !media.exists() || fixture.media_dirs().is_empty(),
-        "no private replay"
-    );
-    available(&fixture, 1, 4, 5).await;
-    println!("Live Matroska progressive refused: unsupported_output");
-    fixture.signal("-TERM").await;
-    assert!(fixture.child.wait().await.unwrap().success());
-}
 /// Continuously consumes one progressive body; keeps its first `keep` bytes.
 struct Consumer {
     total: Arc<AtomicUsize>,
@@ -1789,6 +1765,32 @@ async fn session_state(fixture: &Fixture, key: &str, id: &str) -> (u16, Value) {
         .unwrap();
     let status = response.status().as_u16();
     (status, response.json().await.unwrap_or(Value::Null))
+}
+/// Scoped client renewal for scenarios that measure eviction rather than expiry.
+/// Media reads deliberately do not extend a viewer lease.
+struct RenewingLease(tokio::task::JoinHandle<()>);
+impl Drop for RenewingLease {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+fn keep_lease(fixture: &Fixture, id: &str) -> RenewingLease {
+    let client = fixture.client.clone();
+    let key = fixture.key.clone();
+    let url = format!("{}/v1/sessions/{id}/renew", fixture.base);
+    RenewingLease(tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            let Ok(response) = client.post(&url).bearer_auth(&key).send().await else {
+                return;
+            };
+            // Released/failed viewers no longer renew; their explicit checks
+            // below verify teardown and transport failure.
+            if !response.status().is_success() {
+                return;
+            }
+        }
+    }))
 }
 async fn release(fixture: &Fixture, key: &str, id: &str) -> u16 {
     fixture
@@ -1901,9 +1903,6 @@ async fn real_progressive_image_share_late_join_evict_isolate_and_reap() {
     assert!(progressive());
     let mut fixture = Fixture::new().await;
     let (video, audio, file, content_type) = progressive_codecs();
-    if file == "stream.mkv" {
-        return refuse_matroska_progressive(fixture).await;
-    }
     let service = fixture.child.id().unwrap();
 
     // A decoder the client cannot use fails explicitly and opens nothing.
@@ -1914,6 +1913,7 @@ async fn real_progressive_image_share_late_join_evict_isolate_and_reap() {
     println!("Undecodable request refused: {}", refused["error"]["code"]);
 
     let first = start_progressive(&fixture, &fixture.key, "fixture", "first").await;
+    let first_lease = keep_lease(&fixture, first["id"].as_str().unwrap());
     connections(&fixture.source, 1).await;
     let opened = fixture.source.requests.load(Ordering::SeqCst);
     let first_url = format!(
@@ -1959,6 +1959,7 @@ async fn real_progressive_image_share_late_join_evict_isolate_and_reap() {
     // A late compatible viewer joins the same upstream.
     tokio::time::sleep(Duration::from_secs(3)).await;
     let late = start_progressive(&fixture, &fixture.key, "fixture", "late").await;
+    let late_lease = keep_lease(&fixture, late["id"].as_str().unwrap());
     assert_ne!(late["id"], first["id"]);
     connections(&fixture.source, 1).await;
     assert_eq!(
@@ -2105,6 +2106,7 @@ async fn real_progressive_image_share_late_join_evict_isolate_and_reap() {
 
     // A slow reader: opened, then never read, with a tiny receive window.
     let slow = start_progressive(&fixture, &fixture.key, "fixture", "slow").await;
+    let slow_lease = keep_lease(&fixture, slow["id"].as_str().unwrap());
     let socket = tokio::net::TcpSocket::new_v4().unwrap();
     socket.set_recv_buffer_size(4096).unwrap();
     let mut stalled = socket.connect(fixture.address).await.unwrap();
@@ -2125,6 +2127,7 @@ async fn real_progressive_image_share_late_join_evict_isolate_and_reap() {
     assert!(header.starts_with(b"HTTP/1.1 200"));
     let stalled_at = std::time::Instant::now();
     // Releasing one viewer during the stall leaves the others running.
+    drop(first_lease);
     assert_eq!(
         release(&fixture, &fixture.key, first["id"].as_str().unwrap()).await,
         204
@@ -2153,6 +2156,7 @@ async fn real_progressive_image_share_late_join_evict_isolate_and_reap() {
         "Stalled reader evicted (processing_failed) after {:?}",
         stalled_at.elapsed()
     );
+    drop(slow_lease);
     late_reader.advances().await;
     connections(&fixture.source, 1).await;
     let mut rest = Vec::new();
@@ -2179,6 +2183,7 @@ async fn real_progressive_image_share_late_join_evict_isolate_and_reap() {
     println!("Media children before last release: {}", pids.len());
     assert!(!pids.is_empty());
     let last_release = std::time::Instant::now();
+    drop(late_lease);
     assert_eq!(
         release(&fixture, &fixture.key, late["id"].as_str().unwrap()).await,
         204
@@ -2222,9 +2227,6 @@ async fn real_progressive_kernel_bounded_media_full_fails_and_reclaims() {
         Ok("/var/lib/playback-gateway")
     );
     let mut fixture = Fixture::new().await;
-    if progressive_codecs().2 == "stream.mkv" {
-        return refuse_matroska_progressive(fixture).await;
-    }
     let service = fixture.child.id().unwrap();
     let media = state_root(fixture.root.path()).join("media");
     let process_status = std::fs::read_to_string(format!("/proc/{service}/status")).unwrap();

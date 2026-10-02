@@ -189,6 +189,11 @@ impl Stream {
     pub(super) fn backpressured(&self) -> bool {
         self.backpressured.load(Ordering::Acquire)
     }
+    /// Observes [`Stream::close`], so helpers feeding this stream's producer
+    /// stop with it.
+    pub(super) fn closed(&self) -> watch::Receiver<bool> {
+        self.closed.subscribe()
+    }
     pub(super) fn close(&self) {
         self.closed.send_replace(true);
     }

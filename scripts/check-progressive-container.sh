@@ -4,6 +4,9 @@
 set -euo pipefail
 image="${1:?Usage: bash scripts/check-progressive-container.sh LOCAL_GATEWAY_IMAGE [ts|matroska|ts-tls|matroska-tls|bounded|bounded-matroska]}"
 mode="${2:-ts}"
+# Override only build networking on hosts whose kernel cannot create veth pairs.
+# Qualification containers still use --network none.
+build_network="${PLAYBACK_TEST_BUILD_NETWORK:-default}"
 matroska=0; tls=0; bounded=0
 case "$mode" in
   ts) ;; matroska) matroska=1 ;; ts-tls) tls=1 ;; matroska-tls) matroska=1; tls=1 ;;
@@ -19,11 +22,11 @@ fixture="playback-progressive-fixture:${revision:0:12}-${digest:7:12}"
 docker image tag "$digest" "$parent"
 printf 'Source revision: %s\nGateway image: %s\nMode: %s\n' "$revision" "$digest" "$mode"
 git -C "$root" archive "$revision" Cargo.toml Cargo.lock engine control scripts/runtime-fixture.Dockerfile \
- | docker build --pull=false --build-arg "GATEWAY_IMAGE=$parent" -f scripts/runtime-fixture.Dockerfile -t "$fixture" -
+ | docker build --network "$build_network" --pull=false --build-arg "GATEWAY_IMAGE=$parent" -f scripts/runtime-fixture.Dockerfile -t "$fixture" -
 if [[ "$tls" == 1 ]]; then
   # The same fixture-only CA/leaf and TLS proxy as the subtitle HTTPS fixture.
   git -C "$root" archive "$revision" scripts/subtitle-fixture.Dockerfile \
-   | docker build --pull=false --build-arg "FIXTURE_IMAGE=$fixture" -f scripts/subtitle-fixture.Dockerfile -t "$fixture-tls" -
+   | docker build --network "$build_network" --pull=false --build-arg "FIXTURE_IMAGE=$fixture" -f scripts/subtitle-fixture.Dockerfile -t "$fixture-tls" -
   fixture="$fixture-tls"
 fi
 id=''
