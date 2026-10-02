@@ -17,6 +17,10 @@ RUN cargo test --locked -p playback-gateway --lib --no-run \
 FROM ${GATEWAY_IMAGE}
 COPY --from=fixture-build /out /fixtures
 # Compile-time fixture asset paths point here; only generated test media is copied.
+# The compiled path starts at /src/control/../engine, so its parent must exist.
+USER 0:0
+RUN mkdir -p /src/control
+USER 10001:10001
 COPY engine/assets/rar-media /src/engine/assets/rar-media
 ENV PLAYBACK_TEST_FFMPEG=/opt/ffmpeg/bin/ffmpeg \
     PLAYBACK_TEST_FFPROBE=/opt/ffmpeg/bin/ffprobe
