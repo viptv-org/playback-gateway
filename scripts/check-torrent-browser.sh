@@ -12,6 +12,7 @@ cd "$root"
 [[ -f "$tv_root/dist/index.html" && -f "$tv_root/tests/e2e/helpers/responsiveBackend.ts" ]]
 [[ -f "$cert_dir/viptv.local.test.crt" && -f "$cert_dir/viptv.local.test.key" ]]
 [[ $(node -p 'Number(process.versions.node.split(".")[0])') -ge 24 ]]
+mkdir -p "$root/target/qualification"
 q=$(mktemp -d "$root/target/qualification/browser-XXXXXX")
 chmod 700 "$q"
 export QUALIFICATION_DIR="$q" TV_WEB_ROOT="$tv_root"
