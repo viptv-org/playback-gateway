@@ -10,8 +10,7 @@ use tokio::{
 };
 const BOOTSTRAP: &str = "torrent-runtime-fixture-bootstrap-not-production";
 // A fixture-only BEP 3 seeder keeps its connection open until the downloader
-// requests blocks. A completed librqbit seeder can instead disconnect before
-// the downloader's first Interested message reaches it.
+// requests blocks; a byte-exact handshake supplies deterministic readiness.
 async fn seed_peer(address: std::net::SocketAddr, hash: [u8; 20], bytes: Vec<u8>) {
     let mut handshake = Vec::from(&b"\x13BitTorrent protocol"[..]);
     handshake.extend_from_slice(&[0; 8]);

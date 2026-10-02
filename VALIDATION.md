@@ -127,6 +127,41 @@ sustained peer/crash workloads and client integration remain separate. See
 [torrent qualification](docs/TORRENT_QUALIFICATION.md) and
 [provenance](PROVENANCE.md) for the precise scope and licensing restrictions.
 
+## Actual torrent service/API checkpoint — 2026-10-02
+
+The committed fixture source `f1e0fc7bbddb9dc3c564975698f40e999d002737`
+passes both named service/API cases against the unchanged runtime image
+`sha256:3ed14fbbf179d9d4a326b6e798118ad62c209f01a7fdf3d0524233a52e367825`
+(runtime source `da619d85a4d438b250db27415989a8b5a52e07ee`). No production
+Rust or runtime packaging changed in this qualification extension.
+
+| Exact service fixture | Result | Test time |
+| --- | --- | --- |
+| `standalone_torrent_runtime_off_refuses_before_source_io` | one passed, zero failed | 0.28 s |
+| `standalone_enabled_torrent_public_api_shares_seeks_and_reclaims` | one passed, zero failed | 16.10 s |
+
+The first case runs as UID10001 with no capabilities and proves disabled magnet,
+metainfo and archive inputs fail before source contact or cache creation. The
+enabled case uses generated media and a deterministic local BEP 3 peer, exercises
+the real binary's HTTP control/media API, verifies selected file metadata, two
+viewers plus late join sharing, a decoded three-second seek, foreign-key denial,
+invalid/released media-token denial, source-identity redaction, renewal and final
+admission reclamation. Both cases shut down their owned service and containers.
+
+The enabled fixture driver runs as root with NET_ADMIN solely to configure a
+guarded public-classified loopback alias inside Docker network none; it does not
+qualify the production UID10001 enabled envelope. VOD seek has separate physical
+input/output admission even while torrent payload storage is shared. The source
+gate passes fmt, all-target strict Clippy and 162 default tests; 52 opt-in tests
+remain ignored. The runner validates both exit status and the single-test result,
+allowing libtest progress text to share a line with fixture output.
+
+This is actual torrent service/API and HTTP decode evidence. Trusted-HTTPS
+browser/installed/Media3 playback, enabled UID containment, default idle-cache
+eviction, ready-viewer cache-exhaustion failure, sustained peers and crash recovery
+remain separate gates tracked in [issue15](https://github.com/viptv-org/playback-gateway/issues/15).
+No deployment or production data access occurred.
+
 ## Bounded shared SubRip cue carryover
 
 Linux SubRip-bearing live HLS inputs now use the private Matroska replay with

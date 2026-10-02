@@ -37,7 +37,7 @@ for test_name in standalone_torrent_runtime_off_refuses_before_source_io standal
   fi
   output=$(docker logs "$id" 2>&1); printf '%s\n' "$output"
   [[ "$result" == 0 ]]
-  grep -Fq "test $test_name ... ok" <<< "$output"
+  grep -Fq "test $test_name ..." <<< "$output"
   grep -Fq 'test result: ok. 1 passed; 0 failed; 0 ignored;' <<< "$output"
   docker rm --force --volumes "$id" >/dev/null; id=''
 done
