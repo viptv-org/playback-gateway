@@ -10,7 +10,7 @@ COPY ffi ./ffi
 ENV CARGO_BUILD_JOBS=2
 RUN cargo test --locked -p playback-gateway --tests --no-run \
     && mkdir /out \
-    && for name in runtime service; do \
+    && for name in runtime service torrent_runtime; do \
        executable="$(find target/debug/deps -maxdepth 1 -type f -executable -name "$name-*")"; \
        test "$(printf '%s\n' "$executable" | wc -l)" -eq 1; \
        cp "$executable" "/out/$name-fixture"; done
