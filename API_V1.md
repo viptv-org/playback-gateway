@@ -107,7 +107,8 @@ another origin behind an egress proxy is refused at inspection.
 
 ### Progressive live delivery
 
-Decision recorded 2026-09-30 (playback-gateway#1): original progressive
+Decision recorded 2026-09-30 (playback-gateway#1), extended to Matroska on
+2026-10-02 (playback-gateway#11): original progressive
 delivery is a same-container lossless remux, not byte-identical forwarding.
 
 - **Supported subset.** `input.live` is `true`; the input container is
@@ -138,7 +139,7 @@ delivery is a same-container lossless remux, not byte-identical forwarding.
   carries the first video and the one selected audio track (or none);
   metadata, chapters, data and subtitle streams are dropped. No packet is
   re-encoded.
-- **Join and seek.** A reader starts two replay segments behind the live edge,
+- **Join and seek.** A reader starts at the second-newest listed replay segment,
   at a segment boundary, which is a keyframe, and writes fresh container headers.
   A Matroska reader that falls so far behind that a segment it has not read was
   evicted fails rather than skip media.

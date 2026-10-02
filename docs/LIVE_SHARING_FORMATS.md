@@ -158,8 +158,11 @@ physical decoder or hardware acceptance.
   the HLS-demuxer reader loses media or jumps backwards, and that the joined
   reader delivers every segment with no backward timestamp, starts on a
   keyframe and decodes with `-xerror`.
+  Progressive fixtures serve one long Matroska container instead of repeating
+  short files with regressing source timestamps. Image fixtures renew viewer
+  leases while measuring slow-reader eviction; reads do not renew leases.
   [Progressive qualification](PROGRESSIVE_QUALIFICATION.md) records the
-  built-image evidence.
+  fresh image, exact source revisions and HTTP/TLS/bounded evidence.
 
 Before the shared subtitle implementation, a bounded local experiment with the same FFmpeg 9 binaries verified that the
 official segment-muxer Matroska/M3U8 seam retains H264, FLAC and subrip as indices

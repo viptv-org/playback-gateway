@@ -4,12 +4,90 @@ Built-image evidence for [progressive live delivery](../API_V1.md#progressive-li
 (playback-gateway#1). This records named disposable fixtures. It is not a
 deployment or a universal playback approval.
 
-**Supported subset: live MPEG-TS only.** Live Matroska progressive is
-unsupported and refused at request time with `unsupported_output` (see
-[Matroska progressive: unsupported](#matroska-progressive-unsupported)). The
-first qualification run below found the Matroska stall; the
-[re-run](#re-run-after-narrowing-to-mpeg-ts) records the narrowed subset and the
-error-termination fix on a rebuilt image.
+**Current supported subset (2026-10-02, playback-gateway#11):** same-container
+live MPEG-TS and Matroska remuxes whose private replay matches the input
+container. Matroska readers use the joined replay described below. Subtitle
+selection, byte ranges, seeking, encoding, and other live containers remain
+unsupported. The September runs below preserve the original failure and
+interim refusal evidence; they describe older revisions.
+
+## Matroska join qualification (2026-10-02)
+
+Runtime source `0382030` was freshly built with the repository Dockerfile and
+`CARGO_BUILD_JOBS=2` in the throwaway Rust build stage. Local image
+`viptv-gateway-qual:mkv-stage1-0382030` has content ID
+`sha256:48be718a12d4e3641b38f28de76391f040c05a790fa7de45edd04c434ac82d6f`.
+The final image matches the earlier `6b8525b` runtime byte for byte: subsequent
+changes adjust fixtures and documentation. Fixture/script source is `133fa4a`.
+The image supplies FFmpeg/ffprobe 9.0.2.
+
+Each Matroska progressive reader receives one EBML header, an unknown-size
+Segment, Info and Tracks once, followed by only Clusters from listed private
+segments. The private replay on disk and shared HLS readers keep their existing
+path. The reader starts at the second-newest listed segment, which begins on a
+keyframe. Missing/evicted segments, truncated layouts and replay teardown fail
+the stream rather than skipping media. Live bodies retain error termination on
+release, eviction and failure.
+
+The native FFmpeg fixtures initially stalled because their provider repeated a
+12-second complete Matroska file, introducing extra EBML headers and resetting
+source timestamps. A single 240-second source, held open after its bytes are
+sent, exercises a continuous live container. No additional engine fix was
+required. Both FFV1/FLAC and H264/FLAC worker fixtures pass with two viewers on
+one upstream, late keyframe decode, continued first-viewer delivery, bounded
+slow-reader eviction and last-release cleanup. The three existing Matroska HLS
+sharing/budget fixtures also pass (five tests together: 78.35 seconds).
+The original image fixture also let its 60-second viewer leases expire while
+waiting for a low-rate Matroska socket to fill. It now renews viewers intended
+to remain active, then stops renewal at explicit release. Media consumption
+still never renews a lease; the separate expiry qualification is unchanged.
+MPEG-TS progressive passes in 30.28 seconds. The exact-reader join fixture
+passes in 0.67 seconds, confirming continuous timestamps and full-segment
+coverage for FFV1 and H264.
+
+`cargo fmt --check`, strict all-target Clippy, and `cargo test --workspace`
+pass on this isolated pre-torrent revision: 105 engine, 28 control and one main
+binary test; 45 real-media tests remain opt-in.
+
+On this host, the kernel cannot create bridge veth pairs, so image builds use
+`PLAYBACK_TEST_BUILD_NETWORK=host`. This affects build-time package downloads;
+all qualification runtime containers still use `--network none`. For example:
+
+```sh
+sudo -n env PLAYBACK_TEST_BUILD_NETWORK=host bash scripts/check-progressive-container.sh IMAGE matroska
+```
+
+### Built-image results
+
+| Mode | Assertion | Result |
+| --- | --- | --- |
+| `matroska` | FFV1/FLAC delivery, late decode, isolation, eviction and reap | pass, 138.18 s |
+| `matroska-tls` | same through the verified fixture TLS proxy | pass, 136.85 s |
+| `bounded-matroska` | real ENOSPC, body error, reclaim and fresh playback | pass, 20.12 s |
+| `ts` | H264/AAC delivery, late decode, isolation, eviction and reap | pass, 88.70 s |
+| `bounded` | MPEG-TS real ENOSPC, body error, reclaim and fresh playback | pass, 25.13 s |
+
+Both full Matroska runs decode 20 video and 94 audio frames from the first two
+seconds of a late viewer, with a keyframe as its first video packet. Slow
+readers fail with `processing_failed` after 82.04 seconds (HTTP) and 81.87
+seconds (TLS); the raw response drains 2,243,698 buffered bytes and has no
+clean chunked terminator. The renewed late viewer keeps advancing and the
+provider is never reopened. Final release reclaims the two media children,
+upstream, replay storage and 1/4/5 input/output/viewer reservations in 16.27
+seconds (HTTP) and 14.72 seconds (TLS). SIGTERM exits cleanly.
+
+The MPEG-TS run repeats the full viewer assertions with 50 video and 94 audio
+frames decoded, slow-reader failure after 36.81 seconds, 1,866,062 buffered
+bytes without a terminating chunk, and final teardown in 15.05 seconds.
+
+Both bounded runs verify actual service UID/GID 10001, one ingest
+and one reader on a 2 MiB media tmpfs. Real ENOSPC at 2,097,152 allocated
+bytes makes readiness fail and refuses fresh admission. The affected viewer
+gets `processing_failed`, and its response ends with a transport error.
+Children, upstream and reservations are reclaimed; removing the fill file
+allows fresh progressive playback. The MPEG-TS and Matroska assertions are
+identical. No clean EOF is accepted as failure
+handling.
 
 ## Image and source
 
@@ -143,7 +221,7 @@ before the HTTP body observed the close, or when the reader process exited
 successfully after its replay was torn down. It is fixed for every progressive
 container (see the re-run).
 
-## Matroska progressive: unsupported
+## Historical Matroska progressive refusal (2026-09-30)
 
 Decision (2026-09-30, technical and reversible): the supported progressive
 subset is narrowed to live MPEG-TS. A live progressive request whose input is
@@ -221,14 +299,13 @@ the refusal at the coordinator without starting a process.
 
 ## Not qualified
 
-- Matroska (FFV1/FLAC) progressive delivery: unsupported and refused with
-  `unsupported_output` (see above). There is no Matroska evidence for
-  delivery, HTTPS, eviction, isolation or reaping.
 - Public ingress, Cloudflare or Dockflare HTTPS, and any deployment. HTTPS
   here is a fixture CA and proxy in a network-none container.
 - On-demand progressive, which keeps its pre-existing original-file transport.
-- Codecs, containers, bitrates and resolutions beyond the tested 320x180 25 fps
-  H264/AAC MPEG-TS source. Also not covered: HLS, MP4 or other live inputs
+- Codecs, containers, bitrates and resolutions beyond the tested H264/AAC
+  MPEG-TS (320x180 at 25 fps), FFV1/FLAC Matroska (128x72 at 10 fps
+  in the image; 320x180 at 25 fps natively), and H264/FLAC Matroska
+  (320x180 at 25 fps natively) sources. Also not covered: HLS, MP4 or other live inputs
   (they are refused by contract), interlaced input, and subtitle selection.
 - The non-root, read-only production envelope for these progressive fixtures.
   The runtime fixtures run as root with `NET_ADMIN`. Only the `bounded` modes
@@ -236,5 +313,5 @@ the refusal at the coordinator without starting a process.
   [container qualification](CONTAINER_QUALIFICATION.md) for the separate
   envelope check.
 - Client reconnect: a closed connection ends that viewer, by contract.
-- Long-lived readers beyond about 90 s, many concurrent viewers, and hardware
+- Long-lived readers beyond the roughly 140-second Matroska fixture, many concurrent viewers, and hardware
   acceleration.
