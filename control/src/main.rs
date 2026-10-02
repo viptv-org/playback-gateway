@@ -27,6 +27,9 @@ struct Settings {
     replay_max_bytes: u64,
     qsv: Option<PathBuf>,
     vaapi: Option<PathBuf>,
+    torrent_enabled: bool,
+    torrent_max_bytes: u64,
+    torrent_listen_port: Option<u16>,
 }
 impl Settings {
     fn read() -> Result<Self, &'static str> {
@@ -43,6 +46,23 @@ impl Settings {
         Ok(Self {
             key,
             outputs,
+            torrent_enabled: match std::env::var("TORRENT_ENABLED")
+                .unwrap_or_else(|_| "false".into())
+                .as_str()
+            {
+                "true" => true,
+                "false" => false,
+                _ => return Err("invalid TORRENT_ENABLED"),
+            },
+            torrent_max_bytes: std::env::var("TORRENT_CACHE_MAX_BYTES")
+                .unwrap_or_else(|_| "2147483648".into())
+                .parse::<u64>()
+                .ok()
+                .filter(|bytes| *bytes >= playback_engine::torrent::MIN_CACHE_BYTES)
+                .ok_or("invalid TORRENT_CACHE_MAX_BYTES")?,
+            torrent_listen_port: optional_torrent_port(
+                std::env::var("TORRENT_LISTEN_PORT").ok().as_deref(),
+            )?,
             replay_max_bytes: std::env::var("LIVE_REPLAY_MAX_BYTES")
                 .unwrap_or_else(|_| "268435456".into())
                 .parse::<u64>()
@@ -70,6 +90,18 @@ impl Settings {
                 .unwrap_or_else(|| PathBuf::from("/usr/bin/ffprobe")),
         })
     }
+}
+fn optional_torrent_port(value: Option<&str>) -> Result<Option<u16>, &'static str> {
+    value
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            value
+                .parse::<u16>()
+                .ok()
+                .filter(|port| *port > 0 && *port < u16::MAX)
+                .ok_or("invalid TORRENT_LISTEN_PORT")
+        })
+        .transpose()
 }
 fn main() {
     let result = Settings::read().and_then(|settings| {
@@ -183,7 +215,21 @@ async fn run(settings: Settings) -> Result<(), &'static str> {
         settings.vaapi,
         settings.replay_max_bytes,
     );
-    let workers = Arc::new(Workers::new(engine, credentials, NetworkPolicy::default()).await?);
+    let workers = Arc::new(
+        Workers::new_with_torrent(
+            engine,
+            credentials,
+            NetworkPolicy::default(),
+            playback_engine::TorrentConfig {
+                enabled: settings.torrent_enabled,
+                cache_dir: settings.data.join("torrent-cache"),
+                max_bytes: settings.torrent_max_bytes,
+                listen_port: settings.torrent_listen_port,
+                ..Default::default()
+            },
+        )
+        .await?,
+    );
     let ready = Arc::new(AtomicBool::new(true));
     let listener = tokio::net::TcpListener::bind(settings.bind)
         .await
@@ -255,6 +301,15 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn optional_peer_port_accepts_compose_empty_default_and_rejects_invalid_values() {
+        assert_eq!(optional_torrent_port(None).unwrap(), None);
+        assert_eq!(optional_torrent_port(Some("")).unwrap(), None);
+        assert_eq!(optional_torrent_port(Some("65534")).unwrap(), Some(65534));
+        for value in ["0", "65535", "65536", "invalid", " "] {
+            assert!(optional_torrent_port(Some(value)).is_err());
+        }
+    }
     #[test]
     fn exclusive_storage_lock_is_recoverable_after_owner_exits() {
         let root = tempfile::tempdir().unwrap();

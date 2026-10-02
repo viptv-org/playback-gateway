@@ -100,7 +100,7 @@ impl IntoResponse for ApiError {
             | "invalid_namespace"
             | "invalid_idempotency_key" => StatusCode::BAD_REQUEST,
             "unsupported_output" => StatusCode::UNPROCESSABLE_ENTITY,
-            "viewer_capacity" | "input_capacity" | "output_capacity" => {
+            "viewer_capacity" | "input_capacity" | "output_capacity" | "torrent_cache_capacity" => {
                 StatusCode::TOO_MANY_REQUESTS
             }
             "startup_timeout" => StatusCode::GATEWAY_TIMEOUT,

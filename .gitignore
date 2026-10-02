@@ -4,3 +4,5 @@
 .env
 *.sqlite*
 *.log
+
+ffi/generated/android/

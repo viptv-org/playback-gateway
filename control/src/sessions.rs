@@ -49,6 +49,7 @@ enum JobState {
 struct Job {
     id: String,
     input: String,
+    source: [u8; 32],
     fingerprint: String,
     state: JobState,
     created: u64,
@@ -99,20 +100,132 @@ impl Failure {
 pub struct Sessions {
     jobs: BTreeMap<String, Job>,
     viewers: BTreeMap<String, OwnedViewer>,
+    preparing: BTreeMap<String, PendingSource>,
     idle_grace: u64,
     max_records: usize,
+}
+struct PendingSource {
+    owner: String,
+    source: [u8; 32],
+    request: [u8; 32],
 }
 impl Default for Sessions {
     fn default() -> Self {
         Self {
             jobs: BTreeMap::new(),
             viewers: BTreeMap::new(),
+            preparing: BTreeMap::new(),
             idle_grace: IDLE_GRACE_SECONDS,
             max_records: 16384,
         }
     }
 }
 impl Sessions {
+    /// Reject a new opt-in transport before it allocates cache or contacts peers.
+    /// Existing source preparations may still join when their input slot is full.
+    pub fn check_source_admission(
+        &self,
+        principal: &Principal,
+        request: &CreateSession,
+        now: u64,
+    ) -> Result<(), &'static str> {
+        let available = self.available(principal, now);
+        if available.viewers == 0 {
+            return Err("viewer_capacity");
+        }
+        let existing = self.jobs.values().any(|job| {
+            job.source == source_identity(request)
+                && job.reservations.contains(&principal.key.id)
+                && job.state != JobState::Stopping
+        }) || self.preparing.values().any(|pending| {
+            pending.owner == principal.key.id && pending.source == source_identity(request)
+        });
+        if !existing && available.inputs == 0 {
+            return Err("input_capacity");
+        }
+        if !existing && available.outputs == 0 {
+            return Err("output_capacity");
+        }
+        Ok(())
+    }
+    pub fn begin_source_preparation(
+        &mut self,
+        principal: &Principal,
+        request: &CreateSession,
+        now: u64,
+    ) -> Result<String, &'static str> {
+        self.check_source_admission(principal, request, now)?;
+        if self.preparing.len() >= 1024 {
+            return Err("input_capacity");
+        }
+        let id = random_hex(16);
+        self.preparing.insert(
+            id.clone(),
+            PendingSource {
+                owner: principal.key.id.clone(),
+                source: source_identity(request),
+                request: hash(&serde_json::to_string(request).map_err(|_| "invalid_request")?),
+            },
+        );
+        Ok(id)
+    }
+    pub fn finish_source_preparation(&mut self, id: &str) {
+        self.preparing.remove(id);
+    }
+    pub fn reserve_prepared_source(
+        &mut self,
+        pending: &str,
+        principal: &Principal,
+        request: &CreateSession,
+        plan: &ExecutionPlan,
+        idempotency: &str,
+        now: u64,
+    ) -> Result<Reservation, &'static str> {
+        let record = self
+            .preparing
+            .remove(pending)
+            .ok_or("input_cleanup_pending")?;
+        let result = self.reserve(principal, request, plan, idempotency, now);
+        if result.is_err() {
+            self.preparing.insert(pending.to_owned(), record);
+        }
+        result
+    }
+    fn pending_counts(&self, principal: &Principal) -> (u32, u32, u32) {
+        let pending: Vec<_> = self
+            .preparing
+            .values()
+            .filter(|pending| pending.owner == principal.key.id)
+            .collect();
+        let active_sources: BTreeSet<_> = self
+            .jobs
+            .values()
+            .filter(|job| job.reservations.contains(&principal.key.id))
+            .map(|job| job.source)
+            .collect();
+        let active_requests: BTreeSet<_> = self
+            .viewers
+            .values()
+            .filter(|viewer| {
+                viewer.owner == principal.key.id
+                    && matches!(viewer.view.status, Status::Starting | Status::Ready)
+            })
+            .map(|viewer| viewer.request_hash)
+            .collect();
+        let inputs = pending
+            .iter()
+            .filter(|pending| !active_sources.contains(&pending.source))
+            .map(|pending| pending.source)
+            .collect::<BTreeSet<_>>()
+            .len() as u32;
+        let outputs = pending
+            .iter()
+            .filter(|pending| !active_requests.contains(&pending.request))
+            .map(|pending| pending.request)
+            .collect::<BTreeSet<_>>()
+            .len() as u32;
+        (inputs, outputs, pending.len() as u32)
+    }
     /// Per-key admission hints; stopping jobs stay charged until teardown.
     pub fn available(&self, principal: &Principal, now: u64) -> crate::credentials::Quotas {
         let jobs: Vec<_> = self
@@ -134,15 +247,26 @@ impl Sessions {
                     && matches!(viewer.view.status, Status::Starting | Status::Ready)
             })
             .count() as u32;
+        let (pending_inputs, pending_outputs, pending_viewers) = self.pending_counts(principal);
         crate::credentials::Quotas {
-            inputs: principal.key.spec.quotas.inputs.saturating_sub(inputs),
+            inputs: principal
+                .key
+                .spec
+                .quotas
+                .inputs
+                .saturating_sub(inputs.saturating_add(pending_inputs)),
             outputs: principal
                 .key
                 .spec
                 .quotas
                 .outputs
-                .saturating_sub(jobs.len() as u32),
-            viewers: principal.key.spec.quotas.viewers.saturating_sub(viewers),
+                .saturating_sub((jobs.len() as u32).saturating_add(pending_outputs)),
+            viewers: principal
+                .key
+                .spec
+                .quotas
+                .viewers
+                .saturating_sub(viewers.saturating_add(pending_viewers)),
         }
     }
     /// Resolve idempotent retries before performing any source network I/O.
@@ -212,7 +336,9 @@ impl Sessions {
                     && v.view.expires_at > now
             })
             .collect();
-        if own.len() >= principal.key.spec.quotas.viewers as usize {
+        if own.len() + self.pending_counts(principal).2 as usize
+            >= principal.key.spec.quotas.viewers as usize
+        {
             return Err("viewer_capacity");
         }
         // Headers are case-insensitive. Structural validation rejects duplicate
@@ -231,6 +357,7 @@ impl Sessions {
             request.input.url,
             headers,
             request.input.live,
+            request.input.file_index,
             // A seek starts another provider pipeline. Only live outputs have
             // a common realtime origin independent of the output plan.
             if request.input.live {
@@ -267,13 +394,22 @@ impl Sessions {
             .iter()
             .filter_map(|id| self.jobs.get(*id).map(|j| j.input.as_str()))
             .collect();
+        let pending_source = self.preparing.values().any(|pending| {
+            pending.owner == principal.key.id && pending.source == source_identity(request)
+        });
+        let pending_output = self
+            .preparing
+            .values()
+            .any(|pending| pending.owner == principal.key.id && pending.request == request_hash);
         if !own_inputs.contains(input.as_str())
-            && own_inputs.len() >= principal.key.spec.quotas.inputs as usize
+            && (own_inputs.len() >= principal.key.spec.quotas.inputs as usize
+                || (self.available(principal, now).inputs == 0 && !pending_source))
         {
             return Err("input_capacity");
         }
         if !existing.is_some_and(|job| own_jobs.contains(job.id.as_str()))
-            && own_jobs.len() >= principal.key.spec.quotas.outputs as usize
+            && (own_jobs.len() >= principal.key.spec.quotas.outputs as usize
+                || (self.available(principal, now).outputs == 0 && !pending_output))
         {
             return Err("output_capacity");
         }
@@ -283,6 +419,7 @@ impl Sessions {
         let job = self.jobs.entry(job_id.clone()).or_insert_with(|| Job {
             id: job_id.clone(),
             input,
+            source: source_identity(request),
             fingerprint,
             state: JobState::Starting,
             created: now,
@@ -635,6 +772,26 @@ impl Sessions {
             .collect()
     }
 }
+
+fn source_identity(request: &CreateSession) -> [u8; 32] {
+    let headers: BTreeMap<_, _> = request
+        .input
+        .headers
+        .iter()
+        .map(|(name, value)| (name.to_ascii_lowercase(), value))
+        .collect();
+    hash(
+        &serde_json::json!([
+            request.namespace,
+            request.input.url,
+            headers,
+            request.input.live,
+            request.input.file_index,
+            request.position_seconds
+        ])
+        .to_string(),
+    )
+}
 fn hex(value: &[u8]) -> String {
     value.iter().map(|byte| format!("{byte:02x}")).collect()
 }
@@ -642,6 +799,38 @@ fn hex(value: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn pending_source_admission_blocks_another_input_and_can_promote_shared_viewers() {
+        let mut sessions = Sessions::default();
+        let mut principal = principal("key", "one");
+        principal.key.spec.quotas.inputs = 1;
+        let first = request("one");
+        let initial = sessions
+            .begin_source_preparation(&principal, &first, 0)
+            .unwrap();
+        assert_eq!(sessions.available(&principal, 0).inputs, 0);
+        let shared = sessions
+            .begin_source_preparation(&principal, &first, 0)
+            .unwrap();
+        let mut other = first.clone();
+        other.input.url = "https://another.invalid/movie".into();
+        assert_eq!(
+            sessions
+                .begin_source_preparation(&principal, &other, 0)
+                .err(),
+            Some("input_capacity")
+        );
+        let view = sessions
+            .reserve_prepared_source(&initial, &principal, &first, &plan(), "first", 0)
+            .unwrap();
+        let second = sessions
+            .reserve_prepared_source(&shared, &principal, &first, &plan(), "second", 0)
+            .unwrap();
+        assert_eq!(view.viewer.job_id, second.viewer.job_id);
+        assert_eq!(sessions.available(&principal, 0).inputs, 0);
+        sessions.finish_source_preparation(&initial);
+        assert_eq!(sessions.available(&principal, 0).inputs, 0);
+    }
     use crate::{
         credentials::{KeyRecord, KeySpec, Quotas},
         protocol::{Input, Output, OutputProtocol},
@@ -673,6 +862,7 @@ mod tests {
                 url: "https://provider.invalid/channel".into(),
                 headers: BTreeMap::new(),
                 live: true,
+                file_index: None,
             },
             output: Output {
                 conversion: crate::protocol::Conversion::Auto,

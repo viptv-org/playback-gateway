@@ -36,6 +36,97 @@ socket. Native sources now send one long container; the eviction scenario
 renews active viewers explicitly and stops renewing on release. Media reads
 still do not renew leases, and the separate real expiry fixture is unchanged.
 
+## Opt-in torrent/archive and native library checkpoint
+
+BitTorrent v1 inputs, selected payload metadata, private Range transport, stored
+multipart RAR views and complete compressed-member spools are implemented.
+Runtime support defaults off. HTTP tracker stripping, private/webseed refusal,
+per-namespace sessions and conservative full-payload cache reservations are
+documented adaptations to the pinned librqbit API. Metainfo/direct stored-RAR
+HTTP still uses the vetted egress proxy; public viewer authorization and the
+existing output planner remain the delivery boundary.
+
+The final source gate passes fmt, all-target strict Clippy and 162 default
+tests: 109 engine tests, 10 torrent boundary tests, 40 control tests, two startup
+tests and one native facade fixture. Fifty real-media/service tests remain
+opt-in. Real local-seeder/FFmpeg fixtures separately pass shared viewers/late
+join, decoded 3-second seek, stored four-volume archive HLS with no spool, one
+checksum-verified compressed spool, independent lifecycle and cleanup.
+
+Review-driven regressions cover admission before source I/O, atomic promotion,
+cancellation while blocking extraction owns its directory/budget, actual
+blocking Range readers, delayed cleanup retaining key quota, raw HTTP reader
+abort after the last public handle, URI alias preservation and cache ownership
+until stopped readers settle. Repeated failed metadata namespaces are reaped.
+The optional peer-port parser accepts Compose's empty default and rejects
+invalid nonempty ports. Generated Range roots are registered by exact URI with
+scoped lifetime guards; probing retains the vetted egress proxy for nested HTTP
+resources. A real selected-playlist regression records zero private-child
+contacts and a redacted failure; ordinary torrent/archive delivery still passes.
+This is destination/format-specific evidence, not a general demuxer sandbox.
+
+UniFFI Kotlin bindings are generated and host-tested. All four Android ABI
+libraries were rebuilt after the final external-owner/read-settler changes and
+pass independent ELF LOAD alignment checks of at least 16 KiB. The native
+facade has no axum control/media execution on its selected feature path and
+does not yet unpack archives. No device, APK ZIP-alignment or store claim follows.
+
+Fresh local runtime image source `da619d85a4d438b250db27415989a8b5a52e07ee`
+produces image
+`sha256:3ed14fbbf179d9d4a326b6e798118ad62c209f01a7fdf3d0524233a52e367825`.
+All five committed-source torrent/archive modes pass using fixture/script source
+`9217d34f1147250578bb6dc1b105de2e55316e75`. That follow-up changes only fixture
+directory setup and generated Kotlin EOF normalization; engine/control Rust,
+dependency pins and the runtime Dockerfile are unchanged from the image source.
+
+| Mode | Exact fixture result | Test execution time |
+| --- | --- | --- |
+| `torrent` | one passed, zero failed | 0.49 s |
+| `stored-rar` | one passed, zero failed | 0.42 s |
+| `compressed-rar` | one passed, zero failed | 0.43 s |
+| `bounded-archive` | one passed, zero failed | 0.01 s |
+| `egress` | one passed, zero failed | 0.18 s |
+
+The same image and fixture revision also pass all five required inherited
+progressive modes, one exact test per mode:
+
+| Inherited progressive mode | Exact fixture result | Test execution time |
+| --- | --- | --- |
+| `matroska` | one passed, zero failed | 138.04 s |
+| `matroska-tls` | one passed, zero failed | 137.91 s |
+| `bounded-matroska` | one passed, zero failed | 20.12 s |
+| `ts` | one passed, zero failed | 88.76 s |
+| `bounded` | one passed, zero failed | 25.13 s |
+
+These inherited fixtures preserve actual progressive HTTP/fixture-HTTPS
+delivery, sharing/late join, slow-reader eviction, isolation and cleanup.
+Both bounded modes observe actual UID10001 media ENOSPC at 2,097,152 allocated
+bytes, a failed viewer transport and final process/upstream/reservation recovery.
+Their network-none runtime setup and limited capabilities remain those in
+`scripts/check-progressive-container.sh`. These are inherited live-media checks;
+they do not establish ready-viewer torrent-cache exhaustion.
+
+Each torrent/archive mode executes exactly once as UID10001 with network none, read-only root,
+no Linux capabilities, two CPUs and bounded memory. The bounded mode fills the
+actual 2-MiB archive-cache tmpfs, observes `processing_failed`, removes the partial
+spool and successfully extracts after space is reclaimed. This is preparation
+ENOSPC evidence, not a previously ready viewer's transport-error qualification.
+
+The first stored-RAR image run exposed a fixture packaging defect: the compiled
+`/src/control/../engine/assets` path required its `/src/control` parent even though
+the media assets were present. The fixture build now creates that parent as root
+and immediately restores UID10001; the full five-mode rerun above passes. On this
+sudo-only host a PATH-visible Docker wrapper also preserves Docker access through
+`timeout`; a shell function alone cannot wrap that executable invocation. Git
+retains the repository user's identity and global trust settings are unchanged.
+
+The torrent/archive results are Workers-library/image-FFmpeg qualification;
+they do not qualify torrent-specific public service-binary/API paths.
+Trusted-HTTPS browser playback, ready-viewer cache exhaustion,
+sustained peer/crash workloads and client integration remain separate. See
+[torrent qualification](docs/TORRENT_QUALIFICATION.md) and
+[provenance](PROVENANCE.md) for the precise scope and licensing restrictions.
+
 ## Bounded shared SubRip cue carryover
 
 Linux SubRip-bearing live HLS inputs now use the private Matroska replay with

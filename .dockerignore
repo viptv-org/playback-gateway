@@ -6,3 +6,5 @@ data
 *.sqlite*
 *.log
 .codebase-memory
+
+ffi/generated/android

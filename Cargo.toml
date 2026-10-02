@@ -1,5 +1,5 @@
 [workspace]
-members = ["engine", "control"]
+members = ["engine", "control", "ffi"]
 resolver = "2"
 
 [profile.release]

@@ -5,11 +5,16 @@ edition = "2021"
 license = "GPL-2.0-only"
 description = "Managed, capability-addressed HLS playback engine: direct delivery, the managed ladder, probing and session leases. No database, no identity, no accounts."
 
+[features]
+default = ["media", "torrent"]
+media = ["dep:axum"]
+torrent = ["dep:librqbit", "dep:bencode", "dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:unrar-rs"]
+
 [dev-dependencies]
 tempfile = "3"
 
 [dependencies]
-axum = { version = "0.7", features = ["macros"] }
+axum = { version = "0.7", features = ["macros"], optional = true }
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 serde = { version = "1", features = ["derive"] }
@@ -20,6 +25,14 @@ futures = "0.3"
 async-stream = "0.3"
 sha2 = "0.10"
 tracing = "0.1"
+
+
+bencode = { package = "librqbit-bencode", version = "=3.1.0", default-features = false, features = ["sha1-ring"], optional = true }
+librqbit = { version = "=8.1.1", default-features = false, features = ["rust-tls"], optional = true }
+hyper = { version = "1", features = ["server", "http1"], optional = true }
+hyper-util = { version = "0.1", features = ["tokio"], optional = true }
+http-body-util = { version = "0.1", optional = true }
+unrar-rs = { version = "=0.10.8", default-features = false, features = ["crypto-rust"], optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

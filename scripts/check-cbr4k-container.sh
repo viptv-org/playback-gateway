@@ -9,7 +9,7 @@ digest=$(docker image inspect "$image" --format '{{.Id}}')
 parent="playback-cbr4k-parent:${digest#sha256:}"
 fixture="playback-cbr4k-fixture:${revision:0:12}-${digest:7:12}"
 docker image tag "$digest" "$parent"
-git -C "$root" archive "$revision" Cargo.toml Cargo.lock engine control scripts/runtime-fixture.Dockerfile \
+git -C "$root" archive "$revision" Cargo.toml Cargo.lock engine control ffi scripts/runtime-fixture.Dockerfile \
  | docker build --pull=false --build-arg "GATEWAY_IMAGE=$parent" -f scripts/runtime-fixture.Dockerfile -t "$fixture" -
 id=''
 trap 'if [[ -n "$id" ]]; then docker rm --force --volumes "$id" >/dev/null 2>&1 || true; fi' EXIT

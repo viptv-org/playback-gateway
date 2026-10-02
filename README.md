@@ -62,6 +62,51 @@ and remaining format, TLS, hardware, storage and crash-containment acceptance.
 
 ## Transport policy
 
+### Opt-in torrent and archive inputs
+
+`TORRENT_ENABLED=true` enables BitTorrent v1 magnets and HTTP(S) `.torrent`
+metainfo. It defaults to false; capabilities report `torrent: false` until
+enabled. Inputs must set `live: false`. Optional `input.file_index` selects a
+payload file; otherwise the largest supported media/archive entry is selected.
+Safe filename/size metadata accompanies the viewer response. FFmpeg consumes a
+private, token-protected loopback Range endpoint; public delivery still uses
+the existing authenticated HLS/progressive viewer paths.
+
+`TORRENT_CACHE_MAX_BYTES` defaults to 2 GiB, minimum 256 MiB. Cache admission
+reserves the entire torrent payload and any compressed archive spool, so larger
+payloads require a larger configured budget. Only idle torrents are evicted.
+The cache directory is `DATA_DIR/torrent-cache`, private and exclusively locked.
+This is a logical payload/spool budget; filesystem block rounding and metadata
+need a separate operator filesystem limit. Compose supplies a separate cache
+tmpfs, configurable with `TORRENT_SPOOL_SIZE`, in addition to the media mount.
+Optional `TORRENT_LISTEN_PORT` opens an inbound TCP peer listener for the first
+active namespace; later namespaces use outbound connections. No peer port is
+published by default.
+
+Peer/DHT connections are an explicit opt-in exception to HTTP private-address
+denial. HTTP metainfo, redirects and direct stored-RAR ranges still pass the
+existing egress policy. HTTP trackers are stripped before librqbit admission:
+its `disable_trackers` option is ineffective in the pinned version. Private
+tracker torrents and webseed metainfo are refused; librqbit has no webseed
+implementation. Source-provided peers and alternate source parameters are
+refused. One process manager uses per-namespace sessions to prevent librqbit's
+global infohash deduplication from crossing namespace boundaries.
+
+Stored RAR payloads, including ordered multipart volumes, expose member ranges
+without a second payload copy. Compressed torrent archives are fully extracted
+and checksum-verified into a bounded spool before playback; partial-progress
+seeking is unavailable. Direct HTTP RAR supports stored members only. Encrypted
+archives are refused. Native clients can use the torrent-only
+[UniFFI/Kotlin facade](ffi/README.md); native archive unpacking remains outside
+that facade. [Torrent qualification](docs/TORRENT_QUALIFICATION.md) records
+exact test scope and remaining acceptance.
+
+The dependency additions are pinned in Cargo.lock. See
+[provenance](PROVENANCE.md) for licensing restrictions. Never enable librqbit
+tracing targets in production: they emit peer addresses and torrent identifiers.
+The service installs no tracing subscriber; embedders must suppress the target
+prefix `librqbit=off` before installing one.
+
 IPTV inputs can use **HTTP or HTTPS**. Public gateway control and media endpoints
 must sit behind HTTPS ingress. The gateway can fetch plain HTTP upstream while
 serving HTTPS to clients; the provider hop remains unencrypted. Private/reserved

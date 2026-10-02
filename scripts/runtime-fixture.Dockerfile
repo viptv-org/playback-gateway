@@ -6,6 +6,7 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY engine ./engine
 COPY control ./control
+COPY ffi ./ffi
 ENV CARGO_BUILD_JOBS=2
 RUN cargo test --locked -p playback-gateway --tests --no-run \
     && mkdir /out \

@@ -13,7 +13,7 @@ parent_image="playback-runtime-parent:${image_id#sha256:}"
 fixture_image="playback-runtime-fixture:${revision:0:12}-${image_id:7:12}"
 docker image tag "$image_id" "$parent_image"
 printf 'Source revision: %s\nGateway image: %s\n' "$revision" "$image_id"
-git -C "$repo_root" archive "$revision" Cargo.toml Cargo.lock engine control scripts/runtime-fixture.Dockerfile \
+git -C "$repo_root" archive "$revision" Cargo.toml Cargo.lock engine control ffi scripts/runtime-fixture.Dockerfile \
   | docker build --pull=false --build-arg "GATEWAY_IMAGE=$parent_image" -f scripts/runtime-fixture.Dockerfile -t "$fixture_image" -
 if [[ "$tls" == 1 ]]; then
   git -C "$repo_root" archive "$revision" scripts/subtitle-fixture.Dockerfile \
