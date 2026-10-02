@@ -112,11 +112,27 @@ interrupted transport and settled child/peer/locks, then restarts the same data
 directory, rejects old viewers, retains its scoped key and decodes fresh media.
 Exact runs and remaining limits are recorded in VALIDATION.md.
 
-Local trusted-HTTPS browser playback/seek, sustained peer workloads, repeated
-crash/stress workloads and device integration remain unqualified.
-Default idle-cache eviction and the UID10001 enabled service envelope are also
-separate from this HTTP/admission proof. The fixture releases admission and
-shuts down its owned service, rather than shortening the default idle deadline.
+A further cold-cache trusted-HTTPS browser fixture now passes with the real
+React TV-web app and its WebCodecs/canvas decoder. It proves a decoded three-second
+seek, normal 20-second renewal, old/final release and complete admission
+reclamation. The actual gateway child runs as UID10001 with no effective
+capabilities and NoNewPrivs. Its privileged network-none setup driver remains
+separate from a fully unprivileged production container.
+
+The generated 120-second 320x180 H.264/AAC source transfers 4,397,700 bytes through
+one deterministic peer over 21,795 ms. Active cache is observed, then the default
+service reaper evicts it and stops the peer after final cleanup while readiness
+remains healthy. `Sources::new` deliberately uses zero idle timeout for the
+service; the engine library's 60-second default is a different policy. The test
+changes neither. Run `scripts/check-torrent-browser.sh` with the runtime image,
+built TV-web checkout and trusted local certificate directory. Exact pins,
+49.05-second result and decoded RGB comparisons are in the
+[trusted HTTPS checkpoint](../VALIDATION.md#trusted-https-browser-uid10001-and-bounded-torrent-peer--2026-10-02).
+
+The product/backend account, catalog and approved Source boundary is mocked;
+actual service/media/decoder paths are real. Installed/native playback, Media3,
+physical devices, multi-peer or hour-long sustained workloads, and repeated
+crash/stress workloads remain separate acceptance gates.
 The generic gateway's existing FFmpeg/media response failures retain their
 separate qualification; those results do not substitute for torrent-specific
 ready-viewer failure evidence. GPL distribution restrictions remain recorded

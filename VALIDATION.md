@@ -195,6 +195,69 @@ sustained peer or repeated crash workloads remain unqualified. No production Rus
 changed. Source checks pass fmt, strict all-target Clippy and 162 default tests,
 with 54 opt-in fixtures ignored. No deployment or production data was involved.
 
+## Trusted HTTPS browser, UID10001 and bounded torrent peer — 2026-10-02
+
+Qualification source `02ef7dcea9e7fc52d78aa767a1d043f70a311f08` adds
+`standalone_torrent_browser_uid10001` and
+`scripts/check-torrent-browser.{sh,mjs}`. The unchanged actual runtime image is
+`sha256:3ed14fbbf179d9d4a326b6e798118ad62c209f01a7fdf3d0524233a52e367825`.
+The isolated cold-cache case passes once, one test / zero failures, in **49.05 s**.
+Source checks pass fmt, strict all-target Clippy and 162 default tests; 55 opt-in
+fixtures remain ignored.
+
+The real React TV-web app consumes actual gateway HLS over local trusted HTTPS.
+Curl reports `200 0` without `-k`; Chromium uses `ignoreHTTPSErrors: false`.
+Account/profile/catalog/approved opaque Source responses use the existing
+TV-web `responsiveBackend` fixture; the server-side fixture projects gateway
+leases into the backend v2 envelope. This is a mocked product/backend boundary,
+not a real-backend or installed/native acceptance claim. The actual gateway
+binary, metainfo HTTP fetch, deterministic BEP 3 transport, media authorization,
+FFmpeg outputs and browser WebCodecs/canvas decoder are real. No production
+network, data, source or credentials are used.
+
+Generated media is 120 s of 320x180 H.264/AAC with BT.709 metadata. The paused
+browser seek requests 2.9999998638 s through the real timeline control. Its
+new decoded canvas has RGB MSE **24.42494** against FFmpeg's source frame at
+three seconds, versus **3814.37458** for the zero-origin browser frame.
+The output changes from copy/remux to encode at the seek origin. The app renews
+at the gateway's normal advertised 20 s interval, releases the old and final
+viewer, and reclaims all two input/two output/four viewer slots. No decoder,
+media fetch or lifecycle method is replaced by a mock.
+
+The deterministic peer delivers **4,397,700 bytes over 21,795 ms**, with 80 ms
+between blocks. Active cache payload is observed. After final admission
+reclamation, the unchanged service reaper removes it and stops the peer while
+`/ready` remains healthy; owned SIGTERM shutdown exits successfully. The actual
+service sets `TorrentConfig.idle_timeout = ZERO` in `Sources::new`, intentionally
+evicting idle inputs promptly after worker cleanup. The engine library's
+separate 60 s default is not the service policy and is not altered by this test.
+This bounds one generated source and one peer; it does not qualify multi-peer,
+hour-long, hostile-peer or repeated stress workloads.
+
+The gateway child reports UID/GID10001, `CapEff=0` and `NoNewPrivs=1` under a
+read-only root, network none and memory/PID/CPU bounds. Its root fixture driver
+alone has NET_ADMIN for the guarded public-class loopback alias, CHOWN/SETUID/
+SETGID/DAC_OVERRIDE for the private bridge and child ownership, and KILL for
+owned shutdown. This is enabled-service UID/privilege evidence, not a claim that
+the privileged driver matches the production container's all-capabilities-dropped
+envelope. Production egress policy is unchanged.
+
+The observed TV-web checkout is `aed6ed51f1b61ddc347a0230bcd432bd5e94c3a7`;
+served entry SHA256 is
+`63ba7a2794724e701ccf1275fd7f77254590738502609f42ed3712c0cf172521`
+(`assets/app-xoCLPxez.js`). The runner requires a built TV-web checkout, Node24+,
+Caddy, trusted local certificates, Docker and the checked gateway toolchain:
+
+```sh
+bash scripts/check-torrent-browser.sh IMAGE /path/to/tv-web /path/to/local/certs 8444
+```
+
+All generated media, temporary integration material and results stay in a
+private ignored `target/qualification/browser-*` directory. A short temporary
+Unix-socket alias avoids Linux pathname limits; Caddy output is discarded so
+media capability paths do not enter logs. The runner cleans up only its own
+container, proxy and socket alias. No deployment or production cutover occurs.
+
 ## Bounded shared SubRip cue carryover
 
 Linux SubRip-bearing live HLS inputs now use the private Matroska replay with
