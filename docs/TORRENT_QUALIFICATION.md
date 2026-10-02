@@ -96,16 +96,24 @@ Actual service-binary HTTP qualification now proves runtime-off refusal before
 source I/O/cache creation, runtime-on selected metadata, shared viewers/late join,
 decoded three-second VOD seek, scoped control/media authorization, source-identity
 redaction, renewal and final admission reclamation. Run
-`bash scripts/check-torrent-api-container.sh IMAGE` for the two exact fixtures.
+`bash scripts/check-torrent-api-container.sh IMAGE` for the four exact fixtures.
 They use locally generated media and a deterministic BEP 3 peer, never public
 peers. The enabled driver requires NET_ADMIN only inside its guarded network-none
 namespace; that mode does not qualify production UID10001 containment. The
 disabled fixture runs as UID10001 with no capabilities. VOD seek origins reserve
 separate input/output slots even though torrent payload storage is shared.
 
-Local trusted-HTTPS browser
-playback/seek, ready-viewer cache-exhaustion transport failure, sustained peer
-workloads, unexpected process death and device integration remain unqualified.
+Additional actual-binary fixtures now prove ready-viewer cache exhaustion and
+one deliberate crash/restart. The cache case decodes real HTTP HLS before a
+2-MiB tmpfs reaches ENOSPC, observes `failed/processing_failed`, denies media,
+reclaims admission and decodes a fresh source after pressure removal in the same
+process. The crash case kills a ready owner with an active media child, observes
+interrupted transport and settled child/peer/locks, then restarts the same data
+directory, rejects old viewers, retains its scoped key and decodes fresh media.
+Exact runs and remaining limits are recorded in VALIDATION.md.
+
+Local trusted-HTTPS browser playback/seek, sustained peer workloads, repeated
+crash/stress workloads and device integration remain unqualified.
 Default idle-cache eviction and the UID10001 enabled service envelope are also
 separate from this HTTP/admission proof. The fixture releases admission and
 shuts down its owned service, rather than shortening the default idle deadline.

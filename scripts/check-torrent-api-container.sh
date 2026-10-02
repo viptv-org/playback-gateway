@@ -18,7 +18,7 @@ id=''
 trap 'if [[ -n "$id" ]]; then docker rm --force --volumes "$id" >/dev/null 2>&1 || true; fi' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-for test_name in standalone_torrent_runtime_off_refuses_before_source_io standalone_enabled_torrent_public_api_shares_seeks_and_reclaims; do
+for test_name in standalone_torrent_runtime_off_refuses_before_source_io standalone_enabled_torrent_public_api_shares_seeks_and_reclaims standalone_torrent_crash_reaps_children_releases_locks_and_restarts standalone_ready_torrent_cache_enospc_fails_reclaims_and_recovers; do
   args=(--detach --pull=never --init --network none --read-only --no-healthcheck
     --cap-drop ALL --security-opt no-new-privileges --memory 1g --memory-swap 1g
     --pids-limit 256 --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=512m,mode=1777)
@@ -27,7 +27,16 @@ for test_name in standalone_torrent_runtime_off_refuses_before_source_io standal
   else
     # Only the isolated fixture driver needs NET_ADMIN for its public-classified
     # loopback alias. This mode does not qualify the production UID envelope.
-    args+=(--user 0:0 --cap-add NET_ADMIN --entrypoint /fixtures/torrent_runtime-fixture)
+    args+=(--user 0:0 --cap-add NET_ADMIN)
+    case "$test_name" in
+      standalone_torrent_crash_*) args+=(--entrypoint /fixtures/torrent_crash-fixture) ;;
+      standalone_ready_torrent_cache_*)
+        args+=(--entrypoint /fixtures/torrent_cache_failure-fixture
+          --env PLAYBACK_TEST_DATA_DIR=/fixture/state
+          --tmpfs /fixture/state:rw,nosuid,nodev,size=32m,mode=0700
+          --tmpfs /fixture/state/torrent-cache:rw,noexec,nosuid,nodev,size=2m,mode=0700) ;;
+      *) args+=(--entrypoint /fixtures/torrent_runtime-fixture) ;;
+    esac
   fi
   id=$(docker run "${args[@]}" "$fixture" "$test_name" --ignored --exact --nocapture --test-threads=1)
   [[ "$id" =~ ^[0-9a-f]{64}$ ]]
@@ -41,4 +50,4 @@ for test_name in standalone_torrent_runtime_off_refuses_before_source_io standal
   grep -Fq 'test result: ok. 1 passed; 0 failed; 0 ignored;' <<< "$output"
   docker rm --force --volumes "$id" >/dev/null; id=''
 done
-printf 'Both actual service/API fixtures ran exactly once. image=%s revision=%s\n' "$digest" "$revision"
+printf 'All four actual service/API fixtures ran exactly once. image=%s revision=%s\n' "$digest" "$revision"

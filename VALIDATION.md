@@ -162,6 +162,39 @@ eviction, ready-viewer cache-exhaustion failure, sustained peers and crash recov
 remain separate gates tracked in [issue15](https://github.com/viptv-org/playback-gateway/issues/15).
 No deployment or production data access occurred.
 
+## Ready torrent cache failure and crash/restart — 2026-10-02
+
+Two additional actual-binary fixtures pass against runtime image
+`sha256:3ed14fbbf179d9d4a326b6e798118ad62c209f01a7fdf3d0524233a52e367825`.
+Both use generated H.264/AAC media, a local BEP 3 fixture peer and Docker network
+none. These are host-compiled fixture binaries mounted into that exact image;
+the committed-source archive runner includes the same named cases.
+
+| Exact fixture | Result | Test time |
+| --- | --- | --- |
+| `standalone_torrent_crash_reaps_children_releases_locks_and_restarts` | one passed, zero failed | 16.39 s |
+| `standalone_ready_torrent_cache_enospc_fails_reclaims_and_recovers` | one passed, zero failed | 38.06 s |
+
+The crash case observes a real active FFmpeg child and decoded ready HTTP media
+before SIGKILL of its owned service PID. HTTP/control stops, the child and fixture
+peer settle, and data/cache locks can be reacquired. Restarting the same directory
+removes stale media/cache, preserves the scoped integration key, rejects old
+viewer/media credentials, decodes fresh playback and reclaims its admission.
+
+The cache case verifies kernel tmpfs type and its exact 2,097,152-byte capacity.
+A 4,399,970-byte valid payload has only 196,608 allocated cache bytes when ready
+public HLS decodes. Filling the filesystem then reaches actual ENOSPC; the ready
+viewer becomes `failed/processing_failed`, advertises no playback, denies media,
+stops its peer and reclaims admission. Removing the filler permits a distinct
+small source to decode in the same running process and reclaim its admission.
+This is a ready-viewer failure, distinct from the earlier preparation ENOSPC.
+
+The enabled fixture driver/root envelope is unchanged; production UID10001
+containment, default idle-cache eviction, trusted-HTTPS browser/installed/Media3,
+sustained peer or repeated crash workloads remain unqualified. No production Rust
+changed. Source checks pass fmt, strict all-target Clippy and 162 default tests,
+with 54 opt-in fixtures ignored. No deployment or production data was involved.
+
 ## Bounded shared SubRip cue carryover
 
 Linux SubRip-bearing live HLS inputs now use the private Matroska replay with
