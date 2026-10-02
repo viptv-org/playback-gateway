@@ -12,6 +12,23 @@ pub async fn seed_peer(
     bytes: Vec<u8>,
     block_delay: Duration,
 ) {
+    seed_peer_observed(address, hash, bytes, block_delay, None).await;
+}
+
+#[derive(Default)]
+pub struct SeedProgress {
+    pub bytes: std::sync::atomic::AtomicU64,
+    pub elapsed_millis: std::sync::atomic::AtomicU64,
+}
+
+pub async fn seed_peer_observed(
+    address: std::net::SocketAddr,
+    hash: [u8; 20],
+    bytes: Vec<u8>,
+    block_delay: Duration,
+    progress: Option<std::sync::Arc<SeedProgress>>,
+) {
+    let started = std::time::Instant::now();
     let mut handshake = Vec::from(&b"\x13BitTorrent protocol"[..]);
     handshake.extend_from_slice(&[0; 8]);
     handshake.extend_from_slice(&hash);
@@ -28,7 +45,7 @@ pub async fn seed_peer(
                     break peer;
                 }
             }
-            tokio::task::yield_now().await;
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
     })
     .await
@@ -75,6 +92,13 @@ pub async fn seed_peer(
         }
         if peer.write_all(block).await.is_err() {
             break;
+        }
+        if let Some(progress) = &progress {
+            use std::sync::atomic::Ordering;
+            progress.bytes.fetch_add(length as u64, Ordering::Relaxed);
+            progress
+                .elapsed_millis
+                .store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
         }
         if !block_delay.is_zero() {
             tokio::time::sleep(block_delay).await;
