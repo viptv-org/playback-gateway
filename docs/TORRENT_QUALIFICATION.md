@@ -142,3 +142,12 @@ in PROVENANCE.md. No production data, deployment or migration is involved.
 tracks the follow-up contract, actual service/API and trusted-HTTPS clients,
 Android packaging/player behavior, ready-viewer failure and sustained/crash work.
 It does not qualify those paths or authorize a production cutover.
+
+The standalone browser fixture also accepts the test-only environment option
+`PLAYBACK_TEST_DUAL_AUDIO=true`: it generates two explicitly mapped silent AAC
+inputs, tagged eng/spa and titled English/Spanish. This provides deterministic
+managed-track media for native qualification without audible tone inputs. Exact
+image FFprobe checks observe three streams (H.264 plus two tagged AAC); fmt,
+strict all-target Clippy and default workspace tests pass. That generation check
+does not qualify native selection, managed replacement or physical audio. The
+ordinary single-audio browser fixture remains unchanged.
