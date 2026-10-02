@@ -471,6 +471,13 @@ pub(crate) mod tests {
         http_source_with_interval(bytes, Duration::from_millis(30)).await
     }
     async fn http_source_with_interval(bytes: Vec<u8>, delay: Duration) -> HttpSource {
+        http_source_with_repetition(bytes, delay, true).await
+    }
+    async fn http_source_with_repetition(
+        bytes: Vec<u8>,
+        delay: Duration,
+        repeat: bool,
+    ) -> HttpSource {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -500,6 +507,13 @@ pub(crate) mod tests {
                                 for chunk in bytes.chunks(188 * 100) {
                                     if socket.write_all(chunk).await.is_err() { return; }
                                     tokio::time::sleep(delay).await;
+                                }
+                                if !repeat {
+                                    // Keep the live connection open without repeating container
+                                    // headers or regressing timestamps. Detect reader teardown.
+                                    let mut closed = [0u8; 1];
+                                    let _ = socket.read(&mut closed).await;
+                                    return;
                                 }
                             }
                         });
@@ -1200,7 +1214,7 @@ pub(crate) mod tests {
                     "-i",
                     "sine=frequency=440:sample_rate=48000",
                     "-t",
-                    "12",
+                    "240",
                     "-c:v",
                     encoder,
                     "-threads",
@@ -1224,7 +1238,14 @@ pub(crate) mod tests {
         .unwrap()
         .unwrap();
         assert!(output.status.success(), "fixture generation must succeed");
-        let source = http_source(std::fs::read(input).unwrap()).await;
+        // One continuous container: repeating a short Matroska file emits new
+        // EBML headers and resets its timestamps, unlike a live source.
+        let source = http_source_with_repetition(
+            std::fs::read(input).unwrap(),
+            Duration::from_millis(30),
+            false,
+        )
+        .await;
         let media_root = root.path().join("media");
         let engine = PlaybackManager::new(playback_engine::Config {
             ffmpeg: ffmpeg.clone().into(),
