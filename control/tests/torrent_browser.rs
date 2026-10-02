@@ -74,50 +74,82 @@ async fn standalone_torrent_browser_uid10001() {
     let seed_dir = root.path().join("seed");
     std::fs::create_dir(&seed_dir).unwrap();
     let movie = seed_dir.join("clip.mkv");
-    let generated = Command::new(&ffmpeg)
-        .args([
-            "-v",
-            "error",
-            "-nostdin",
+    let dual_audio = std::env::var("PLAYBACK_TEST_DUAL_AUDIO").as_deref() == Ok("true");
+    let mut encoder = Command::new(&ffmpeg);
+    encoder.args([
+        "-v",
+        "error",
+        "-nostdin",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=size=320x180:rate=25",
+    ]);
+    if dual_audio {
+        encoder.args([
             "-f",
             "lavfi",
             "-i",
-            "testsrc2=size=320x180:rate=25",
+            "anullsrc=channel_layout=stereo:sample_rate=48000",
             "-f",
             "lavfi",
             "-i",
-            "sine=frequency=440:sample_rate=48000",
-            "-t",
-            "120",
-            "-c:v",
-            "libx264",
-            "-threads",
-            "2",
-            "-preset",
-            "ultrafast",
-            "-g",
-            "25",
-            "-b:v",
-            "256k",
-            "-minrate",
-            "256k",
-            "-maxrate",
-            "256k",
-            "-bufsize",
-            "256k",
-            "-x264-params",
-            "nal-hrd=cbr",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "32k",
-            "-colorspace",
-            "bt709",
-            "-color_primaries",
-            "bt709",
-            "-color_trc",
-            "bt709",
-        ])
+            "anullsrc=channel_layout=stereo:sample_rate=48000",
+        ]);
+    } else {
+        encoder.args(["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000"]);
+    }
+    encoder.args([
+        "-t",
+        "120",
+        "-c:v",
+        "libx264",
+        "-threads",
+        "2",
+        "-preset",
+        "ultrafast",
+        "-g",
+        "25",
+        "-b:v",
+        "256k",
+        "-minrate",
+        "256k",
+        "-maxrate",
+        "256k",
+        "-bufsize",
+        "256k",
+        "-x264-params",
+        "nal-hrd=cbr",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "32k",
+        "-colorspace",
+        "bt709",
+        "-color_primaries",
+        "bt709",
+        "-color_trc",
+        "bt709",
+    ]);
+    if dual_audio {
+        encoder.args([
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-map",
+            "2:a:0",
+            "-metadata:s:a:0",
+            "language=eng",
+            "-metadata:s:a:0",
+            "title=English",
+            "-metadata:s:a:1",
+            "language=spa",
+            "-metadata:s:a:1",
+            "title=Spanish",
+        ]);
+    }
+    let generated = encoder
         .arg(&movie)
         .stderr(Stdio::null())
         .kill_on_drop(true)
