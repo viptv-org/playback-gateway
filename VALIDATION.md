@@ -120,8 +120,9 @@ sudo-only host a PATH-visible Docker wrapper also preserves Docker access throug
 `timeout`; a shell function alone cannot wrap that executable invocation. Git
 retains the repository user's identity and global trust settings are unchanged.
 
-These are Workers-library/image-FFmpeg results, not public service-binary/API
-qualification. Trusted-HTTPS browser playback, ready-viewer cache exhaustion,
+The torrent/archive results are Workers-library/image-FFmpeg qualification;
+they do not qualify torrent-specific public service-binary/API paths.
+Trusted-HTTPS browser playback, ready-viewer cache exhaustion,
 sustained peer/crash workloads and client integration remain separate. See
 [torrent qualification](docs/TORRENT_QUALIFICATION.md) and
 [provenance](PROVENANCE.md) for the precise scope and licensing restrictions.
