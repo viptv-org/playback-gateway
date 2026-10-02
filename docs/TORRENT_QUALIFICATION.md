@@ -151,3 +151,34 @@ image FFprobe checks observe three streams (H.264 plus two tagged AAC); fmt,
 strict all-target Clippy and default workspace tests pass. That generation check
 does not qualify native selection, managed replacement or physical audio. The
 ordinary single-audio browser fixture remains unchanged.
+
+## Controlled magnet bootstrap and bounded peer workloads
+
+The opt-in browser driver now supports `PLAYBACK_TEST_MAGNET=true` and
+`PLAYBACK_TEST_SWARM_PEERS=1..4`. Generated infoHash/fileIdx inputs are approved
+by the real backend; actual service metadata resolves through controlled BEP 5
+DHT and BEP 10/BEP 9 peers, then standard BEP 3 payload requests. The metadata
+bytes are the exact generated info dictionary, not a preloaded service input.
+The container's default DHT bootstrap names map to the guarded public-class
+loopback alias only inside Docker `--network none`; production flags and address
+policy are unchanged. No public torrent or public DHT is contacted.
+
+A one-peer real backend/browser case passed in 51.99 seconds: 4,990 metadata
+bytes, 16 DHT get_peers queries and 4,014,795 payload bytes over 19,996ms.
+A three-advertised-peer case passed in 63.03 seconds with two actual payload
+contributors: 9,980 metadata bytes, 18 DHT queries and 4,014,631 payload bytes
+over 25,863ms. A separate fresh three-peer process cycle passed in 44.0 seconds
+with all three peers contributing, 9,980 metadata bytes, 14 DHT queries and
+6,832,456 delivered payload bytes over 34,664ms. Delivered byte counts include
+repeated block requests and do not mean unique downloaded bytes.
+
+Each case used the same qualified runtime image, actual UID10001 service, real
+backend-approved Source, trusted HTTPS, decoded three-second browser seek,
+renewals/releases and two-input/two-output/four-viewer reclamation. Active
+cache payloads were removed and peer transports settled before owned shutdown.
+These are bounded fresh-process cases, not a long-duration public swarm, a
+universal peer compatibility or adverse Internet traffic claim.
+
+Protocol references: [BEP 5](https://www.bittorrent.org/beps/bep_0005.html),
+[BEP 9](https://www.bittorrent.org/beps/bep_0009.html) and
+[BEP 10](https://www.bittorrent.org/beps/bep_0010.html).
