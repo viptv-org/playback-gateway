@@ -1766,6 +1766,32 @@ async fn session_state(fixture: &Fixture, key: &str, id: &str) -> (u16, Value) {
     let status = response.status().as_u16();
     (status, response.json().await.unwrap_or(Value::Null))
 }
+/// Scoped client renewal for scenarios that measure eviction rather than expiry.
+/// Media reads deliberately do not extend a viewer lease.
+struct RenewingLease(tokio::task::JoinHandle<()>);
+impl Drop for RenewingLease {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+fn keep_lease(fixture: &Fixture, id: &str) -> RenewingLease {
+    let client = fixture.client.clone();
+    let key = fixture.key.clone();
+    let url = format!("{}/v1/sessions/{id}/renew", fixture.base);
+    RenewingLease(tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            let Ok(response) = client.post(&url).bearer_auth(&key).send().await else {
+                return;
+            };
+            // Released/failed viewers no longer renew; their explicit checks
+            // below verify teardown and transport failure.
+            if !response.status().is_success() {
+                return;
+            }
+        }
+    }))
+}
 async fn release(fixture: &Fixture, key: &str, id: &str) -> u16 {
     fixture
         .client
@@ -1887,6 +1913,7 @@ async fn real_progressive_image_share_late_join_evict_isolate_and_reap() {
     println!("Undecodable request refused: {}", refused["error"]["code"]);
 
     let first = start_progressive(&fixture, &fixture.key, "fixture", "first").await;
+    let first_lease = keep_lease(&fixture, first["id"].as_str().unwrap());
     connections(&fixture.source, 1).await;
     let opened = fixture.source.requests.load(Ordering::SeqCst);
     let first_url = format!(
@@ -1932,6 +1959,7 @@ async fn real_progressive_image_share_late_join_evict_isolate_and_reap() {
     // A late compatible viewer joins the same upstream.
     tokio::time::sleep(Duration::from_secs(3)).await;
     let late = start_progressive(&fixture, &fixture.key, "fixture", "late").await;
+    let late_lease = keep_lease(&fixture, late["id"].as_str().unwrap());
     assert_ne!(late["id"], first["id"]);
     connections(&fixture.source, 1).await;
     assert_eq!(
@@ -2078,6 +2106,7 @@ async fn real_progressive_image_share_late_join_evict_isolate_and_reap() {
 
     // A slow reader: opened, then never read, with a tiny receive window.
     let slow = start_progressive(&fixture, &fixture.key, "fixture", "slow").await;
+    let slow_lease = keep_lease(&fixture, slow["id"].as_str().unwrap());
     let socket = tokio::net::TcpSocket::new_v4().unwrap();
     socket.set_recv_buffer_size(4096).unwrap();
     let mut stalled = socket.connect(fixture.address).await.unwrap();
@@ -2098,6 +2127,7 @@ async fn real_progressive_image_share_late_join_evict_isolate_and_reap() {
     assert!(header.starts_with(b"HTTP/1.1 200"));
     let stalled_at = std::time::Instant::now();
     // Releasing one viewer during the stall leaves the others running.
+    drop(first_lease);
     assert_eq!(
         release(&fixture, &fixture.key, first["id"].as_str().unwrap()).await,
         204
@@ -2126,6 +2156,7 @@ async fn real_progressive_image_share_late_join_evict_isolate_and_reap() {
         "Stalled reader evicted (processing_failed) after {:?}",
         stalled_at.elapsed()
     );
+    drop(slow_lease);
     late_reader.advances().await;
     connections(&fixture.source, 1).await;
     let mut rest = Vec::new();
@@ -2152,6 +2183,7 @@ async fn real_progressive_image_share_late_join_evict_isolate_and_reap() {
     println!("Media children before last release: {}", pids.len());
     assert!(!pids.is_empty());
     let last_release = std::time::Instant::now();
+    drop(late_lease);
     assert_eq!(
         release(&fixture, &fixture.key, late["id"].as_str().unwrap()).await,
         204
