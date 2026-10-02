@@ -71,13 +71,58 @@ pass independent ELF LOAD alignment checks of at least 16 KiB. The native
 facade has no axum control/media execution on its selected feature path and
 does not yet unpack archives. No device, APK ZIP-alignment or store claim follows.
 
-Fresh-image torrent/archive execution evidence is pending below this source
-checkpoint; no image success is inferred from host tests. The reproducible
-script has five exact modes and distinguishes Workers-library/image-FFmpeg
-qualification from public service-binary/API qualification. Preparation ENOSPC
-does not prove a ready viewer's error termination. Trusted-HTTPS browser
-playback, ready-viewer cache exhaustion, sustained peer/crash workloads and
-client integration remain separate. See
+Fresh local runtime image source `da619d85a4d438b250db27415989a8b5a52e07ee`
+produces image
+`sha256:3ed14fbbf179d9d4a326b6e798118ad62c209f01a7fdf3d0524233a52e367825`.
+All five committed-source torrent/archive modes pass using fixture/script source
+`9217d34f1147250578bb6dc1b105de2e55316e75`. That follow-up changes only fixture
+directory setup and generated Kotlin EOF normalization; engine/control Rust,
+dependency pins and the runtime Dockerfile are unchanged from the image source.
+
+| Mode | Exact fixture result | Test execution time |
+| --- | --- | --- |
+| `torrent` | one passed, zero failed | 0.49 s |
+| `stored-rar` | one passed, zero failed | 0.42 s |
+| `compressed-rar` | one passed, zero failed | 0.43 s |
+| `bounded-archive` | one passed, zero failed | 0.01 s |
+| `egress` | one passed, zero failed | 0.18 s |
+
+The same image and fixture revision also pass all five required inherited
+progressive modes, one exact test per mode:
+
+| Inherited progressive mode | Exact fixture result | Test execution time |
+| --- | --- | --- |
+| `matroska` | one passed, zero failed | 138.04 s |
+| `matroska-tls` | one passed, zero failed | 137.91 s |
+| `bounded-matroska` | one passed, zero failed | 20.12 s |
+| `ts` | one passed, zero failed | 88.76 s |
+| `bounded` | one passed, zero failed | 25.13 s |
+
+These inherited fixtures preserve actual progressive HTTP/fixture-HTTPS
+delivery, sharing/late join, slow-reader eviction, isolation and cleanup.
+Both bounded modes observe actual UID10001 media ENOSPC at 2,097,152 allocated
+bytes, a failed viewer transport and final process/upstream/reservation recovery.
+Their network-none runtime setup and limited capabilities remain those in
+`scripts/check-progressive-container.sh`. These are inherited live-media checks;
+they do not establish ready-viewer torrent-cache exhaustion.
+
+Each torrent/archive mode executes exactly once as UID10001 with network none, read-only root,
+no Linux capabilities, two CPUs and bounded memory. The bounded mode fills the
+actual 2-MiB archive-cache tmpfs, observes `processing_failed`, removes the partial
+spool and successfully extracts after space is reclaimed. This is preparation
+ENOSPC evidence, not a previously ready viewer's transport-error qualification.
+
+The first stored-RAR image run exposed a fixture packaging defect: the compiled
+`/src/control/../engine/assets` path required its `/src/control` parent even though
+the media assets were present. The fixture build now creates that parent as root
+and immediately restores UID10001; the full five-mode rerun above passes. On this
+sudo-only host a PATH-visible Docker wrapper also preserves Docker access through
+`timeout`; a shell function alone cannot wrap that executable invocation. Git
+retains the repository user's identity and global trust settings are unchanged.
+
+These are Workers-library/image-FFmpeg results, not public service-binary/API
+qualification. Trusted-HTTPS browser playback, ready-viewer cache exhaustion,
+sustained peer/crash workloads and client integration remain separate. See
 [torrent qualification](docs/TORRENT_QUALIFICATION.md) and
 [provenance](PROVENANCE.md) for the precise scope and licensing restrictions.
 

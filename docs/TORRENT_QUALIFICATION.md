@@ -63,8 +63,23 @@ validation protects nested requests. It also verifies nonstandard MP4 playlist
 refusal on the qualified FFprobe version. Exact image/source evidence is
 recorded in VALIDATION.md after execution.
 
+All five modes pass with committed fixture source
+`9217d34f1147250578bb6dc1b105de2e55316e75` and local runtime image
+`sha256:3ed14fbbf179d9d4a326b6e798118ad62c209f01a7fdf3d0524233a52e367825`,
+built from `da619d85a4d438b250db27415989a8b5a52e07ee`. The fixture follow-up
+creates the compile-time asset path's missing parent and normalizes generated
+Kotlin EOF; runtime Rust and dependency pins are identical. See VALIDATION.md
+for per-mode results and the fixture repair. Hosts requiring sudo for Docker
+must provide a PATH-visible wrapper so `timeout` can invoke it; exporting a
+shell function alone does not cover that child executable.
+
 The inherited progressive/runtime/CBR4K/bounded-media fixture builders include
 the new ffi workspace member so they remain reproducible from Git archives.
+The five required inherited progressive modes (`matroska`, `matroska-tls`,
+`bounded-matroska`, `ts`, `bounded`) also pass with the same runtime image and
+fixture source; their exact timings and separate live-media scope are in
+VALIDATION.md. Runtime/CBR4K/bounded-media builders are mechanically updated,
+rather than newly qualified by this torrent checkpoint.
 
 ## Native library
 
@@ -84,3 +99,8 @@ The generic gateway's existing FFmpeg/media response failures retain their
 separate qualification; those results do not substitute for torrent-specific
 ready-viewer failure evidence. GPL distribution restrictions remain recorded
 in PROVENANCE.md. No production data, deployment or migration is involved.
+
+[Client integration and remaining qualification](https://github.com/viptv-org/playback-gateway/issues/15)
+tracks the follow-up contract, actual service/API and trusted-HTTPS clients,
+Android packaging/player behavior, ready-viewer failure and sustained/crash work.
+It does not qualify those paths or authorize a production cutover.
