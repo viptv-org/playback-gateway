@@ -14,8 +14,11 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 sha2 = "0.10"
 rand_core = { version = "0.6", features = ["getrandom"] }
 url = "2"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+futures = "0.3"
 
 [dev-dependencies]
+librqbit = { version = "=8.1.1", default-features = false, features = ["rust-tls"] }
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

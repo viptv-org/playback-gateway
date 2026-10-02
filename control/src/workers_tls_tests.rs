@@ -42,7 +42,10 @@ fn publish(dir: &Path, base: &str, parts: &[Vec<u8>], sequence: u64) -> String {
             "#EXT-X-DISCONTINUITY\n#EXTINF:2,\n{base}/part-{index}.ts\n"
         ));
     }
-    let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/vnd.apple.mpegurl\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{playlist}", playlist.len());
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/vnd.apple.mpegurl\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{playlist}",
+        playlist.len()
+    );
     std::fs::write(dir.join("playlist.tmp"), response).unwrap();
     std::fs::rename(dir.join("playlist.tmp"), dir.join("playlist.http")).unwrap();
     playlist
@@ -216,7 +219,16 @@ fn trusted_binary(
     std::fs::copy(certificate, anchors.join("fixture.crt")).unwrap();
     // Per-process mount namespace only: never modify the host trust store.
     // HLS children use GnuTLS system trust rather than inheriting root ca_file.
-    let body = format!("#!/bin/sh\nremote=0\nfor arg do case \"$arg\" in http://*|https://*) remote=1 ;; esac; done\nif [ \"$remote\" = 1 ]; then\n printf x >> {}\n exec bwrap --die-with-parent --ro-bind / / --bind {} {} --ro-bind {} /etc/ca-certificates/trust-source/anchors --ro-bind {} /etc/ca-certificates/extracted/tls-ca-bundle.pem -- {} \"$@\"\nfi\nexec {} \"$@\"\n", quoted(&trace),quoted(root),quoted(root),quoted(&anchors),quoted(certificate),quoted(binary),quoted(binary));
+    let body = format!(
+        "#!/bin/sh\nremote=0\nfor arg do case \"$arg\" in http://*|https://*) remote=1 ;; esac; done\nif [ \"$remote\" = 1 ]; then\n printf x >> {}\n exec bwrap --die-with-parent --ro-bind / / --bind {} {} --ro-bind {} /etc/ca-certificates/trust-source/anchors --ro-bind {} /etc/ca-certificates/extracted/tls-ca-bundle.pem -- {} \"$@\"\nfi\nexec {} \"$@\"\n",
+        quoted(&trace),
+        quoted(root),
+        quoted(root),
+        quoted(&anchors),
+        quoted(certificate),
+        quoted(binary),
+        quoted(binary)
+    );
     std::fs::write(&wrapper, body).unwrap();
     std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o700)).unwrap();
     (wrapper, trace)

@@ -5,6 +5,43 @@ product account/profile IDs nor provider-specific catalog logic appear here.
 All public traffic to this API must use HTTPS. Inputs independently support HTTP
 and HTTPS. URLs and required upstream headers are confidential.
 
+## Torrent and archive inputs
+
+When `/v1/capabilities` reports `torrent: true`, `input.url` additionally accepts
+a BitTorrent v1 `magnet:?xt=urn:btih:...` URI, an HTTP(S) `.torrent` URL, or a
+direct HTTP(S) stored `.rar` URL. The runtime opt-in is `TORRENT_ENABLED=true`;
+disabled requests return `422 unsupported_output` without source I/O.
+These inputs require `live: false`; `live: true` returns `422 unsupported_output`.
+Optional `input.file_index` (0–65535) selects a torrent payload entry. It is
+invalid on ordinary HTTP media/archive inputs. Without it, selection chooses
+the largest recognized media/archive payload. Missing/unsupported selections
+return `422 unsupported_output`.
+
+Magnets allow one v1 hash and optional display name/tracker parameters. They
+refuse source-provided peers, alternate sources and embedded credentials.
+Trackers are not contacted; private tracker torrents and webseed metainfo are
+unsupported. DHT/peer traffic is the documented opt-in transport-policy exception.
+Metainfo and direct archive fetches retain vetted DNS/redirect/egress rules.
+Headers apply to those HTTP fetches; magnets require empty headers.
+
+Ready responses additionally include `input_file: {"index":0,"name":"clip.mkv",
+"size":123456}` for the selected playable file. Archive metadata describes the
+selected member. Only its basename/size/index are returned, never an infohash,
+peer list, cache path or private loopback capability. Namespaces, key quotas,
+idempotency, viewer leases and media authorization retain their existing rules.
+Pending source preparations count toward admission before network activity;
+cancellation retains their charge until owned work settles.
+
+Stored RAR members support byte ranges across ordered volumes with no spool
+copy. Compressed torrent members must finish bounded, verified extraction before
+playback, then support seeking within the completed spool. Partial-progress seek,
+encrypted archives and direct compressed HTTP RAR are unsupported. Capacity
+refusal is `429 torrent_cache_capacity`; preparation timeout is `504
+startup_timeout`; preparation/processing failures are redacted `502` errors.
+Outputs continue through the existing FFmpeg planner; public raw torrent/archive
+bytes are not served. Native torrent byte delivery is a separate local
+[Kotlin facade](ffi/README.md).
+
 ## Credentials
 
 `Authorization: Bearer <API_KEY>` authorizes only bootstrap key management:

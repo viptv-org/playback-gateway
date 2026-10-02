@@ -14,6 +14,8 @@ pub struct Input {
     #[serde(default)]
     pub headers: BTreeMap<String, String>,
     pub live: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_index: Option<u32>,
 }
 impl fmt::Debug for Input {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -24,6 +26,12 @@ impl fmt::Debug for Input {
     }
 }
 impl Input {
+    pub fn torrent(&self) -> bool {
+        self.url.starts_with("magnet:") || source_extension(&self.url) == Some("torrent".into())
+    }
+    pub fn archive(&self) -> bool {
+        source_extension(&self.url).is_some_and(|extension| extension == "rar")
+    }
     /// Structural validation only. DNS, redirects and child resources must also
     /// pass the media network policy before any engine is allowed to fetch them.
     pub fn validate(&self) -> Result<(), &'static str> {
@@ -31,13 +39,26 @@ impl Input {
             return Err("invalid_input");
         }
         let url = url::Url::parse(&self.url).map_err(|_| "invalid_input")?;
-        if !matches!(url.scheme(), "http" | "https")
+        if url.scheme() == "magnet" {
+            playback_engine::torrent::validate_magnet(&self.url).map_err(|_| "invalid_input")?;
+            if !self.headers.is_empty() {
+                return Err("invalid_headers");
+            }
+        } else if !matches!(url.scheme(), "http" | "https")
             || url.host_str().is_none()
             || !url.username().is_empty()
             || url.password().is_some()
             || url.fragment().is_some()
         {
             return Err("invalid_input");
+        }
+        if self.file_index.is_some_and(|index| index > 65535)
+            || (self.file_index.is_some() && !self.torrent())
+        {
+            return Err("invalid_input");
+        }
+        if (self.torrent() || self.archive()) && self.live {
+            return Err("unsupported_output");
         }
         if self.headers.len() > 32
             || self
@@ -68,6 +89,12 @@ impl Input {
         }
         Ok(())
     }
+}
+
+fn source_extension(source: &str) -> Option<String> {
+    let url = url::Url::parse(source).ok()?;
+    let path = url.path();
+    Some(path.rsplit_once('.')?.1.to_ascii_lowercase())
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -193,6 +220,30 @@ pub enum SessionState {
 mod tests {
     use super::*;
     #[test]
+    fn torrent_file_selection_is_vod_only_and_bounded() {
+        let base = serde_json::json!({"url":"magnet:?xt=urn:btih:1111111111111111111111111111111111111111","live":false,"file_index":2});
+        assert!(serde_json::from_value::<Input>(base.clone())
+            .unwrap()
+            .validate()
+            .is_ok());
+        for (field, value) in [
+            ("live", serde_json::json!(true)),
+            ("file_index", serde_json::json!(65536)),
+        ] {
+            let mut invalid = base.clone();
+            invalid[field] = value;
+            assert!(serde_json::from_value::<Input>(invalid)
+                .unwrap()
+                .validate()
+                .is_err());
+        }
+        for source in ["magnet:?xt=urn:btih:bad", "magnet:?xt=urn:btih:1111111111111111111111111111111111111111&x.pe=127.0.0.1:80", "magnet:?xt=urn:btih:1111111111111111111111111111111111111111&tr=https%3A%2F%2Fuser%3Asecret%40tracker.invalid"] {
+            let mut invalid = base.clone();
+            invalid["url"] = serde_json::json!(source);
+            assert!(serde_json::from_value::<Input>(invalid).unwrap().validate().is_err());
+        }
+    }
+    #[test]
     fn output_conversion_and_track_policy_is_explicit_and_bounded() {
         let base = serde_json::json!({"protocol":"hls","video_codecs":["h264"],"audio_codecs":["aac"],"max_width":3840,"max_height":2160,"audio_track":null,"subtitle_track":null});
         let automatic: Output = serde_json::from_value(base.clone()).unwrap();
@@ -236,6 +287,7 @@ mod tests {
             url: "https://provider.invalid/password/movie".into(),
             headers: BTreeMap::from([("Authorization".into(), "Bearer private".into())]),
             live: false,
+            file_index: None,
         };
         assert!(input.validate().is_ok());
         let display = format!("{input:?}");
@@ -255,7 +307,8 @@ mod tests {
             assert!(Input {
                 url: url.into(),
                 headers: BTreeMap::new(),
-                live: false
+                live: false,
+                file_index: None,
             }
             .validate()
             .is_err());
@@ -263,7 +316,8 @@ mod tests {
         assert!(Input {
             url: "https://provider.invalid/video".into(),
             headers: BTreeMap::from([("Host".into(), "private".into())]),
-            live: false
+            live: false,
+            file_index: None,
         }
         .validate()
         .is_err());

@@ -5,6 +5,9 @@ services:
       API_KEY: ${API_KEY:?Set a unique bootstrap key of at least 32 characters}
       MAX_OUTPUTS: ${MAX_OUTPUTS:-8}
       LIVE_REPLAY_MAX_BYTES: ${LIVE_REPLAY_MAX_BYTES:-268435456}
+      TORRENT_ENABLED: ${TORRENT_ENABLED:-false}
+      TORRENT_CACHE_MAX_BYTES: ${TORRENT_CACHE_MAX_BYTES:-2147483648}
+      TORRENT_LISTEN_PORT: ${TORRENT_LISTEN_PORT:-}
       QSV_DEVICE: ${QSV_DEVICE:-}
       VAAPI_DEVICE: ${VAAPI_DEVICE:-}
     ports:
@@ -15,6 +18,7 @@ services:
     tmpfs:
       - /tmp:size=64m,nosuid,nodev
       - /var/lib/playback-gateway/media:size=${MEDIA_SPOOL_SIZE:-256m},uid=10001,gid=10001,mode=0700,noexec,nosuid,nodev
+      - /var/lib/playback-gateway/torrent-cache:size=${TORRENT_SPOOL_SIZE:-2g},uid=10001,gid=10001,mode=0700,noexec,nosuid,nodev
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     pids_limit: 1024

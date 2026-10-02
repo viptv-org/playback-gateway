@@ -2,8 +2,9 @@
 //! the validated socket address. HTTPS stays end-to-end through CONNECT tunnels.
 //! Engines must use this proxy for all HTTP(S), including nested media resources.
 use std::{
+    collections::HashMap,
     net::{IpAddr, SocketAddr},
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 use tokio::{
@@ -83,7 +84,29 @@ impl NetworkPolicy {
     }
 }
 
+type TrustedRanges = Arc<Mutex<HashMap<String, usize>>>;
+/// Only a gateway-generated capability URI is exempted. Clones belong to
+/// preparation or output-job owners; the final guard revokes that exact URI.
+pub(crate) struct TrustedRange {
+    routes: TrustedRanges,
+    url: String,
+}
+impl Drop for TrustedRange {
+    fn drop(&mut self) {
+        let mut routes = self
+            .routes
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(count) = routes.get_mut(&self.url) {
+            *count -= 1;
+            if *count == 0 {
+                routes.remove(&self.url);
+            }
+        }
+    }
+}
 pub struct EgressProxy {
+    trusted: TrustedRanges,
     address: SocketAddr,
     task: JoinHandle<()>,
 }
@@ -91,6 +114,8 @@ impl EgressProxy {
     pub async fn start(policy: NetworkPolicy) -> Result<Self, std::io::Error> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
+        let trusted: TrustedRanges = Arc::new(Mutex::new(HashMap::new()));
+        let allowed = trusted.clone();
         let task = tokio::spawn(async move {
             let slots = Arc::new(Semaphore::new(128));
             let mut peers = tokio::task::JoinSet::new();
@@ -99,14 +124,58 @@ impl EgressProxy {
                     incoming=listener.accept()=>{
                         let Ok((stream,_))=incoming else{break};
                         let Ok(permit)=slots.clone().try_acquire_owned() else{drop(stream);continue};
-                        let policy=policy.clone();
-                        peers.spawn(async move {let _permit=permit;let _=forward(stream,policy).await;});
+                        let policy=policy.clone();let trusted=allowed.clone();
+                        peers.spawn(async move {let _permit=permit;let _=forward(stream,policy,trusted).await;});
                     },
                     _=peers.join_next(),if !peers.is_empty()=>{}
                 }
             }
         });
-        Ok(Self { address, task })
+        Ok(Self {
+            address,
+            task,
+            trusted,
+        })
+    }
+    pub(crate) fn register_range(&self, raw: &str) -> Result<Arc<TrustedRange>, &'static str> {
+        let url = url::Url::parse(raw).map_err(|_| "invalid_owned_range")?;
+        let parts: Vec<_> = url.path().split('/').collect();
+        if url.scheme() != "http"
+            || url.host() != Some(url::Host::Ipv4(std::net::Ipv4Addr::LOCALHOST))
+            || url.port().is_none_or(|port| port == 0)
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+            || parts.len() != 4
+            || !parts[0].is_empty()
+            || parts[1].len() != 64
+            || !parts[1].bytes().all(|b| b.is_ascii_hexdigit())
+            || parts[2]
+                .parse::<u32>()
+                .ok()
+                .is_none_or(|index| index >= 4096)
+            || parts[3].strip_prefix("stream.").is_none_or(|extension| {
+                extension.is_empty()
+                    || extension.len() > 8
+                    || !extension.bytes().all(|b| b.is_ascii_alphanumeric())
+            })
+        {
+            return Err("invalid_owned_range");
+        }
+        let uri = url.as_str().to_owned();
+        let mut routes = self
+            .trusted
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if routes.len() >= 4096 && !routes.contains_key(&uri) {
+            return Err("owned_range_capacity");
+        }
+        *routes.entry(uri.clone()).or_default() += 1;
+        Ok(Arc::new(TrustedRange {
+            routes: self.trusted.clone(),
+            url: uri,
+        }))
     }
     pub fn url(&self) -> String {
         format!("http://{}", self.address)
@@ -118,7 +187,11 @@ impl Drop for EgressProxy {
     }
 }
 
-async fn forward(mut downstream: TcpStream, policy: NetworkPolicy) -> Result<(), ()> {
+async fn forward(
+    mut downstream: TcpStream,
+    policy: NetworkPolicy,
+    trusted: TrustedRanges,
+) -> Result<(), ()> {
     let mut buffer = Vec::with_capacity(2048);
     let header = timeout(Duration::from_secs(5), async {
         while !buffer.ends_with(b"\r\n\r\n") {
@@ -164,12 +237,26 @@ async fn forward(mut downstream: TcpStream, policy: NetworkPolicy) -> Result<(),
         url::Host::Ipv4(ip) => ip.to_string(),
         url::Host::Ipv6(ip) => ip.to_string(),
     };
-    let addresses = match policy
-        .resolve(&host, url.port_or_known_default().ok_or(())?)
-        .await
-    {
-        Ok(value) => value,
-        Err(_) => return deny(&mut downstream).await,
+    let owned = !connect
+        && trusted
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .contains_key(url.as_str());
+    let addresses = if owned {
+        // Registration validates literal loopback and an exact generated URI;
+        // no DNS resolution, origin-wide exception, or CONNECT exemption.
+        vec![SocketAddr::new(
+            std::net::Ipv4Addr::LOCALHOST.into(),
+            url.port().ok_or(())?,
+        )]
+    } else {
+        match policy
+            .resolve(&host, url.port_or_known_default().ok_or(())?)
+            .await
+        {
+            Ok(value) => value,
+            Err(_) => return deny(&mut downstream).await,
+        }
     };
     let mut upstream = None;
     for address in addresses {
@@ -287,6 +374,87 @@ mod tests {
         assert!(timeout(Duration::from_millis(30), target.accept())
             .await
             .is_err());
+    }
+    #[tokio::test]
+    async fn owned_range_registration_is_exact_counted_and_revoked_on_last_guard() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let contacted = Arc::new(AtomicUsize::new(0));
+        let router = axum::Router::new().fallback(axum::routing::get({
+            let contacted = contacted.clone();
+            move || {
+                let contacted = contacted.clone();
+                async move {
+                    contacted.fetch_add(1, Ordering::SeqCst);
+                    "ok"
+                }
+            }
+        }));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let target = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let proxy = EgressProxy::start(NetworkPolicy::default()).await.unwrap();
+        let root = format!("http://{}/{}/0/stream.mp4", target, "a".repeat(64));
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .proxy(reqwest::Proxy::all(proxy.url()).unwrap())
+            .build()
+            .unwrap();
+        assert_eq!(client.get(&root).send().await.unwrap().status(), 403);
+        let first = proxy.register_range(&root).unwrap();
+        let second = proxy.register_range(&root).unwrap();
+        assert_eq!(client.get(&root).send().await.unwrap().status(), 200);
+        assert_eq!(client.head(&root).send().await.unwrap().status(), 200);
+        for unauthorized in [
+            root.replace("/0/", "/1/"),
+            format!("{root}?child=1"),
+            root.replace("stream.mp4", "private.ts"),
+            root.replace(&"a".repeat(64), &"b".repeat(64)),
+        ] {
+            assert_eq!(client.get(unauthorized).send().await.unwrap().status(), 403);
+        }
+        let other = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        assert_eq!(
+            client
+                .get(format!("http://{}/private", other.local_addr().unwrap()))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            403
+        );
+        assert!(timeout(Duration::from_millis(30), other.accept())
+            .await
+            .is_err());
+        let mut connect = TcpStream::connect(proxy.address).await.unwrap();
+        connect
+            .write_all(format!("CONNECT {target} HTTP/1.1\r\nHost: ignored\r\n\r\n").as_bytes())
+            .await
+            .unwrap();
+        let mut reply = String::new();
+        connect.read_to_string(&mut reply).await.unwrap();
+        assert!(reply.starts_with("HTTP/1.1 403"));
+        drop(first);
+        assert_eq!(client.get(&root).send().await.unwrap().status(), 200);
+        drop(second);
+        assert_eq!(client.get(&root).send().await.unwrap().status(), 403);
+        assert_eq!(
+            contacted.load(Ordering::SeqCst),
+            3,
+            "unregistered destinations must be rejected before contact"
+        );
+        server.abort();
+    }
+    #[tokio::test]
+    async fn registration_refuses_non_generated_private_uri_shapes() {
+        let proxy = EgressProxy::start(NetworkPolicy::default()).await.unwrap();
+        for root in [
+            "http://127.0.0.1:8000/private",
+            "http://localhost:8000/private",
+            "https://127.0.0.1:8000/private",
+            "http://127.0.0.1:8000/token/0/stream.mp4",
+        ] {
+            assert!(proxy.register_range(root).is_err());
+        }
     }
     #[tokio::test]
     async fn fixture_forwarding_preserves_target_without_leaking_proxy_headers() {

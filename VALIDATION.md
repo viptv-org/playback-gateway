@@ -36,6 +36,51 @@ socket. Native sources now send one long container; the eviction scenario
 renews active viewers explicitly and stops renewing on release. Media reads
 still do not renew leases, and the separate real expiry fixture is unchanged.
 
+## Opt-in torrent/archive and native library checkpoint
+
+BitTorrent v1 inputs, selected payload metadata, private Range transport, stored
+multipart RAR views and complete compressed-member spools are implemented.
+Runtime support defaults off. HTTP tracker stripping, private/webseed refusal,
+per-namespace sessions and conservative full-payload cache reservations are
+documented adaptations to the pinned librqbit API. Metainfo/direct stored-RAR
+HTTP still uses the vetted egress proxy; public viewer authorization and the
+existing output planner remain the delivery boundary.
+
+The final source gate passes fmt, all-target strict Clippy and 162 default
+tests: 109 engine tests, 10 torrent boundary tests, 40 control tests, two startup
+tests and one native facade fixture. Fifty real-media/service tests remain
+opt-in. Real local-seeder/FFmpeg fixtures separately pass shared viewers/late
+join, decoded 3-second seek, stored four-volume archive HLS with no spool, one
+checksum-verified compressed spool, independent lifecycle and cleanup.
+
+Review-driven regressions cover admission before source I/O, atomic promotion,
+cancellation while blocking extraction owns its directory/budget, actual
+blocking Range readers, delayed cleanup retaining key quota, raw HTTP reader
+abort after the last public handle, URI alias preservation and cache ownership
+until stopped readers settle. Repeated failed metadata namespaces are reaped.
+The optional peer-port parser accepts Compose's empty default and rejects
+invalid nonempty ports. Generated Range roots are registered by exact URI with
+scoped lifetime guards; probing retains the vetted egress proxy for nested HTTP
+resources. A real selected-playlist regression records zero private-child
+contacts and a redacted failure; ordinary torrent/archive delivery still passes.
+This is destination/format-specific evidence, not a general demuxer sandbox.
+
+UniFFI Kotlin bindings are generated and host-tested. All four Android ABI
+libraries were rebuilt after the final external-owner/read-settler changes and
+pass independent ELF LOAD alignment checks of at least 16 KiB. The native
+facade has no axum control/media execution on its selected feature path and
+does not yet unpack archives. No device, APK ZIP-alignment or store claim follows.
+
+Fresh-image torrent/archive execution evidence is pending below this source
+checkpoint; no image success is inferred from host tests. The reproducible
+script has five exact modes and distinguishes Workers-library/image-FFmpeg
+qualification from public service-binary/API qualification. Preparation ENOSPC
+does not prove a ready viewer's error termination. Trusted-HTTPS browser
+playback, ready-viewer cache exhaustion, sustained peer/crash workloads and
+client integration remain separate. See
+[torrent qualification](docs/TORRENT_QUALIFICATION.md) and
+[provenance](PROVENANCE.md) for the precise scope and licensing restrictions.
+
 ## Bounded shared SubRip cue carryover
 
 Linux SubRip-bearing live HLS inputs now use the private Matroska replay with

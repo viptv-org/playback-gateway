@@ -1,0 +1,28 @@
+[package]
+name = "playback-gateway-ffi"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-only"
+
+[lib]
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[features]
+default = ["torrent"]
+torrent = ["playback-engine/torrent"]
+bindgen = ["uniffi/cli"]
+
+[dependencies]
+playback-engine = { path = "../engine", default-features = false }
+uniffi = "=0.29.4"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "time", "sync"] }
+
+[dev-dependencies]
+tempfile = "3"
+librqbit = { version = "=8.1.1", default-features = false, features = ["rust-tls"] }
+
+[[bin]]
+name = "playback-uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]

@@ -1,9 +1,10 @@
 //! Engine/ledger bridge. No HTTP route may bypass this layer to create media.
 use crate::{
     credentials::{Credentials, Principal, Scope},
-    network::{EgressProxy, NetworkPolicy},
+    network::{EgressProxy, NetworkPolicy, TrustedRange},
     protocol::{CreateSession, OutputProtocol, STARTUP_DEADLINE_SECONDS},
     sessions::{Failure, Sessions, Status, Viewer},
+    sources::{ResolvedSource, Sources},
 };
 use playback_engine::{Capabilities, PlaybackManager, PlaybackResponse, TrackSelection};
 use std::{
@@ -16,6 +17,17 @@ use std::{
 #[path = "workers_tls_tests.rs"]
 mod tls_tests;
 
+#[cfg(all(test, unix))]
+#[path = "workers_archive_tests.rs"]
+mod archive_tests;
+#[cfg(all(test, unix))]
+#[path = "workers_torrent_tests.rs"]
+mod torrent_tests;
+
+#[cfg(all(test, unix))]
+#[path = "workers_security_tests.rs"]
+mod security_tests;
+
 pub struct Workers {
     pub sessions: Arc<Mutex<Sessions>>,
     pub credentials: Arc<Credentials>,
@@ -24,10 +36,23 @@ pub struct Workers {
     active: Mutex<BTreeMap<String, PlaybackResponse>>,
     starting: Mutex<BTreeSet<String>>,
     reaper: tokio::sync::Mutex<()>,
+    sources: Arc<Sources>,
+    input_sources: Mutex<BTreeMap<String, Arc<ResolvedSource>>>,
+    input_routes: Mutex<BTreeMap<String, Arc<TrustedRange>>>,
 }
 impl Workers {
     pub fn media_storage_available(&self) -> bool {
         self.engine.media_storage_available()
+    }
+    pub fn torrent_enabled(&self) -> bool {
+        self.sources.enabled()
+    }
+    pub fn input_file(&self, viewer: &Viewer) -> Option<playback_engine::TorrentFile> {
+        self.input_sources
+            .lock()
+            .ok()?
+            .get(&viewer.job_id)
+            .map(|source| source.file.clone())
     }
     pub fn available(
         &self,
@@ -77,26 +102,52 @@ impl Workers {
     }
     pub async fn shutdown(&self) {
         self.engine.shutdown().await;
+        if let Ok(mut sources) = self.input_sources.lock() {
+            sources.clear();
+        }
+        let _ = self.sources.reap().await;
+        if let Ok(mut routes) = self.input_routes.lock() {
+            routes.clear();
+        }
     }
     pub async fn new(
         engine: Arc<PlaybackManager>,
         credentials: Arc<Credentials>,
         policy: NetworkPolicy,
     ) -> Result<Self, &'static str> {
+        Self::new_with_torrent(
+            engine,
+            credentials,
+            policy,
+            playback_engine::TorrentConfig::default(),
+        )
+        .await
+    }
+    pub async fn new_with_torrent(
+        engine: Arc<PlaybackManager>,
+        credentials: Arc<Credentials>,
+        policy: NetworkPolicy,
+        config: playback_engine::TorrentConfig,
+    ) -> Result<Self, &'static str> {
         engine
             .initialize()
             .await
             .map_err(|_| "media_storage_unavailable")?;
+        let proxy = EgressProxy::start(policy)
+            .await
+            .map_err(|_| "egress_unavailable")?;
+        let sources = Arc::new(Sources::new(config, &proxy.url())?);
         Ok(Self {
             sessions: Arc::new(Mutex::new(Sessions::default())),
             credentials,
             engine,
-            proxy: EgressProxy::start(policy)
-                .await
-                .map_err(|_| "egress_unavailable")?,
+            proxy,
             active: Mutex::new(BTreeMap::new()),
             starting: Mutex::new(BTreeSet::new()),
             reaper: tokio::sync::Mutex::new(()),
+            sources,
+            input_sources: Mutex::new(BTreeMap::new()),
+            input_routes: Mutex::new(BTreeMap::new()),
         })
     }
 
@@ -122,6 +173,40 @@ impl Workers {
         }
         let started = Instant::now();
         let deadline = Duration::from_secs(STARTUP_DEADLINE_SECONDS);
+        let pending = if request.input.torrent() || request.input.archive() {
+            if !self.sources.enabled() {
+                return Err("unsupported_output");
+            }
+            let id = self
+                .sessions
+                .lock()
+                .map_err(|_| "session_store_unavailable")?
+                .begin_source_preparation(principal, request, now)?;
+            Some(Arc::new(SourcePreparation {
+                sessions: self.sessions.clone(),
+                sources: self.sources.clone(),
+                engine: self.engine.clone(),
+                route: Mutex::new(None),
+                runtime: tokio::runtime::Handle::current(),
+                id,
+                promoted: std::sync::atomic::AtomicBool::new(false),
+            }))
+        } else {
+            None
+        };
+        let resolved = if let Some(pending) = &pending {
+            Some(
+                tokio::time::timeout(
+                    deadline,
+                    self.sources
+                        .resolve(&request.namespace, &request.input, Some(pending.clone())),
+                )
+                .await
+                .map_err(|_| "startup_timeout")??,
+            )
+        } else {
+            None
+        };
         let has = |codecs: &[String], name: &str| codecs.iter().any(|codec| codec == name);
         let progressive = request.output.protocol == OutputProtocol::Progressive;
         let caps = Capabilities {
@@ -148,11 +233,31 @@ impl Workers {
         if headers.len() != request.input.headers.len() {
             return Err("invalid_headers");
         }
+        let route = resolved
+            .as_ref()
+            .map(|source| self.proxy.register_range(&source.url))
+            .transpose()
+            .map_err(|_| "source_preparation_failed")?;
+        if let Some(pending) = &pending {
+            *pending
+                .route
+                .lock()
+                .map_err(|_| "session_store_unavailable")? = route.clone();
+        }
+        let source_url = match &resolved {
+            Some(source) => {
+                headers.clear();
+                source.url.clone()
+            }
+            None => request.input.url.clone(),
+        };
+        // The root's exact private Range URI is registered, while every nested
+        // HTTP(S) URL still goes through ordinary destination validation.
         headers.insert("x-playback-egress-proxy".into(), self.proxy.url());
         let prepared = tokio::time::timeout(
-            deadline,
+            deadline.saturating_sub(started.elapsed()),
             self.engine.prepare_shared_with_selection(
-                request.input.url.clone(),
+                source_url,
                 headers,
                 request.position_seconds,
                 Some(caps),
@@ -191,15 +296,45 @@ impl Workers {
         }
         let timestamp = now.saturating_add(started.elapsed().as_secs());
         self.require_active(principal, timestamp).await?;
-        let reservation = self
-            .sessions
-            .lock()
-            .map_err(|_| "session_store_unavailable")?
-            .reserve(principal, request, plan, idempotency, timestamp)?;
+        let reservation = {
+            let mut sessions = self
+                .sessions
+                .lock()
+                .map_err(|_| "session_store_unavailable")?;
+            match &pending {
+                Some(pending) => {
+                    let reservation = sessions.reserve_prepared_source(
+                        &pending.id,
+                        principal,
+                        request,
+                        plan,
+                        idempotency,
+                        timestamp,
+                    )?;
+                    pending
+                        .promoted
+                        .store(true, std::sync::atomic::Ordering::Release);
+                    reservation
+                }
+                None => sessions.reserve(principal, request, plan, idempotency, timestamp)?,
+            }
+        };
         if !reservation.start_job {
             return Ok(reservation.viewer);
         }
         let job = reservation.viewer.job_id.clone();
+        if let Some(route) = route {
+            self.input_routes
+                .lock()
+                .map_err(|_| "session_store_unavailable")?
+                .insert(job.clone(), route);
+        }
+        if let Some(source) = resolved {
+            self.input_sources
+                .lock()
+                .map_err(|_| "session_store_unavailable")?
+                .insert(job.clone(), source);
+        }
         self.starting
             .lock()
             .map_err(|_| "session_store_unavailable")?
@@ -325,11 +460,34 @@ impl Workers {
             )
             .await
             .map_err(|_| "cleanup_pending")?;
+            let source = self
+                .input_sources
+                .lock()
+                .map_err(|_| "session_store_unavailable")?
+                .get(&job)
+                .cloned();
+            if let Some(source) = source {
+                tokio::time::timeout(
+                    Duration::from_secs(5),
+                    self.sources.close_if_unused(&source),
+                )
+                .await
+                .map_err(|_| "cleanup_pending")??;
+            }
             self.sessions
                 .lock()
                 .map_err(|_| "session_store_unavailable")?
                 .finish_stop(&job);
+            self.input_sources
+                .lock()
+                .map_err(|_| "session_store_unavailable")?
+                .remove(&job);
+            self.input_routes
+                .lock()
+                .map_err(|_| "session_store_unavailable")?
+                .remove(&job);
         }
+        self.sources.reap().await?;
         Ok(())
     }
 
@@ -419,6 +577,46 @@ impl Workers {
     }
 }
 
+struct SourcePreparation {
+    sessions: Arc<Mutex<Sessions>>,
+    sources: Arc<Sources>,
+    engine: Arc<PlaybackManager>,
+    route: Mutex<Option<Arc<TrustedRange>>>,
+    runtime: tokio::runtime::Handle,
+    id: String,
+    promoted: std::sync::atomic::AtomicBool,
+}
+impl Drop for SourcePreparation {
+    fn drop(&mut self) {
+        if self.promoted.load(std::sync::atomic::Ordering::Acquire) {
+            return;
+        }
+        let sessions = self.sessions.clone();
+        let sources = self.sources.clone();
+        let engine = self.engine.clone();
+        let route = self
+            .route
+            .get_mut()
+            .unwrap_or_else(|error| error.into_inner())
+            .take();
+        let id = self.id.clone();
+        self.runtime.spawn(async move {
+            let _route = route;
+            engine.settle_cancelled_inputs().await;
+            // Failed/canceled setup can leave a torrent initialization task.
+            // Keep its key charged until peer/cache teardown actually settles.
+            loop {
+                if sources.reap().await.is_ok() {
+                    if let Ok(mut sessions) = sessions.lock() {
+                        sessions.finish_source_preparation(&id);
+                    }
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        });
+    }
+}
 struct Startup<'a> {
     workers: &'a Workers,
     job: String,
@@ -2287,6 +2485,7 @@ printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","wi
                 url: "https://fixture.invalid/source".into(),
                 headers: BTreeMap::new(),
                 live: true,
+                file_index: None,
             },
             output: Output {
                 conversion: crate::protocol::Conversion::Auto,

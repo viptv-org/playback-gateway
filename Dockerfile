@@ -3,7 +3,8 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY engine ./engine
 COPY control ./control
-RUN cargo build --release --locked -p playback-gateway
+COPY ffi ./ffi
+RUN CARGO_BUILD_JOBS=2 cargo build --release --locked -p playback-gateway
 
 FROM debian:trixie-slim AS media-build
 ARG FFMPEG_VERSION=9.0.2
@@ -34,6 +35,7 @@ COPY --from=app-build /src/target/release/playback-gateway /usr/local/bin/playba
 COPY --from=media-build /opt/ffmpeg /opt/ffmpeg
 COPY --from=media-build /src/ffmpeg.tar.xz /src/ffmpeg.tar.xz.asc /usr/share/doc/playback-gateway/
 COPY LICENSE PROVENANCE.md /usr/share/doc/playback-gateway/
+COPY THIRD_PARTY /usr/share/doc/playback-gateway/third-party/
 ENV DATA_DIR=/var/lib/playback-gateway BIND_ADDRESS=0.0.0.0:8090 \
     FFMPEG_PATH=/opt/ffmpeg/bin/ffmpeg FFPROBE_PATH=/opt/ffmpeg/bin/ffprobe MAX_OUTPUTS=8
 USER 10001:10001
