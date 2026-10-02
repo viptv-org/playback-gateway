@@ -34,13 +34,20 @@ pub async fn seed_peer_observed(
     handshake.extend_from_slice(&hash);
     const PEER_ID: &[u8; 20] = b"fixture-peer-0000001";
     handshake.extend_from_slice(PEER_ID);
-    let mut peer = tokio::time::timeout(Duration::from_secs(10), async {
+    let mut peer = tokio::time::timeout(Duration::from_secs(20), async {
         loop {
             if let Ok(mut peer) = TcpStream::connect(address).await {
                 let mut reply = [0; 68];
-                if peer.write_all(&handshake).await.is_ok()
-                    && peer.read_exact(&mut reply).await.is_ok()
-                {
+                // The listener can become reachable before its torrent is
+                // registered. Do not spend the entire startup budget on one
+                // accepted transport that never returns its handshake.
+                let attempt = tokio::time::timeout(Duration::from_secs(1), async {
+                    peer.write_all(&handshake).await?;
+                    peer.read_exact(&mut reply).await?;
+                    Ok::<(), std::io::Error>(())
+                })
+                .await;
+                if matches!(attempt, Ok(Ok(()))) {
                     assert!(reply[28..48] == hash, "fixture handshake must match");
                     break peer;
                 }
