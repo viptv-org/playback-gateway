@@ -191,6 +191,12 @@ fn network_input_args(cmd: &mut Command, headers: &str, protocols: &str) {
     cmd.args([
         "-rw_timeout",
         "10000000",
+        // Some file origins reject open-ended Range requests. Let FFmpeg
+        // continue finite ranges itself, including seeks and header probing.
+        "-request_size",
+        "8388608",
+        "-initial_request_size",
+        "1048576",
         // Recover premature HTTP bodies at their byte offset, with short bounded backoff.
         // Deliberately omit reconnect_at_eof and reconnect_on_http_error: normal VOD
         // completion and authentication failures must not restart or retry forever.

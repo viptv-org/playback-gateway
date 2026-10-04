@@ -73,6 +73,13 @@ protects HTTPS inputs and HTTPS children of HTTP playlists without breaking
 ordinary HTTP inputs. Startup rejects unqualified binaries. The Docker image
 builds signed FFmpeg 9.0.2 sources with GnuTLS, x264, zimg, VAAPI and oneVPL.
 
+Network inputs use FFmpeg's finite HTTP range requests: 1 MiB during initial
+probing and 8 MiB during subsequent reading. This supports file origins that
+reject open-ended ranges, while retaining FFmpeg's seek and continuation logic.
+Engine warnings record bounded failure categories and recognized HTTP status
+codes; dependency transport logs and arbitrary environment filters are disabled
+to keep source credentials out of service logs.
+
 ## Local service
 
 Set a unique `API_KEY` of at least 32 characters in an ignored `.env`, then run

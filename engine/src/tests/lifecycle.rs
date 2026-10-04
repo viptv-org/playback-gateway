@@ -276,6 +276,8 @@ fn input_protocols_allow_network_crypto_but_not_local_files() {
         ("-reconnect_streamed", "1"),
         ("-reconnect_delay_max", "2"),
         ("-rw_timeout", "10000000"),
+        ("-request_size", "8388608"),
+        ("-initial_request_size", "1048576"),
     ] {
         let index = args.iter().position(|arg| *arg == key).unwrap();
         assert_eq!(args[index + 1], value);
