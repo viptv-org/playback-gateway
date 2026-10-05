@@ -50,3 +50,16 @@ successfully probed Quick Sync encoder before trying software encoding. This
 does not claim GPU HDR tone mapping: that retry can still decode and tone-map on
 the CPU. Without a qualified Quick Sync device, the previous software fallback
 remains unchanged. Conversion attempts retain the same source and reservation.
+
+## HDR Output Metadata
+
+GPU HDR conversion applies limited-range BT.709 metadata with `setparams` in the
+frame filter chain and removes the source HDR side data there. It does not pass
+encoder-side color options that can make FFmpeg request a software-format
+conversion after VAAPI hardware frames. Software conversion retains its existing
+encoder color options. Both paths must produce correctly tagged SDR, not merely
+an output that opens.
+
+The VPP capability probe uses the same metadata filter as runtime conversion.
+This correction does not add OpenCL support or qualify HLG/Dolby Vision paths.
+Direct/copy delivery remains unchanged and must not lose original HDR metadata.

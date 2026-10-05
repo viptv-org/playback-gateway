@@ -30,6 +30,48 @@ printf '#EXTM3U\n#EXTINF:1,\nsegment-000000000.ts\n' > "$last"
 
 const HDR10_HEVC: &str = r#"{"streams":[{"index":0,"codec_type":"video","codec_name":"hevc","profile":"Main 10","width":3840,"height":1600,"pix_fmt":"yuv420p10le","sample_aspect_ratio":"1:1","field_order":"progressive","color_transfer":"smpte2084","avg_frame_rate":"24000/1001","r_frame_rate":"24000/1001"},{"index":1,"codec_type":"audio","codec_name":"aac","profile":"LC","channels":2}],"format":{"format_name":"matroska,webm","duration":"10"}}"#;
 
+#[cfg(unix)]
+#[tokio::test]
+async fn software_hdr_conversion_retains_encoder_color_metadata() {
+    let root = tempfile::tempdir().unwrap();
+    let (ffprobe, ffmpeg) = scripted(root.path(), HDR10_HEVC, "never-matches");
+    let manager = PlaybackManager::new(Config {
+        ffmpeg: ffmpeg.clone(),
+        ffprobe,
+        root: root.path().join("media"),
+        max_sessions: 1,
+        ttl: Duration::from_secs(60),
+    });
+    manager
+        .filters
+        .set(["zscale", "tonemap", "sidedata"].map(String::from).into())
+        .unwrap();
+    let result = manager
+        .start_with_permit(
+            "http://fixture.invalid/video".into(),
+            HashMap::new(),
+            0.0,
+            Some(Capabilities {
+                max_width: 1920,
+                max_height: 1080,
+                ..Default::default()
+            }),
+            false,
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+    let attempts = std::fs::read_to_string(ffmpeg.with_extension("attempts")).unwrap();
+    assert!(attempts.contains("-c:v libx264"));
+    assert!(attempts
+        .contains("-color_primaries bt709 -color_trc bt709 -colorspace bt709 -color_range tv"));
+    assert!(attempts.contains("sidedata=mode=delete"));
+    assert!(!attempts.contains("setparams="));
+    assert!(manager.stop(&result.id).await);
+    manager.shutdown().await;
+}
+
 /// A Quick Sync host whose VPP tone maps: HDR10 decodes and tone maps on the
 /// GPU. When the GPU tone mapper fails for a source, the same reservation
 /// retries with CPU decode + GPU tone mapping, then CPU tone mapping + QSV encode.
@@ -97,9 +139,13 @@ async fn failing_gpu_tone_mapping_keeps_a_qualified_qsv_encoder() {
     assert!(attempts[2].contains("-init_hw_device qsv=viptv,child_device=/dev/dri/renderD128"));
     for attempt in &attempts {
         assert!(
-            attempt.contains("-color_primaries bt709 -color_trc bt709 -colorspace bt709"),
-            "every HDR attempt is tagged SDR BT.709: {attempt}"
+            attempt.contains(
+                "setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709"
+            ),
+            "GPU HDR frames must carry SDR metadata: {attempt}"
         );
+        assert!(!attempt.contains("-color_primaries"), "output color options must not request an automatic software format conversion: {attempt}");
+        assert!(attempt.contains("sidedata=mode=delete"));
         assert!(attempt.contains("-c:a copy"));
     }
     assert!(manager.stop(&result.id).await);

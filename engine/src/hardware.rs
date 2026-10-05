@@ -16,6 +16,11 @@ const HDR10_PROBE: &[u8] = include_bytes!("../assets/hdr10-probe.hevc");
 /// curve renders measurably darker than the software mobius path.
 const VPP_TONEMAP: &str = "procamp_vaapi=b=16,tonemap_vaapi=format=nv12:t=bt709:m=bt709:p=bt709";
 
+/// Tag converted frames without encoder color options requesting software format negotiation.
+pub(super) fn hdr_output_filter(filter: String) -> String {
+    format!("{filter},setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709,sidedata=mode=delete")
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Pipeline {
     Copy,
@@ -359,7 +364,9 @@ pub(super) async fn vaapi(
         ]);
         probe(ffmpeg, &args, None).await
     };
-    let vpp = hdr10(format!("format=p010le,hwupload,{VPP_TONEMAP}"));
+    let vpp = hdr10(hdr_output_filter(format!(
+        "format=p010le,hwupload,{VPP_TONEMAP}"
+    )));
     let tonemap = probe(
         ffmpeg,
         &vpp.iter().map(String::as_str).collect::<Vec<_>>(),
@@ -369,9 +376,9 @@ pub(super) async fn vaapi(
     let placebo = encode
         && !tonemap
         && {
-            let args = hdr10(
+            let args = hdr10(hdr_output_filter(
             "libplacebo=format=nv12:tonemapping=bt.2390:range=tv:color_primaries=bt709:color_trc=bt709:colorspace=bt709,hwupload".into(),
-        );
+        ));
             probe(
                 ffmpeg,
                 &args.iter().map(String::as_str).collect::<Vec<_>>(),

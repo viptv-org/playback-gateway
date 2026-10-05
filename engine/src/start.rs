@@ -888,8 +888,13 @@ impl PlaybackManager {
                         }
                         _ => transforms.join(","),
                     };
+                    let filter = if hdr && pipeline.accelerated() {
+                        hardware::hdr_output_filter(filter)
+                    } else {
+                        filter
+                    };
                     cmd.arg("-vf").arg(filter);
-                    if hdr {
+                    if hdr && !pipeline.accelerated() {
                         cmd.args([
                             "-color_primaries",
                             "bt709",
