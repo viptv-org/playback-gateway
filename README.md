@@ -141,6 +141,10 @@ An existing data directory must be private to its owner. Optional `QSV_DEVICE`
 and `VAAPI_DEVICE` select render nodes; a container operator must also map the
 specific device and grant the container user the appropriate device-group access.
 
+Pre-Xe Intel Quick Sync requires a compatible hardware runtime in addition to
+oneVPL. The optional [Intel legacy profile](docs/INTEL_QUICK_SYNC.md) packages and
+checks that runtime without changing the default generic image.
+
 `/health` is liveness; `/ready` reflects startup checks and the reaper. SIGTERM
 and Ctrl-C stop accepting requests, drain in-flight requests and stop workers.
 HTTP draining has a five-second grace bound so an unread response cannot defer

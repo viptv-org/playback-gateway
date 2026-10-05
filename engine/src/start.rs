@@ -1159,7 +1159,7 @@ impl PlaybackManager {
                 if ready {
                     break;
                 }
-                if let Some(next) = pipeline.fallback() {
+                if let Some(next) = pipeline.fallback(accel.qsv) {
                     if let Some(mut child) = session.child.take() {
                         let _ = child.kill().await;
                         let _ = child.wait().await;

@@ -1,0 +1,19 @@
+# Optional amd64 profile for pre-Xe Intel graphics. Build the base gateway first.
+ARG BASE_IMAGE=playback-gateway:local
+FROM debian:bookworm-slim AS legacy-runtime
+RUN test "$(dpkg --print-architecture)" = amd64 \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends libmfx1=22.5.4-1
+
+FROM ${BASE_IMAGE}
+USER 0:0
+RUN test "$(dpkg --print-architecture)" = amd64 \
+    && sed -i 's/Components: main$/Components: main non-free/' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends intel-media-va-driver-non-free \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+COPY --from=legacy-runtime /usr/lib/x86_64-linux-gnu/libmfxhw64.so.* /usr/lib/x86_64-linux-gnu/
+COPY --from=legacy-runtime /usr/lib/x86_64-linux-gnu/mfx/ /usr/lib/x86_64-linux-gnu/mfx/
+COPY --from=legacy-runtime /usr/share/mfx/ /usr/share/mfx/
+COPY --from=legacy-runtime /usr/share/doc/libmfx1/ /usr/share/doc/libmfx1/
+USER 10001:10001

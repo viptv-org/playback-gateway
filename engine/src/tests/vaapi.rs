@@ -32,10 +32,10 @@ const HDR10_HEVC: &str = r#"{"streams":[{"index":0,"codec_type":"video","codec_n
 
 /// A Quick Sync host whose VPP tone maps: HDR10 decodes and tone maps on the
 /// GPU. When the GPU tone mapper fails for a source, the same reservation
-/// retries with CPU decode + GPU tone mapping, then the proven software path.
+/// retries with CPU decode + GPU tone mapping, then CPU tone mapping + QSV encode.
 #[cfg(unix)]
 #[tokio::test]
-async fn failing_gpu_tone_mapping_retries_down_to_the_software_path() {
+async fn failing_gpu_tone_mapping_keeps_a_qualified_qsv_encoder() {
     let root = tempfile::tempdir().unwrap();
     let (ffprobe, ffmpeg) = scripted(root.path(), HDR10_HEVC, "tonemap_vaapi");
     let manager = PlaybackManager::new_with_qsv(
@@ -91,10 +91,10 @@ async fn failing_gpu_tone_mapping_retries_down_to_the_software_path() {
     // 2: CPU decode, uploaded P010, VPP tone mapping.
     assert!(!attempts[1].contains("-hwaccel"));
     assert!(attempts[1].contains("format=p010le,hwupload,procamp_vaapi"));
-    // 3: the software chain every host already had.
+    // 3: CPU tone mapping still retains the qualified Quick Sync encoder.
     assert!(attempts[2].contains("zscale=transfer=linear"));
-    assert!(attempts[2].contains("libx264"));
-    assert!(!attempts[2].contains("-init_hw_device"));
+    assert!(attempts[2].contains("h264_qsv"));
+    assert!(attempts[2].contains("-init_hw_device qsv=viptv,child_device=/dev/dri/renderD128"));
     for attempt in &attempts {
         assert!(
             attempt.contains("-color_primaries bt709 -color_trc bt709 -colorspace bt709"),

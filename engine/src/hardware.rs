@@ -38,10 +38,11 @@ impl Pipeline {
             Self::Software => "libx264",
         }
     }
-    pub(super) fn fallback(self) -> Option<Self> {
+    pub(super) fn fallback(self, qsv_available: bool) -> Option<Self> {
         match self {
             Self::QsvDecode => Some(Self::QsvEncode),
             Self::VaapiDecode => Some(Self::VaapiEncode),
+            Self::VaapiEncode if qsv_available => Some(Self::QsvEncode),
             Self::QsvEncode | Self::VaapiEncode => Some(Self::Software),
             _ => None,
         }
@@ -421,10 +422,20 @@ mod tests {
             "vpp_qsv=w=1920:h=1080:format=nv12"
         );
         assert_eq!(
-            Pipeline::QsvDecode.fallback().and_then(Pipeline::fallback),
+            Pipeline::QsvDecode
+                .fallback(true)
+                .and_then(|next| next.fallback(true)),
             Some(Pipeline::Software)
         );
-        assert_eq!(Pipeline::Software.fallback(), None);
+        assert_eq!(Pipeline::Software.fallback(true), None);
+        assert_eq!(
+            Pipeline::VaapiEncode.fallback(false),
+            Some(Pipeline::Software)
+        );
+        assert_eq!(
+            Pipeline::VaapiEncode.fallback(true),
+            Some(Pipeline::QsvEncode)
+        );
     }
 
     /// Production is Quick Sync plus the same device's VPP: SDR keeps the
@@ -471,8 +482,9 @@ mod tests {
         );
         assert_eq!(
             Pipeline::VaapiDecode
-                .fallback()
-                .and_then(Pipeline::fallback),
+                .fallback(true)
+                .and_then(|next| next.fallback(true))
+                .and_then(|next| next.fallback(true)),
             Some(Pipeline::Software),
             "a failing GPU tone mapper ends on the proven software path"
         );
