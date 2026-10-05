@@ -60,6 +60,9 @@ conversion after VAAPI hardware frames. Software conversion retains its existing
 encoder color options. Both paths must produce correctly tagged SDR, not merely
 an output that opens.
 
+The VPP scaler explicitly produces limited-range pixels before the metadata is
+tagged, so a full-range input is not merely relabeled as limited-range output.
+
 The VPP capability probe uses the same metadata filter as runtime conversion.
 This correction does not add OpenCL support or qualify HLG/Dolby Vision paths.
 Direct/copy delivery remains unchanged and must not lose original HDR metadata.

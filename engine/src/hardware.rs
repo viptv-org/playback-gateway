@@ -219,7 +219,14 @@ pub(super) fn vaapi_filter(
     software: &str,
 ) -> String {
     let (w, h) = fit(video, width, height);
-    let scale = format!("scale_vaapi=w={w}:h={h}:format=nv12");
+    let scale = format!(
+        "scale_vaapi=w={w}:h={h}:format=nv12{}",
+        if tone_map == Some(ToneMap::Vpp) {
+            ":out_range=tv"
+        } else {
+            ""
+        }
+    );
     let before = deinterlace
         .map(|filter| format!("{filter},"))
         .unwrap_or_default();
@@ -506,7 +513,7 @@ mod tests {
         );
         assert_eq!(
             filter,
-            "procamp_vaapi=b=16,tonemap_vaapi=format=nv12:t=bt709:m=bt709:p=bt709,scale_vaapi=w=1920:h=800:format=nv12"
+            "procamp_vaapi=b=16,tonemap_vaapi=format=nv12:t=bt709:m=bt709:p=bt709,scale_vaapi=w=1920:h=800:format=nv12:out_range=tv"
         );
         let uploaded = vaapi_filter(
             Pipeline::VaapiEncode,

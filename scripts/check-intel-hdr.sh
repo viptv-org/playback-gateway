@@ -15,7 +15,7 @@ ffmpeg=/opt/ffmpeg/bin/ffmpeg
 ffprobe=/opt/ffmpeg/bin/ffprobe
 "$ffmpeg" -v error -init_hw_device "vaapi=qualification:$HDR_TEST_DEVICE" \
   -filter_hw_device qualification -hwaccel vaapi -hwaccel_output_format vaapi \
-  -i /sample.hevc -vf "procamp_vaapi=b=16,tonemap_vaapi=format=nv12:t=bt709:m=bt709:p=bt709,scale_vaapi=w=128:h=128:format=nv12,setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709,sidedata=mode=delete" \
+  -i /sample.hevc -vf "procamp_vaapi=b=16,tonemap_vaapi=format=nv12:t=bt709:m=bt709:p=bt709,scale_vaapi=w=128:h=128:format=nv12:out_range=tv,setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709,sidedata=mode=delete" \
   -c:v h264_vaapi -profile:v main -level:v 4 -rc_mode VBR -b:v 4000k \
   -maxrate 5000k -bufsize 10000k -bf 0 -frames:v 2 -y /tmp/sdr.mp4
 "$ffmpeg" -v error -i /tmp/sdr.mp4 -frames:v 2 -f null -
