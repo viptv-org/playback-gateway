@@ -1164,6 +1164,12 @@ impl PlaybackManager {
                 if ready {
                     break;
                 }
+                if pipeline.vaapi() {
+                    // Downgrade VAAPI process-wide: the startup probe passed but
+                    // this real stream did not, so no later session pays the
+                    // same failing pipeline first.
+                    self.note_vaapi_failure();
+                }
                 if let Some(next) = pipeline.fallback(accel.qsv) {
                     if let Some(mut child) = session.child.take() {
                         let _ = child.kill().await;
