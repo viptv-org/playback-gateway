@@ -98,8 +98,15 @@ struct Entry {
     idle_since: std::sync::Mutex<Instant>,
     handles: std::sync::Mutex<HashMap<u32, Weak<HandleState>>>,
 }
-/// Clones share one lease. The last clone closes the listener and makes the
-/// underlying torrent idle; the manager can then pause and evict its cache.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LeaseMode {
+    // Repeated legacy starts share a lease and can read any torrent file.
+    Shared,
+    // Repeated starts share payload only, never byte authority.
+    SelectedFile,
+}
+/// Clones share one lease. The last clone closes that lease's listener.
+/// Payload becomes idle only after every lease and active reader releases it.
 pub struct TorrentHandle {
     pub(crate) state: Arc<HandleState>,
 }
@@ -107,6 +114,7 @@ pub(crate) struct HandleState {
     entry: Arc<Entry>,
     manager: Arc<ManagerInner>,
     selected: u32,
+    mode: LeaseMode,
     owners: std::sync::Mutex<usize>,
     reads: Arc<TorrentReads>,
     pub(crate) stopped: AtomicBool,
@@ -146,6 +154,16 @@ impl TorrentManager {
         source: &str,
         index: Option<u32>,
     ) -> Result<TorrentHandle, String> {
+        self.start_magnet_with_mode(scope, source, index, LeaseMode::Shared)
+            .await
+    }
+    async fn start_magnet_with_mode(
+        &self,
+        scope: &str,
+        source: &str,
+        index: Option<u32>,
+        mode: LeaseMode,
+    ) -> Result<TorrentHandle, String> {
         if !self.inner.config.enabled {
             return Err("Torrent transport disabled".into());
         }
@@ -157,7 +175,7 @@ impl TorrentManager {
             .map(|(k, v)| (k.into_owned(), v.into_owned()))
             .collect();
         magnet.query_pairs_mut().clear().extend_pairs(fields);
-        self.start(scope, AddTorrent::from_url(magnet.as_str()), index)
+        self.start(scope, AddTorrent::from_url(magnet.as_str()), index, mode)
             .await
     }
     /// The caller fetches HTTP metainfo using its vetted redirect/DNS policy.
@@ -167,6 +185,16 @@ impl TorrentManager {
         bytes: Vec<u8>,
         index: Option<u32>,
     ) -> Result<TorrentHandle, String> {
+        self.start_metainfo_with_mode(scope, bytes, index, LeaseMode::Shared)
+            .await
+    }
+    async fn start_metainfo_with_mode(
+        &self,
+        scope: &str,
+        bytes: Vec<u8>,
+        index: Option<u32>,
+        mode: LeaseMode,
+    ) -> Result<TorrentHandle, String> {
         if !self.inner.config.enabled {
             return Err("Torrent transport disabled".into());
         }
@@ -175,8 +203,30 @@ impl TorrentManager {
             scope,
             AddTorrent::from_bytes(strip_trackers(&bytes)?),
             index,
+            mode,
         )
         .await
+    }
+    /// Start a separately stoppable lease restricted to an explicit file.
+    pub async fn start_selected_magnet(
+        &self,
+        scope: &str,
+        source: &str,
+        index: u32,
+    ) -> Result<TorrentHandle, String> {
+        self.start_magnet_with_mode(scope, source, Some(index), LeaseMode::SelectedFile)
+            .await
+    }
+    /// The caller fetches metainfo using its vetted redirect/DNS policy.
+    /// Each call owns a separate selected-file byte capability.
+    pub async fn start_selected_metainfo(
+        &self,
+        scope: &str,
+        bytes: Vec<u8>,
+        index: u32,
+    ) -> Result<TorrentHandle, String> {
+        self.start_metainfo_with_mode(scope, bytes, Some(index), LeaseMode::SelectedFile)
+            .await
     }
     /// Reserve additional bytes for a decompressed archive spool. Keep the
     /// reservation alive until the spool and every range reader are gone.
@@ -216,6 +266,7 @@ impl TorrentManager {
         scope: &str,
         input: AddTorrent<'_>,
         index: Option<u32>,
+        mode: LeaseMode,
     ) -> Result<TorrentHandle, String> {
         if scope.is_empty() || scope.len() > 256 {
             return Err("Invalid torrent scope".into());
@@ -241,25 +292,7 @@ impl TorrentManager {
             known_hash.and_then(|hash| state.entries.get(&(scope.clone(), hash)).cloned())
         {
             let selected = select_file(&entry.files, index)?;
-            let existing = entry
-                .handles
-                .lock()
-                .map_err(|_| "Torrent unavailable")?
-                .get(&selected)
-                .and_then(Weak::upgrade);
-            if let Some(handle) = existing.filter(|h| !h.stopped.load(Ordering::Acquire)) {
-                if let Some(handle) = TorrentHandle::acquire(handle) {
-                    return Ok(handle);
-                }
-            }
-            if entry.users.load(Ordering::Acquire) == 0 && entry.managed.is_paused() {
-                entry
-                    .session
-                    .unpause(&entry.managed)
-                    .await
-                    .map_err(|_| "Torrent resume failed")?;
-            }
-            return self.make_handle(entry, selected).await;
+            return self.lease_entry(entry, selected, mode).await;
         }
         let session = match state.scopes.get(&scope) {
             Some(s) => s.clone(),
@@ -329,24 +362,7 @@ impl TorrentManager {
         let selected = select_file(&files, index)?;
         let key = (scope, hash);
         if let Some(entry) = state.entries.get(&key).cloned() {
-            let existing = entry
-                .handles
-                .lock()
-                .map_err(|_| "Torrent unavailable")?
-                .get(&selected)
-                .and_then(Weak::upgrade);
-            if let Some(handle) = existing.filter(|h| !h.stopped.load(Ordering::Acquire)) {
-                if let Some(handle) = TorrentHandle::acquire(handle) {
-                    return Ok(handle);
-                }
-            }
-            if entry.users.load(Ordering::Acquire) == 0 && entry.managed.is_paused() {
-                session
-                    .unpause(&entry.managed)
-                    .await
-                    .map_err(|_| "Torrent resume failed")?;
-            }
-            return self.make_handle(entry, selected).await;
+            return self.lease_entry(entry, selected, mode).await;
         }
         if existing.is_some() {
             return Err("Torrent cache state unavailable".into());
@@ -409,14 +425,48 @@ impl TorrentManager {
             .await
             .map_err(|_| "Torrent initialization timed out")?
             .map_err(|_| "Torrent initialization failed")?;
-        self.make_handle(entry, selected).await
+        self.make_handle(entry, selected, mode).await
     }
-    async fn make_handle(&self, entry: Arc<Entry>, selected: u32) -> Result<TorrentHandle, String> {
+    async fn lease_entry(
+        &self,
+        entry: Arc<Entry>,
+        selected: u32,
+        mode: LeaseMode,
+    ) -> Result<TorrentHandle, String> {
+        if mode == LeaseMode::Shared {
+            let existing = entry
+                .handles
+                .lock()
+                .map_err(|_| "Torrent unavailable")?
+                .get(&selected)
+                .and_then(Weak::upgrade);
+            if let Some(handle) = existing.filter(|h| !h.stopped.load(Ordering::Acquire)) {
+                if let Some(handle) = TorrentHandle::acquire(handle) {
+                    return Ok(handle);
+                }
+            }
+        }
+        if entry.users.load(Ordering::Acquire) == 0 && entry.managed.is_paused() {
+            entry
+                .session
+                .unpause(&entry.managed)
+                .await
+                .map_err(|_| "Torrent resume failed")?;
+        }
+        self.make_handle(entry, selected, mode).await
+    }
+    async fn make_handle(
+        &self,
+        entry: Arc<Entry>,
+        selected: u32,
+        mode: LeaseMode,
+    ) -> Result<TorrentHandle, String> {
         entry.users.fetch_add(1, Ordering::AcqRel);
         let state = Arc::new(HandleState {
             entry: entry.clone(),
             manager: self.inner.clone(),
             selected,
+            mode,
             owners: std::sync::Mutex::new(1),
             reads: Arc::new(TorrentReads::default()),
             stopped: AtomicBool::new(false),
@@ -427,11 +477,13 @@ impl TorrentManager {
             .server
             .set(server)
             .map_err(|_| "Torrent stream unavailable")?;
-        entry
-            .handles
-            .lock()
-            .map_err(|_| "Torrent unavailable")?
-            .insert(selected, Arc::downgrade(&state));
+        if mode == LeaseMode::Shared {
+            entry
+                .handles
+                .lock()
+                .map_err(|_| "Torrent unavailable")?
+                .insert(selected, Arc::downgrade(&state));
+        }
         Ok(TorrentHandle { state })
     }
     /// Pause idle torrents and remove expired entries. Under pressure only idle
@@ -583,15 +635,18 @@ impl TorrentHandle {
         true
     }
     pub fn files(&self) -> &[TorrentFile] {
-        &self.state.entry.files
+        if self.state.mode == LeaseMode::SelectedFile {
+            std::slice::from_ref(self.selected_file())
+        } else {
+            &self.state.entry.files
+        }
     }
     pub fn selected_file(&self) -> &TorrentFile {
-        &self.files()[self.state.selected as usize]
+        &self.state.entry.files[self.state.selected as usize]
     }
     /// Private capability URL. Never send it to public clients or logs.
     pub fn stream_url(&self, index: u32) -> Result<String, String> {
-        if self.state.stopped.load(Ordering::Acquire) || self.files().get(index as usize).is_none()
-        {
+        if self.state.stopped.load(Ordering::Acquire) || self.state.file(index).is_none() {
             return Err("Torrent stream unavailable".into());
         }
         self.state
@@ -617,8 +672,9 @@ impl TorrentHandle {
             stopped: self.state.stopped.load(Ordering::Acquire),
         }
     }
-    /// Invalidates this shared lease and makes it idle immediately. Every clone
-    /// observes the stop; other selected-file leases remain active.
+    /// Invalidates this lease and every explicit clone. Independent leases,
+    /// including selected-only leases for the same file, remain active.
+    /// This does not join the listener or cancel pending piece waits.
     pub fn stop(&self) {
         self.state.release();
     }
@@ -638,6 +694,9 @@ impl HandleState {
     }
 
     pub(crate) fn file(&self, index: u32) -> Option<&TorrentFile> {
+        if self.mode == LeaseMode::SelectedFile && index != self.selected {
+            return None;
+        }
         self.entry.files.get(index as usize)
     }
     pub(crate) async fn read_range(

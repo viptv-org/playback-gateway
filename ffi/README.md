@@ -16,6 +16,11 @@ The token is generated internally; never log URLs, magnet values or peer lists.
 The consuming Android app needs INTERNET permission and a cleartext network
 security exception scoped to loopback `127.0.0.1` for the native player.
 
+## Legacy shared-lease facade
+
+This example uses automatic file selection and shared lease semantics, not an
+exact-file authorization adapter.
+
 ```kotlin
 import uniffi.playback_gateway_ffi.*
 
@@ -43,6 +48,33 @@ returns at most 8 MiB per call and waits at most 30 seconds for missing pieces.
 state. Calling `stop` invalidates every clone of that shared lease; final
 active lease release or explicit stop closes its listener; in-flight readers retain ownership until they settle, then the torrent pauses. `reap` evicts fully idle cache entries after the
 idle deadline or when a new reservation needs their space.
+
+## Opt-in independent selected-file leases
+
+`startSelected(magnet, fileIndex)` and
+`startSelectedMetainfo(metainfo, fileIndex)` require an explicit metadata index.
+Every call allocates a separate stop state, reader accounting and random loopback
+capability, even for the same hash/index in one client. Cached payload and its
+full-torrent reservation remain shared. `files()` returns only the selected
+file, retaining its original metadata index (it need not be zero). Invalid or
+unsupported indices fail; no largest-file fallback occurs. `streamUrl`,
+`readRange`, HTTP GET/HEAD/ranges and file-size lookup refuse other indices.
+
+Stopping or disposing one independent handle does not retire another handle or
+its listener. Explicit aliases of a handle still refer to the same lease and
+observe its stop. Legacy `start`/`startMetainfo` continue to share same-file lease
+state and allow all torrent file indices; gateway/archive callers retain those
+semantics. Do not infer independent authority from a legacy handle's clone.
+
+These methods are not authorization-ready native playback qualification. Starts
+still block before a handle exists; stop aborts rather than joins the listener,
+and missing-piece reads can wait up to 30 seconds. Total acquisition deadlines,
+cancellable acquisition, bounded joined reader/session/dependency settlement,
+public-only peer/DHT/bootstrap filtering and bounded dependency metadata
+allocation remain required work. No capability advertisement or activation is
+provided by this facade. Status remains whole-torrent byte progress, not playback
+completion or history. Android ABI/device and full license qualification are
+separate gates.
 
 Only BitTorrent v1 over TCP is supported. HTTP trackers are stripped before
 library admission, private tracker torrents are refused, and webseed metainfo
@@ -85,8 +117,12 @@ Android native dependency graphs exclude archive/control crates. Both artifact
 build scripts require this check. Dependency exclusion is not a complete license
 review or device qualification.
 
-Run `CARGO_BUILD_JOBS=2 cargo test -p playback-gateway-ffi`. The host fixture
-uses a loopback BitTorrent seeder and exercises selection, seek/range bytes,
-progress callbacks, and explicit stop without contacting the public network.
+Run `CARGO_BUILD_JOBS=2 cargo test --locked -p playback-gateway-ffi`. The host
+fixtures use owned TCP seeders with DHT/trackers disabled and exercise legacy
+selection, independent selected-file leases, seek/range bytes, callbacks and
+stop. On Linux run synthetic seeder tests in a loopback-only network namespace:
+the pinned dependency's peer listener binds wildcard interfaces, unlike the byte
+endpoint's literal `127.0.0.1`. Keep fixture peer listeners inaccessible from
+public/LAN interfaces; public-only dependency networking remains unimplemented.
 
 The alignment flags follow [Android's page-size guidance](https://developer.android.com/guide/practices/page-sizes). ELF alignment does not verify APK ZIP alignment or device behavior.

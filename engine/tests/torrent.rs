@@ -501,3 +501,339 @@ async fn last_owner_close_preserves_other_torrent_aliases() {
     second.settle_closed_reads().await;
     assert!(second.stream_url(0).is_err());
 }
+
+struct SelectedFixture {
+    // Seeder files and cache must outlive their sessions/readers.
+    _seed: tempfile::TempDir,
+    _cache: tempfile::TempDir,
+    session: std::sync::Arc<librqbit::Session>,
+    manager: TorrentManager,
+    metainfo: Vec<u8>,
+    selected: u32,
+    other: u32,
+    data: Vec<u8>,
+}
+async fn selected_fixture() -> SelectedFixture {
+    let seed = tempfile::tempdir().unwrap();
+    let data: Vec<u8> = (0..150_000).map(|n| (n % 251) as u8).collect();
+    std::fs::write(seed.path().join("a.mkv"), &data).unwrap();
+    std::fs::write(seed.path().join("b.mkv"), vec![7; 90_000]).unwrap();
+    let metainfo = librqbit::create_torrent(
+        seed.path(),
+        librqbit::CreateTorrentOptions {
+            piece_length: Some(16 * 1024),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap()
+    .as_bytes()
+    .unwrap()
+    .to_vec();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    let session = librqbit::Session::new_with_opts(
+        seed.path().to_owned(),
+        librqbit::SessionOptions {
+            disable_dht: true,
+            disable_dht_persistence: true,
+            enable_upnp_port_forwarding: false,
+            listen_port_range: Some(port..port + 1),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let seeder = session
+        .add_torrent(
+            librqbit::AddTorrent::from_bytes(metainfo.clone()),
+            Some(librqbit::AddTorrentOptions {
+                output_folder: Some(seed.path().to_str().unwrap().into()),
+                overwrite: true,
+                disable_trackers: true,
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap()
+        .into_handle()
+        .unwrap();
+    seeder.wait_until_initialized().await.unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let manager = TorrentManager::new(TorrentConfig {
+        enabled: true,
+        cache_dir: cache.path().join("cache"),
+        enable_dht: false,
+        initial_peers: vec![format!("127.0.0.1:{port}").parse().unwrap()],
+        idle_timeout: std::time::Duration::ZERO,
+        ..Default::default()
+    })
+    .unwrap();
+    // Read the owned fixture metadata, without a legacy admission or traversal-order assumption.
+    let meta = librqbit::torrent_from_bytes::<librqbit::ByteBufOwned>(&metainfo).unwrap();
+    let files: Vec<_> = meta
+        .info
+        .iter_file_details()
+        .unwrap()
+        .enumerate()
+        .map(|(index, file)| (index as u32, file.filename.to_vec().unwrap().join("/")))
+        .collect();
+    let selected = files.iter().find(|(_, name)| name == "a.mkv").unwrap().0;
+    let other = files.iter().find(|(_, name)| name == "b.mkv").unwrap().0;
+    SelectedFixture {
+        _seed: seed,
+        _cache: cache,
+        session,
+        manager,
+        metainfo,
+        selected,
+        other,
+        data,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn selected_file_capability_denies_unselected_get_head_range_and_native_reads() {
+    let f = selected_fixture().await;
+    let handle = f
+        .manager
+        .start_selected_metainfo("selected-fixture", f.metainfo.clone(), f.selected)
+        .await
+        .unwrap();
+    assert_eq!(handle.files().len(), 1);
+    assert_eq!(handle.files()[0].index, f.selected);
+    let url = handle.stream_url(f.selected).unwrap();
+    let unselected_url = url.replace(
+        &format!("/{}/stream.", f.selected),
+        &format!("/{}/stream.", f.other),
+    );
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .unwrap();
+    let mut failures = Vec::new();
+    if handle.stream_url(f.other).is_ok() {
+        failures.push("unselected URL creation");
+    }
+    if handle.read_range(f.other, 0, 16).await.is_ok() {
+        failures.push("unselected native read");
+    }
+    for (method, range) in [
+        (reqwest::Method::GET, None),
+        (reqwest::Method::HEAD, None),
+        (reqwest::Method::GET, Some("bytes=0-15")),
+    ] {
+        let mut request = client.request(method.clone(), &unselected_url);
+        if let Some(range) = range {
+            request = request.header("Range", range);
+        }
+        let response = request.send().await.unwrap();
+        if response.status() != reqwest::StatusCode::NOT_FOUND {
+            failures.push("unselected HTTP status");
+        }
+        if response
+            .headers()
+            .get("Content-Length")
+            .is_some_and(|v| v != "0")
+            || response.headers().contains_key("Content-Range")
+        {
+            failures.push("unselected length exposure");
+        }
+        if !response.bytes().await.unwrap().is_empty() {
+            failures.push("unselected HTTP bytes");
+        }
+    }
+    assert_eq!(
+        handle.read_range(f.selected, 80_000, 32).await.unwrap(),
+        f.data[80_000..80_032]
+    );
+    let head = client.head(&url).send().await.unwrap();
+    assert_eq!(head.status(), reqwest::StatusCode::OK);
+    assert_eq!(head.headers()["Content-Length"], "150000");
+    assert!(head.bytes().await.unwrap().is_empty());
+    let response = client.get(&url).send().await.unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    assert_eq!(response.bytes().await.unwrap().as_ref(), f.data.as_slice());
+    handle.stop();
+    f.session.stop().await;
+    assert!(
+        failures.is_empty(),
+        "selected-file capability violations: {failures:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn selected_file_starts_have_separate_tokens_and_preserve_legacy_aliases() {
+    let f = selected_fixture().await;
+    let legacy = f
+        .manager
+        .start_metainfo("selected-fixture", f.metainfo.clone(), Some(f.selected))
+        .await
+        .unwrap();
+    let first = f
+        .manager
+        .start_selected_metainfo("selected-fixture", f.metainfo.clone(), f.selected)
+        .await
+        .unwrap();
+    let second = f
+        .manager
+        .start_selected_metainfo("selected-fixture", f.metainfo.clone(), f.selected)
+        .await
+        .unwrap();
+    let legacy_alias = f
+        .manager
+        .start_metainfo("selected-fixture", f.metainfo.clone(), Some(f.selected))
+        .await
+        .unwrap();
+    assert!(legacy.stream_url(f.selected).unwrap() == legacy_alias.stream_url(f.selected).unwrap());
+    let first_url = first.stream_url(f.selected).unwrap();
+    let second_url = second.stream_url(f.selected).unwrap();
+    assert!(
+        first_url != second_url,
+        "independent lease endpoints must differ"
+    );
+    let first_token = first_url.split('/').nth(3).unwrap();
+    let second_token = second_url.split('/').nth(3).unwrap();
+    assert!(
+        first_token != second_token,
+        "independent lease tokens must differ"
+    );
+    let swapped_token_url = second_url.replace(second_token, first_token);
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let response = client.get(swapped_token_url).send().await.unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::NOT_FOUND);
+    assert!(response.bytes().await.unwrap().is_empty());
+    assert!(first.stream_url(f.selected).unwrap() != legacy.stream_url(f.selected).unwrap());
+    assert!(
+        legacy.stream_url(f.other).is_ok(),
+        "legacy archive access remains unrestricted"
+    );
+    first.stop();
+    second.stop();
+    legacy.stop();
+    f.session.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn selected_file_stop_retires_clones_not_an_independent_same_file_lease() {
+    let f = selected_fixture().await;
+    let first = f
+        .manager
+        .start_selected_metainfo("selected-fixture", f.metainfo.clone(), f.selected)
+        .await
+        .unwrap();
+    let alias = first.clone();
+    let hash = librqbit::torrent_from_bytes::<librqbit::ByteBufOwned>(&f.metainfo)
+        .unwrap()
+        .info_hash
+        .as_string();
+    let second = f
+        .manager
+        .start_selected_magnet(
+            "selected-fixture",
+            &format!("magnet:?xt=urn:btih:{hash}"),
+            f.selected,
+        )
+        .await
+        .unwrap();
+    let old_url = first.stream_url(f.selected).unwrap();
+    let valid_url = second.stream_url(f.selected).unwrap();
+    assert_eq!(
+        first.read_range(f.selected, 0, 16).await.unwrap(),
+        f.data[..16]
+    );
+    first.stop();
+    assert!(alias.status().stopped);
+    assert!(alias.stream_url(f.selected).is_err());
+    assert!(alias.read_range(f.selected, 0, 16).await.is_err());
+    assert!(
+        !second.status().stopped,
+        "stopping one lease must preserve independent same-file work"
+    );
+    f.manager.reap().await.unwrap();
+    assert_eq!(
+        second.read_range(f.selected, 120_000, 32).await.unwrap(),
+        f.data[120_000..120_032]
+    );
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let response = client
+        .get(&valid_url)
+        .header("Range", "bytes=120000-120031")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::PARTIAL_CONTENT);
+    assert_eq!(
+        response.bytes().await.unwrap().as_ref(),
+        &f.data[120_000..120_032]
+    );
+    // A retired listener may reject a connection or return an empty refusal,
+    // but cannot serve bytes under its old capability.
+    if let Ok(response) = client.get(&old_url).send().await {
+        assert!(!response.status().is_success());
+        assert!(response.bytes().await.unwrap().is_empty());
+    }
+    second.stop();
+    f.session.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn selected_file_nonzero_index_and_last_owner_drop_preserve_other_authority() {
+    let f = selected_fixture().await;
+    assert_ne!(f.other, 0, "fixture must exercise a nonzero metadata index");
+    let hash = librqbit::torrent_from_bytes::<librqbit::ByteBufOwned>(&f.metainfo)
+        .unwrap()
+        .info_hash
+        .as_string();
+    let first = f
+        .manager
+        .start_selected_magnet(
+            "selected-fixture",
+            &format!("magnet:?xt=urn:btih:{hash}"),
+            f.other,
+        )
+        .await
+        .unwrap();
+    let second = f
+        .manager
+        .start_selected_metainfo("selected-fixture", f.metainfo.clone(), f.other)
+        .await
+        .unwrap();
+    let alias = first.clone();
+    assert_eq!(first.files().len(), 1);
+    assert_eq!(first.files()[0].index, f.other);
+    assert_eq!(first.selected_file().index, f.other);
+    assert!(first.stream_url(f.selected).is_err());
+    assert!(first.read_range(f.selected, 0, 16).await.is_err());
+    assert_eq!(first.read_range(f.other, 0, 16).await.unwrap(), vec![7; 16]);
+    assert!(
+        !first.close_if_last_owner(),
+        "explicit clones still alias one lease"
+    );
+    drop(first);
+    assert!(!alias.status().stopped);
+    drop(alias);
+    f.manager.reap().await.unwrap();
+    assert!(!second.status().stopped);
+    assert_eq!(
+        second.read_range(f.other, 80_000, 32).await.unwrap(),
+        vec![7; 32]
+    );
+    assert!(f
+        .manager
+        .start_selected_metainfo("selected-fixture", f.metainfo.clone(), 999)
+        .await
+        .is_err());
+    assert!(
+        !second.status().stopped,
+        "invalid selection cannot retire active authority"
+    );
+    second.stop();
+    f.session.stop().await;
+}

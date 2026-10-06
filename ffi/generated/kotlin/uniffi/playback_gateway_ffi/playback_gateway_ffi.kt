@@ -759,6 +759,10 @@ internal open class UniffiVTableCallbackInterfaceTorrentProgressListener(
 
 
 
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -781,6 +785,10 @@ fun uniffi_playback_gateway_ffi_checksum_method_torrentclient_reap(
 fun uniffi_playback_gateway_ffi_checksum_method_torrentclient_start(
 ): Short
 fun uniffi_playback_gateway_ffi_checksum_method_torrentclient_start_metainfo(
+): Short
+fun uniffi_playback_gateway_ffi_checksum_method_torrentclient_start_selected(
+): Short
+fun uniffi_playback_gateway_ffi_checksum_method_torrentclient_start_selected_metainfo(
 ): Short
 fun uniffi_playback_gateway_ffi_checksum_method_torrenthandle_files(
 ): Short
@@ -859,6 +867,10 @@ fun uniffi_playback_gateway_ffi_fn_method_torrentclient_reap(`ptr`: Pointer,unif
 fun uniffi_playback_gateway_ffi_fn_method_torrentclient_start(`ptr`: Pointer,`magnet`: RustBuffer.ByValue,`fileIndex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Pointer
 fun uniffi_playback_gateway_ffi_fn_method_torrentclient_start_metainfo(`ptr`: Pointer,`metainfo`: RustBuffer.ByValue,`fileIndex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): Pointer
+fun uniffi_playback_gateway_ffi_fn_method_torrentclient_start_selected(`ptr`: Pointer,`magnet`: RustBuffer.ByValue,`fileIndex`: Int,uniffi_out_err: UniffiRustCallStatus,
+): Pointer
+fun uniffi_playback_gateway_ffi_fn_method_torrentclient_start_selected_metainfo(`ptr`: Pointer,`metainfo`: RustBuffer.ByValue,`fileIndex`: Int,uniffi_out_err: UniffiRustCallStatus,
 ): Pointer
 fun uniffi_playback_gateway_ffi_fn_clone_torrenthandle(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
 ): Pointer
@@ -1016,6 +1028,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_playback_gateway_ffi_checksum_method_torrentclient_start_metainfo() != 19036.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_playback_gateway_ffi_checksum_method_torrentclient_start_selected() != 24591.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_playback_gateway_ffi_checksum_method_torrentclient_start_selected_metainfo() != 19051.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_playback_gateway_ffi_checksum_method_torrenthandle_files() != 49004.toShort()) {
@@ -1498,6 +1516,18 @@ public interface TorrentClientInterface {
      */
     fun `startMetainfo`(`metainfo`: kotlin.ByteArray, `fileIndex`: kotlin.UInt?): TorrentHandle
 
+    /**
+     * Each call owns an independent lease restricted to this exact file.
+     * This does not provide cancellation during acquisition or joined stop.
+     */
+    fun `startSelected`(`magnet`: kotlin.String, `fileIndex`: kotlin.UInt): TorrentHandle
+
+    /**
+     * Caller-vetted metainfo; an explicit file index is mandatory.
+     * Repeated starts share cached payload, not stop state or byte tokens.
+     */
+    fun `startSelectedMetainfo`(`metainfo`: kotlin.ByteArray, `fileIndex`: kotlin.UInt): TorrentHandle
+
     companion object
 }
 
@@ -1629,6 +1659,40 @@ open class TorrentClient: Disposable, AutoCloseable, TorrentClientInterface
     uniffiRustCallWithError(TorrentException) { _status ->
     UniffiLib.INSTANCE.uniffi_playback_gateway_ffi_fn_method_torrentclient_start_metainfo(
         it, FfiConverterByteArray.lower(`metainfo`),FfiConverterOptionalUInt.lower(`fileIndex`),_status)
+}
+    }
+    )
+    }
+
+
+
+    /**
+     * Each call owns an independent lease restricted to this exact file.
+     * This does not provide cancellation during acquisition or joined stop.
+     */
+    @Throws(TorrentException::class)override fun `startSelected`(`magnet`: kotlin.String, `fileIndex`: kotlin.UInt): TorrentHandle {
+            return FfiConverterTypeTorrentHandle.lift(
+    callWithPointer {
+    uniffiRustCallWithError(TorrentException) { _status ->
+    UniffiLib.INSTANCE.uniffi_playback_gateway_ffi_fn_method_torrentclient_start_selected(
+        it, FfiConverterString.lower(`magnet`),FfiConverterUInt.lower(`fileIndex`),_status)
+}
+    }
+    )
+    }
+
+
+
+    /**
+     * Caller-vetted metainfo; an explicit file index is mandatory.
+     * Repeated starts share cached payload, not stop state or byte tokens.
+     */
+    @Throws(TorrentException::class)override fun `startSelectedMetainfo`(`metainfo`: kotlin.ByteArray, `fileIndex`: kotlin.UInt): TorrentHandle {
+            return FfiConverterTypeTorrentHandle.lift(
+    callWithPointer {
+    uniffiRustCallWithError(TorrentException) { _status ->
+    UniffiLib.INSTANCE.uniffi_playback_gateway_ffi_fn_method_torrentclient_start_selected_metainfo(
+        it, FfiConverterByteArray.lower(`metainfo`),FfiConverterUInt.lower(`fileIndex`),_status)
 }
     }
     )

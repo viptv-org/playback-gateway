@@ -134,6 +134,42 @@ impl TorrentClient {
             callback: Mutex::new(None),
         }))
     }
+    /// Each call owns an independent lease restricted to this exact file.
+    /// This does not provide cancellation during acquisition or joined stop.
+    pub fn start_selected(
+        &self,
+        magnet: String,
+        file_index: u32,
+    ) -> Result<Arc<TorrentHandle>, TorrentError> {
+        let handle = runtime()?
+            .block_on(
+                self.manager
+                    .start_selected_magnet("native", &magnet, file_index),
+            )
+            .map_err(|_| TorrentError::OperationFailed)?;
+        Ok(Arc::new(TorrentHandle {
+            handle,
+            callback: Mutex::new(None),
+        }))
+    }
+    /// Caller-vetted metainfo; an explicit file index is mandatory.
+    /// Repeated starts share cached payload, not stop state or byte tokens.
+    pub fn start_selected_metainfo(
+        &self,
+        metainfo: Vec<u8>,
+        file_index: u32,
+    ) -> Result<Arc<TorrentHandle>, TorrentError> {
+        let handle = runtime()?
+            .block_on(
+                self.manager
+                    .start_selected_metainfo("native", metainfo, file_index),
+            )
+            .map_err(|_| TorrentError::OperationFailed)?;
+        Ok(Arc::new(TorrentHandle {
+            handle,
+            callback: Mutex::new(None),
+        }))
+    }
     pub fn reap(&self) -> Result<(), TorrentError> {
         runtime()?
             .block_on(self.manager.reap())

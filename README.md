@@ -103,6 +103,17 @@ remains enabled for the default gateway. Native archive unpacking is outside
 that facade. [Torrent qualification](docs/TORRENT_QUALIFICATION.md) records
 exact test scope and remaining acceptance.
 
+In-process consumers can explicitly request independent exact-file leases with
+`TorrentManager::start_selected_magnet` / `start_selected_metainfo`; each requires
+a metadata file index and owns separate stop state and loopback byte authority.
+Only that file's metadata and bytes are exposed by the returned handle. Repeated
+selected starts share payload/reservation, not tokens. Existing `start_magnet` /
+`start_metainfo` preserve shared-handle and all-file gateway/archive behavior;
+explicit clones always remain aliases. These opt-in APIs do not provide
+cancellable acquisition, bounded joined shutdown or public-only peer/DHT policy,
+and do not qualify a native authorization integration. See the
+[facade boundaries](ffi/README.md#opt-in-independent-selected-file-leases).
+
 The dependency additions are pinned in Cargo.lock. See
 [provenance](PROVENANCE.md) for licensing restrictions. Never enable librqbit
 tracing targets in production: they emit peer addresses and torrent identifiers.
