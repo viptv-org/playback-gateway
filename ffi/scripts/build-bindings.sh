@@ -2,6 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 export CARGO_BUILD_JOBS=2
+./ffi/scripts/check-native-deps.sh
 cargo build --locked -p playback-gateway-ffi --no-default-features --features torrent --lib
 cargo run --locked -p playback-gateway-ffi --features bindgen --bin playback-uniffi-bindgen -- generate \
   --library target/debug/libplayback_gateway_ffi.so --language kotlin --no-format --out-dir ffi/generated/kotlin

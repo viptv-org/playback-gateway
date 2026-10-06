@@ -6,9 +6,10 @@ license = "GPL-2.0-only"
 description = "Managed, capability-addressed HLS playback engine: direct delivery, the managed ladder, probing and session leases. No database, no identity, no accounts."
 
 [features]
-default = ["media", "torrent"]
+default = ["media", "torrent", "archive"]
 media = ["dep:axum"]
-torrent = ["dep:librqbit", "dep:bencode", "dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:unrar-rs"]
+torrent = ["dep:librqbit", "dep:bencode", "dep:hyper", "dep:hyper-util", "dep:http-body-util"]
+archive = ["torrent", "dep:unrar-rs"]
 
 [dev-dependencies]
 tempfile = "3"
@@ -36,3 +37,7 @@ unrar-rs = { version = "=0.10.8", default-features = false, features = ["crypto-
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[[example]]
+name = "browser_check"
+required-features = ["media"]

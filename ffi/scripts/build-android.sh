@@ -2,6 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 export CARGO_BUILD_JOBS=2
+./ffi/scripts/check-native-deps.sh
 : "${ANDROID_NDK_HOME:=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}/ndk/28.2.13676358}"
 export ANDROID_NDK_HOME
 if [[ ! -d "$ANDROID_NDK_HOME" ]]; then

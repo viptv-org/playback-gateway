@@ -97,7 +97,9 @@ without a second payload copy. Compressed torrent archives are fully extracted
 and checksum-verified into a bounded spool before playback; partial-progress
 seeking is unavailable. Direct HTTP RAR supports stored members only. Encrypted
 archives are refused. Native clients can use the torrent-only
-[UniFFI/Kotlin facade](ffi/README.md); native archive unpacking remains outside
+[UniFFI/Kotlin facade](ffi/README.md); its selected-package dependency graph
+excludes archive extraction/unrar-rs. The engine's separate `archive` feature
+remains enabled for the default gateway. Native archive unpacking is outside
 that facade. [Torrent qualification](docs/TORRENT_QUALIFICATION.md) records
 exact test scope and remaining acceptance.
 

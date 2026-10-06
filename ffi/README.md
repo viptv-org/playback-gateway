@@ -2,8 +2,11 @@
 
 This crate exposes the gateway's torrent byte transport through UniFFI 0.29.4,
 following the shared core's native binding pattern. The native build enables
-`playback-engine/torrent` with default features disabled: it includes no axum
-control server and launches no FFmpeg/ffprobe process. It uses a process runtime
+`playback-engine/torrent` with default features disabled: it includes no archive
+extractor/unrar-rs or axum control server and launches no FFmpeg/ffprobe process.
+The engine's separate `archive` feature is reserved for archive-enabled consumers;
+the default gateway build retains it. Build this facade as the selected package,
+not a workspace-wide artifact with unified archive features. It uses a process runtime
 with two workers and one client/manager per exclusively locked cache directory.
 
 Methods doing IO block. Call them from Kotlin's `Dispatchers.IO`; progress
@@ -73,6 +76,11 @@ build jobs and verifies ELF LOAD segment alignment of at least 16 KiB.
 Outputs are ignored under `ffi/generated/android/jniLibs`; package those
 libraries and `ffi/generated/kotlin` into the consuming Android project.
 ABI compilation and host fixtures do not qualify actual device playback.
+
+Run `./ffi/scripts/check-native-deps.sh` to verify the default facade and explicit
+Android native dependency graphs exclude archive/control crates. Both artifact
+build scripts require this check. Dependency exclusion is not a complete license
+review or device qualification.
 
 Run `CARGO_BUILD_JOBS=2 cargo test -p playback-gateway-ffi`. The host fixture
 uses a loopback BitTorrent seeder and exercises selection, seek/range bytes,

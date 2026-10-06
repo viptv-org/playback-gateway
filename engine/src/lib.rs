@@ -210,7 +210,7 @@ pub fn source_display_text(
     text[..end].to_owned()
 }
 
-#[cfg(feature = "torrent")]
+#[cfg(feature = "archive")]
 pub mod rar;
 #[cfg(feature = "torrent")]
 pub mod torrent;

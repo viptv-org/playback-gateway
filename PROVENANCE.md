@@ -19,9 +19,13 @@ preserved in [THIRD_PARTY/unrar-rs-LICENSE.txt](THIRD_PARTY/unrar-rs-LICENSE.txt
 It is a reader/extractor only. This repository provides no RAR writer or
 compression implementation.
 
-Inherited code and notices remain GPL-2.0-only. The combined in-process binary
-has an unresolved GPL-2.0-only/GPL-3.0-or-later distribution incompatibility;
-this checkpoint does not claim those licenses are compatible. The separate
+Inherited code and notices remain GPL-2.0-only. Archive-enabled in-process
+binaries have an unresolved GPL-2.0-only/GPL-3.0-or-later distribution
+incompatibility; these licenses are not claimed compatible. The engine's
+`archive` feature owns unrar-rs and remains enabled in the default gateway build.
+The selected-package native facade enables only `torrent`, excluding the archive
+extractor and its dependency from its normal build graph. That exclusion does not
+clear other dependency/license obligations or establish distribution readiness. The separate
 process architecture remains an alternative if distribution is revisited.
 UniFFI is pinned to the shared core's 0.29.4 binding generation pattern; its
 generated Kotlin and native ABI compilation are gateway artifacts, not Android
