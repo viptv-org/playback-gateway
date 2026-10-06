@@ -104,6 +104,7 @@ use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
     process::Stdio,
+    sync::atomic::{AtomicBool, Ordering},
     sync::Arc,
     time::{Duration, Instant},
 };

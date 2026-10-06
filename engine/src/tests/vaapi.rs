@@ -72,9 +72,11 @@ async fn software_hdr_conversion_retains_encoder_color_metadata() {
     manager.shutdown().await;
 }
 
-/// A Quick Sync host whose VPP tone maps: HDR10 decodes and tone maps on the
-/// GPU. When the GPU tone mapper fails for a source, the same reservation
-/// retries with CPU decode + GPU tone mapping, then CPU tone mapping + QSV encode.
+/// A Quick Sync host whose VPP tone maps: HDR plans directly on the qualified
+/// Quick Sync pipeline with CPU tone mapping inside it — VAAPI is never
+/// attempted while Quick Sync is proven, so a VAAPI device whose startup probe
+/// misrepresents real-stream capability cannot drag the start through failing
+/// pipelines. The scripted failure trigger never even fires.
 #[cfg(unix)]
 #[tokio::test]
 async fn failing_gpu_tone_mapping_keeps_a_qualified_qsv_encoder() {
@@ -122,32 +124,22 @@ async fn failing_gpu_tone_mapping_keeps_a_qualified_qsv_encoder() {
     assert_eq!(result.video_mode, "encode");
     let attempts = std::fs::read_to_string(ffmpeg.with_extension("attempts")).unwrap();
     let attempts: Vec<_> = attempts.lines().collect();
-    assert_eq!(attempts.len(), 3, "{attempts:?}");
-    // 1: VAAPI decode, VPP tone mapping, VAAPI encode on the QSV render node.
-    assert!(attempts[0].contains("-init_hw_device vaapi=viptv:/dev/dri/renderD128"));
-    assert!(attempts[0].contains("-hwaccel vaapi"));
-    assert!(attempts[0].contains(
-        "procamp_vaapi=b=16,tonemap_vaapi=format=nv12:t=bt709:m=bt709:p=bt709,scale_vaapi=w=1920:h=800:format=nv12"
-    ));
-    assert!(attempts[0].contains("-c:v h264_vaapi -profile:v main -level:v 4"));
-    // 2: CPU decode, uploaded P010, VPP tone mapping.
-    assert!(!attempts[1].contains("-hwaccel"));
-    assert!(attempts[1].contains("format=p010le,hwupload,procamp_vaapi"));
-    // 3: CPU tone mapping still retains the qualified Quick Sync encoder.
-    assert!(attempts[2].contains("zscale=transfer=linear"));
-    assert!(attempts[2].contains("h264_qsv"));
-    assert!(attempts[2].contains("-init_hw_device qsv=viptv,child_device=/dev/dri/renderD128"));
-    for attempt in &attempts {
-        assert!(
-            attempt.contains(
-                "setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709"
-            ),
-            "GPU HDR frames must carry SDR metadata: {attempt}"
-        );
-        assert!(!attempt.contains("-color_primaries"), "output color options must not request an automatic software format conversion: {attempt}");
-        assert!(attempt.contains("sidedata=mode=delete"));
-        assert!(attempt.contains("-c:a copy"));
-    }
+    // One attempt: CPU tone mapping retains the qualified Quick Sync encoder,
+    // and no VAAPI pipeline is ever started.
+    assert_eq!(attempts.len(), 1, "{attempts:?}");
+    assert!(attempts[0].contains("zscale=transfer=linear"));
+    assert!(attempts[0].contains("h264_qsv"));
+    assert!(attempts[0].contains("-init_hw_device qsv=viptv,child_device=/dev/dri/renderD128"));
+    assert!(!attempts[0].contains("-init_hw_device vaapi"));
+    assert!(
+        attempts[0].contains(
+            "setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709"
+        ),
+        "GPU HDR frames must carry SDR metadata: {attempts:?}"
+    );
+    assert!(!attempts[0].contains("-color_primaries"), "output color options must not request an automatic software format conversion: {attempts:?}");
+    assert!(attempts[0].contains("sidedata=mode=delete"));
+    assert!(attempts[0].contains("-c:a copy"));
     assert!(manager.stop(&result.id).await);
     manager.shutdown().await;
 }

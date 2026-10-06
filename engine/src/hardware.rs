@@ -43,11 +43,17 @@ impl Pipeline {
             Self::Software => "libx264",
         }
     }
+    /// The retry ladder for a failed pipeline. With Quick Sync proven, a
+    /// failing VAAPI pipeline moves straight to Quick Sync: hosts where VAAPI
+    /// passes its startup probe but fails on real streams (measured on Intel
+    /// UHD 630 + iHD) then pay one bounded retry, never the historical
+    /// VaapiDecode -> VaapiEncode -> QsvEncode walk with a below-realtime CPU
+    /// final rung. Without Quick Sync the historical ladder is kept.
     pub(super) fn fallback(self, qsv_available: bool) -> Option<Self> {
         match self {
             Self::QsvDecode => Some(Self::QsvEncode),
+            Self::VaapiDecode | Self::VaapiEncode if qsv_available => Some(Self::QsvDecode),
             Self::VaapiDecode => Some(Self::VaapiEncode),
-            Self::VaapiEncode if qsv_available => Some(Self::QsvEncode),
             Self::QsvEncode | Self::VaapiEncode => Some(Self::Software),
             _ => None,
         }
@@ -132,11 +138,19 @@ pub(super) fn plan(
     let decodable = hardware_decodable(video, interlaced);
     if hdr.is_some() {
         // CPU tone mapping of 4K HDR runs below realtime on a 6-core host;
-        // a GPU tone mapper is preferred over every CPU path.
+        // a GPU tone mapper is preferred over every CPU path. VPP tone
+        // mapping is VAAPI's unique capability, but it is only trusted when
+        // Quick Sync is absent: a VAAPI device that passes its startup probe
+        // yet fails on real streams (measured: Intel UHD 630 encode, iHD)
+        // otherwise drags every HDR start through a failing pipeline first.
+        // With QSV proven, HDR plans on Quick Sync and tone maps in software
+        // inside that pipeline.
         match tone_map(accel.vaapi, hdr) {
-            Some(ToneMap::Vpp) if decodable => return Pipeline::VaapiDecode,
-            Some(ToneMap::Vpp) => return Pipeline::VaapiEncode,
-            Some(ToneMap::Placebo) if accel.vaapi.encode => return Pipeline::VaapiEncode,
+            Some(ToneMap::Vpp) if decodable && !accel.qsv => return Pipeline::VaapiDecode,
+            Some(ToneMap::Vpp) if !accel.qsv => return Pipeline::VaapiEncode,
+            Some(ToneMap::Placebo) if !accel.qsv && accel.vaapi.encode => {
+                return Pipeline::VaapiEncode
+            }
             _ => {}
         }
         return if accel.qsv {
@@ -448,13 +462,23 @@ mod tests {
         );
         assert_eq!(
             Pipeline::VaapiEncode.fallback(true),
-            Some(Pipeline::QsvEncode)
+            Some(Pipeline::QsvDecode),
+            "a failing VAAPI pipeline retries on Quick Sync decode first"
+        );
+        assert_eq!(
+            Pipeline::QsvDecode
+                .fallback(true)
+                .and_then(|next| next.fallback(true)),
+            Some(Pipeline::Software)
         );
     }
 
     /// Production is Quick Sync plus the same device's VPP: SDR keeps the
-    /// measured QSV path, HDR10 moves to VAAPI decode + VPP tone mapping,
-    /// and HLG (unsupported by FFmpeg 5.1's tonemap_vaapi) stays on the CPU.
+    /// measured QSV path, HDR10 also plans on Quick Sync (VPP tone mapping is
+    /// only trusted when Quick Sync is absent — a VAAPI device whose startup
+    /// probe lies would otherwise drag every HDR start through a failing
+    /// pipeline), and HLG (unsupported by FFmpeg 5.1's tonemap_vaapi) stays on
+    /// the CPU chain inside the QSV pipeline.
     #[test]
     fn quick_sync_hosts_tone_map_hdr10_on_the_vpp_and_keep_sdr_unchanged() {
         let accel = Accel {
@@ -474,17 +498,17 @@ mod tests {
         assert_eq!(plan(false, accel, &hevc, None, false), Pipeline::QsvDecode);
         assert_eq!(
             plan(false, accel, &hevc, Some("smpte2084"), false),
-            Pipeline::VaapiDecode
+            Pipeline::QsvEncode,
+            "HDR never plans on VAAPI while Quick Sync is proven"
         );
-        // Undecodable on the GPU (AV1 on Gen 9.5) or interlaced: CPU decode,
-        // GPU tone mapping and encode.
+        // Undecodable on the GPU (AV1 on Gen 9.5) or interlaced: CPU decode.
         assert_eq!(
             plan(false, accel, &av1, Some("smpte2084"), false),
-            Pipeline::VaapiEncode
+            Pipeline::QsvEncode
         );
         assert_eq!(
             plan(false, accel, &hevc, Some("smpte2084"), true),
-            Pipeline::VaapiEncode
+            Pipeline::QsvEncode
         );
         assert_eq!(
             plan(false, accel, &hevc, Some("arib-std-b67"), false),
@@ -502,9 +526,22 @@ mod tests {
             Some(Pipeline::Software),
             "a failing GPU tone mapper ends on the proven software path"
         );
+        // A sole-VAAPI host (no Quick Sync) still plans HDR10 on the VPP.
+        let vaapi_only = Accel {
+            qsv: false,
+            vaapi: Vaapi {
+                encode: true,
+                tonemap: true,
+                placebo: false,
+            },
+        };
+        assert_eq!(
+            plan(false, vaapi_only, &hevc, Some("smpte2084"), false),
+            Pipeline::VaapiDecode
+        );
         let filter = vaapi_filter(
             Pipeline::VaapiDecode,
-            tone_map(accel.vaapi, Some("smpte2084")),
+            tone_map(vaapi_only.vaapi, Some("smpte2084")),
             &hevc,
             1920,
             1080,

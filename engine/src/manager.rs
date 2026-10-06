@@ -18,6 +18,10 @@ pub struct PlaybackManager {
     pub(super) qsv_ready: OnceCell<bool>,
     pub(super) vaapi_device: Option<PathBuf>,
     pub(super) vaapi_ready: OnceCell<hardware::Vaapi>,
+    /// A VAAPI pipeline that failed on a real stream downgrades VAAPI for the
+    /// process lifetime: later sessions plan straight onto the remaining GPU
+    /// path instead of paying the same failing pipeline first every time.
+    pub(super) vaapi_failed: AtomicBool,
     pub(super) cleanup_tasks: CleanupTasks,
 }
 pub struct SampleLimits {
@@ -112,6 +116,7 @@ impl PlaybackManager {
             qsv_ready: OnceCell::new(),
             vaapi_device,
             vaapi_ready: OnceCell::new(),
+            vaapi_failed: AtomicBool::new(false),
             cleanup_tasks: Arc::new(std::sync::Mutex::new(Vec::new())),
         });
         let weak = Arc::downgrade(&manager);
@@ -215,10 +220,22 @@ impl PlaybackManager {
     }
 
     pub(super) async fn accel(&self) -> hardware::Accel {
-        hardware::Accel {
+        let mut accel = hardware::Accel {
             qsv: self.qsv_available().await,
             vaapi: self.vaapi_available().await,
+        };
+        // A VAAPI pipeline that failed on a real stream is not retried for the
+        // process lifetime: the startup probe's claim is overridden by the
+        // observed failure, so later sessions plan straight onto Quick Sync.
+        if self.vaapi_failed.load(Ordering::Acquire) && accel.qsv {
+            accel.vaapi = hardware::Vaapi::default();
         }
+        accel
+    }
+    /// Record that a VAAPI pipeline failed on a real stream. Called when the
+    /// same session exhausts its VAAPI run; never un-sets for this process.
+    pub(super) fn note_vaapi_failure(&self) {
+        self.vaapi_failed.store(true, Ordering::Release);
     }
 
     pub fn acceleration_status(&self) -> &'static str {
