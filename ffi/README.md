@@ -67,7 +67,10 @@ The dependency emits peer addresses and torrent identifiers internally; it
 must not be allowed to write them to production logs. Gateway and FFI error
 surfaces expose static error variants and contain no source diagnostics.
 
-Generate committed Kotlin with `./ffi/scripts/build-bindings.sh`. Its runtime
+Generate committed Kotlin with `./ffi/scripts/build-bindings.sh` on Linux, with
+Python 3 available. The script resolves Cargo's configured target directory,
+including `CARGO_TARGET_DIR` and Cargo configuration, rather than assuming a
+repository-local target. Its runtime
 requires JNA (the generated binding imports `com.sun.jna`),
 as with the shared core's UniFFI output. Build Android libraries with
 `./ffi/scripts/build-android.sh`; set `ANDROID_NDK_HOME` for a different NDK.
