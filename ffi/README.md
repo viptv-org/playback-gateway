@@ -128,8 +128,11 @@ all three ABIs, checks dynamic dependencies against Android system libraries and
 preserves package licenses/notices. Missing workspace-root notices are retrieved
 from the dependency's recorded immutable upstream Git revision and checked
 against its Git blob hash. The bundle includes a checksum manifest, native ELF
-reports, package inventory and notices. It refuses missing/unverified license
-provenance. Import the bundle through the consumer's validator rather than
+reports, package inventory, locked source dependencies and notices. It also
+preserves installed NDK/LLVM and Rust standard-library supplier notices, which
+include build-only components; their presence does not claim all listed code is
+linked into the facade. It refuses missing/unverified license provenance.
+Import the bundle through the consumer's validator rather than
 copying unpinned libraries. Inventory and archive exclusion do not establish
 license compatibility or distribution clearance. ABI compilation and host
 fixtures do not qualify actual device loading or playback.

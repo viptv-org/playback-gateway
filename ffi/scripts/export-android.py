@@ -152,6 +152,29 @@ def inventory():
     return entries, "\n".join(notices), graphs
 
 
+def toolchain_notices(ndk, host):
+    rust = Path(command("rustc", "--print", "sysroot")) / "share/doc/rust"
+    sources = [
+        ("android-ndk", ndk, [ndk / "NOTICE", ndk / "NOTICE.toolchain"]),
+        ("android-llvm", ndk / "toolchains/llvm/prebuilt" / host,
+         [ndk / "toolchains/llvm/prebuilt" / host / "NOTICE"]),
+        ("rust-standard-library", rust,
+         [rust / "COPYRIGHT-library.html", *sorted((rust / "licenses").glob("*.txt"))]),
+    ]
+    entries, texts = [], []
+    for component, root, paths in sources:
+        if not paths:
+            raise RuntimeError("Missing build/runtime toolchain notices")
+        for path in paths:
+            if path.is_symlink() or not path.is_file() or path.stat().st_size > 4 * 1024 * 1024:
+                raise RuntimeError("Missing or unverified build/runtime toolchain notice")
+            data = path.read_bytes()
+            relative = path.relative_to(root).as_posix()
+            entries.append({"component": component, "path": relative, "sha256": sha256(data)})
+            texts.append(f"===== {component} / {relative} =====\n{data.decode('utf-8')}\n")
+    return entries, "\n".join(texts)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("destination", type=Path)
@@ -169,6 +192,7 @@ def main():
     host = "windows-x86_64" if os.name == "nt" else "darwin-x86_64" if os.uname().sysname == "Darwin" else "linux-x86_64"
     readelf = str(ndk / "toolchains/llvm/prebuilt" / host / "bin/llvm-readelf")
     dependencies, notices, graphs = inventory()
+    compiler_notices, compiler_text = toolchain_notices(ndk, host)
     proof = json.loads(Path("ffi/generated/android/build.json").read_text())
     if proof["revision"] != args.revision or proof["min_sdk"] != 24 or proof["abis"] != ABIS:
         raise RuntimeError("Native build source provenance does not match the immutable source revision")
@@ -201,9 +225,13 @@ def main():
         "features": ["torrent"], "archive_excluded": True, "distribution_cleared": False,
         "distribution_note": "GPL-2.0-only gateway code and Apache-2.0 dependencies require separate distribution review. Archive exclusion and notice preservation do not establish license compatibility.",
         "dependencies": dependencies, "elf": elf, "build": proof,
+        "toolchain_notices": compiler_notices,
+        "toolchain_notice_scope": "Installed build/runtime supplier notices include build-only components. This is not a claim that every listed component links into the facade.",
     }
     payload["THIRD_PARTY/native-dependencies.json"] = (json.dumps(report, indent=2, sort_keys=True) + "\n").encode()
     payload["THIRD_PARTY/native-NOTICES.txt"] = notices.encode()
+    payload["THIRD_PARTY/native-toolchain-NOTICES.txt"] = compiler_text.encode()
+    payload["THIRD_PARTY/native-Cargo.lock"] = Path("Cargo.lock").read_bytes()
     payload["THIRD_PARTY/rqbit-UPSTREAM.json"] = Path("third_party/rqbit/UPSTREAM.json").read_bytes()
     for abi, graph in graphs.items():
         # Cargo tree paths belong only in private build logs. Replace them with
