@@ -22,6 +22,24 @@ pub enum TorrentError {
     CallbacksUnsupported,
     #[error("Native startup deadline reached")]
     StartupTimeout,
+    #[error("Torrent network session deadline reached")]
+    SessionTimeout,
+    #[error("Torrent metadata deadline reached")]
+    MetadataTimeout,
+    #[error("Torrent cache preparation deadline reached")]
+    CachePreparationTimeout,
+    #[error("Torrent initialization deadline reached")]
+    InitializationTimeout,
+    #[error("Local stream preparation deadline reached")]
+    LoopbackTimeout,
+    #[error("Torrent network session unavailable")]
+    SessionUnavailable,
+    #[error("Torrent initialization failed")]
+    InitializationFailed,
+    #[error("Local stream unavailable")]
+    LoopbackUnavailable,
+    #[error("Previous torrent work is retiring")]
+    RetirementPending,
     #[error("Torrent exceeds payload budget")]
     PayloadLimit,
     #[error("Torrent storage unavailable")]
@@ -37,6 +55,15 @@ fn native_failure(reason: playback_engine::torrent::AcquisitionFailure) -> Torre
     use playback_engine::torrent::AcquisitionFailure as F;
     match reason {
         F::StartupTimeout => TorrentError::StartupTimeout,
+        F::SessionTimeout => TorrentError::SessionTimeout,
+        F::MetadataTimeout => TorrentError::MetadataTimeout,
+        F::CachePreparationTimeout => TorrentError::CachePreparationTimeout,
+        F::InitializationTimeout => TorrentError::InitializationTimeout,
+        F::LoopbackTimeout => TorrentError::LoopbackTimeout,
+        F::SessionUnavailable => TorrentError::SessionUnavailable,
+        F::InitializationFailed => TorrentError::InitializationFailed,
+        F::LoopbackUnavailable => TorrentError::LoopbackUnavailable,
+        F::RetirementPending => TorrentError::RetirementPending,
         F::PayloadLimit => TorrentError::PayloadLimit,
         F::StorageUnavailable => TorrentError::StorageUnavailable,
         F::CacheUnavailable => TorrentError::CacheUnavailable,
@@ -232,7 +259,11 @@ impl TorrentClient {
                 verified_size,
                 Duration::from_millis(remaining_budget_millis.into()),
             )
-            .map_err(|_| TorrentError::OperationFailed)?;
+            .map_err(|error| {
+                native_failure(
+                    playback_engine::torrent::AcquisitionFailure::from_safe_error(&error),
+                )
+            })?;
         Ok(Arc::new(TorrentAcquisition { acquisition }))
     }
     pub fn begin_selected_metainfo(
@@ -254,7 +285,11 @@ impl TorrentClient {
                 verified_size,
                 Duration::from_millis(remaining_budget_millis.into()),
             )
-            .map_err(|_| TorrentError::OperationFailed)?;
+            .map_err(|error| {
+                native_failure(
+                    playback_engine::torrent::AcquisitionFailure::from_safe_error(&error),
+                )
+            })?;
         Ok(Arc::new(TorrentAcquisition { acquisition }))
     }
     pub fn has_failed_settlement(&self) -> bool {

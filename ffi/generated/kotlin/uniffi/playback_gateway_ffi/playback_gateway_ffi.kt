@@ -2727,6 +2727,60 @@ sealed class TorrentException: kotlin.Exception() {
             get() = ""
     }
 
+    class SessionTimeout(
+        ) : TorrentException() {
+        override val message
+            get() = ""
+    }
+
+    class MetadataTimeout(
+        ) : TorrentException() {
+        override val message
+            get() = ""
+    }
+
+    class CachePreparationTimeout(
+        ) : TorrentException() {
+        override val message
+            get() = ""
+    }
+
+    class InitializationTimeout(
+        ) : TorrentException() {
+        override val message
+            get() = ""
+    }
+
+    class LoopbackTimeout(
+        ) : TorrentException() {
+        override val message
+            get() = ""
+    }
+
+    class SessionUnavailable(
+        ) : TorrentException() {
+        override val message
+            get() = ""
+    }
+
+    class InitializationFailed(
+        ) : TorrentException() {
+        override val message
+            get() = ""
+    }
+
+    class LoopbackUnavailable(
+        ) : TorrentException() {
+        override val message
+            get() = ""
+    }
+
+    class RetirementPending(
+        ) : TorrentException() {
+        override val message
+            get() = ""
+    }
+
     class PayloadLimit(
         ) : TorrentException() {
         override val message
@@ -2778,11 +2832,20 @@ public object FfiConverterTypeTorrentError : FfiConverterRustBuffer<TorrentExcep
             3 -> TorrentException.Stopped()
             4 -> TorrentException.CallbacksUnsupported()
             5 -> TorrentException.StartupTimeout()
-            6 -> TorrentException.PayloadLimit()
-            7 -> TorrentException.StorageUnavailable()
-            8 -> TorrentException.CacheUnavailable()
-            9 -> TorrentException.MetadataInvalid()
-            10 -> TorrentException.FileUnavailable()
+            6 -> TorrentException.SessionTimeout()
+            7 -> TorrentException.MetadataTimeout()
+            8 -> TorrentException.CachePreparationTimeout()
+            9 -> TorrentException.InitializationTimeout()
+            10 -> TorrentException.LoopbackTimeout()
+            11 -> TorrentException.SessionUnavailable()
+            12 -> TorrentException.InitializationFailed()
+            13 -> TorrentException.LoopbackUnavailable()
+            14 -> TorrentException.RetirementPending()
+            15 -> TorrentException.PayloadLimit()
+            16 -> TorrentException.StorageUnavailable()
+            17 -> TorrentException.CacheUnavailable()
+            18 -> TorrentException.MetadataInvalid()
+            19 -> TorrentException.FileUnavailable()
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
     }
@@ -2806,6 +2869,42 @@ public object FfiConverterTypeTorrentError : FfiConverterRustBuffer<TorrentExcep
                 4UL
             )
             is TorrentException.StartupTimeout -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is TorrentException.SessionTimeout -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is TorrentException.MetadataTimeout -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is TorrentException.CachePreparationTimeout -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is TorrentException.InitializationTimeout -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is TorrentException.LoopbackTimeout -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is TorrentException.SessionUnavailable -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is TorrentException.InitializationFailed -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is TorrentException.LoopbackUnavailable -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is TorrentException.RetirementPending -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
             )
@@ -2854,24 +2953,60 @@ public object FfiConverterTypeTorrentError : FfiConverterRustBuffer<TorrentExcep
                 buf.putInt(5)
                 Unit
             }
-            is TorrentException.PayloadLimit -> {
+            is TorrentException.SessionTimeout -> {
                 buf.putInt(6)
                 Unit
             }
-            is TorrentException.StorageUnavailable -> {
+            is TorrentException.MetadataTimeout -> {
                 buf.putInt(7)
                 Unit
             }
-            is TorrentException.CacheUnavailable -> {
+            is TorrentException.CachePreparationTimeout -> {
                 buf.putInt(8)
                 Unit
             }
-            is TorrentException.MetadataInvalid -> {
+            is TorrentException.InitializationTimeout -> {
                 buf.putInt(9)
                 Unit
             }
-            is TorrentException.FileUnavailable -> {
+            is TorrentException.LoopbackTimeout -> {
                 buf.putInt(10)
+                Unit
+            }
+            is TorrentException.SessionUnavailable -> {
+                buf.putInt(11)
+                Unit
+            }
+            is TorrentException.InitializationFailed -> {
+                buf.putInt(12)
+                Unit
+            }
+            is TorrentException.LoopbackUnavailable -> {
+                buf.putInt(13)
+                Unit
+            }
+            is TorrentException.RetirementPending -> {
+                buf.putInt(14)
+                Unit
+            }
+            is TorrentException.PayloadLimit -> {
+                buf.putInt(15)
+                Unit
+            }
+            is TorrentException.StorageUnavailable -> {
+                buf.putInt(16)
+                Unit
+            }
+            is TorrentException.CacheUnavailable -> {
+                buf.putInt(17)
+                Unit
+            }
+            is TorrentException.MetadataInvalid -> {
+                buf.putInt(18)
+                Unit
+            }
+            is TorrentException.FileUnavailable -> {
+                buf.putInt(19)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }

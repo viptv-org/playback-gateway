@@ -150,9 +150,13 @@ caller supplies its remaining monotonic startup budget; the engine captures one
 absolute deadline before validation and queueing and caps it at thirty seconds.
 Metadata, registry waits, initialization and endpoint creation share that deadline.
 
-`waitReady()` preserves closed failure variants for the startup deadline, full
-payload budget, measured storage, cache ownership, invalid metadata and exact-file
-selection. Other failures remain `OperationFailed`. These variants contain no
+`waitReady()` freezes the first observed failure across its competing deadline
+waiters. Deadline variants identify cache preparation, network session creation,
+metadata acquisition, torrent initialization or local endpoint publication.
+Session/initialization/endpoint failure, retiring work, payload admission,
+measured storage, cache ownership, invalid metadata and exact-file selection
+remain distinct. Early admission failures retain the same closed mapping.
+Other failures remain `OperationFailed`. These variants contain no
 source input or dependency diagnostics; the embedding application owns wording
 and recovery after joined retirement.
 

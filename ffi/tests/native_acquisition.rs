@@ -272,7 +272,7 @@ fn owned_ffi_metadata_wait_has_prehandle_cancel_and_one_total_budget() {
         .unwrap();
     assert!(matches!(
         b.wait_ready(),
-        Err(playback_gateway_ffi::TorrentError::StartupTimeout)
+        Err(playback_gateway_ffi::TorrentError::MetadataTimeout)
     ));
     assert!(started.elapsed() < Duration::from_millis(600));
     assert_eq!(b.cancel_and_wait().unwrap(), TorrentSettlement::Settled);

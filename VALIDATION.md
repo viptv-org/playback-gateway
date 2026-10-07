@@ -701,3 +701,16 @@ and its Kotlin/JNA/four-ABI/Range work are deferred, not completed by this resul
 Public/hostile swarms, clean-machine/physical hardware, signing and production
 rollback/cutover remain separate gates. No production access or deployment
 occurred; raw source/media URLs, credentials, argv, logs and captures stay private.
+# Native startup failure attribution — 2026-10-07
+
+The owned TCP regression connected a peer without receiving metadata and failed
+with `StartupTimeout` before the stage snapshot, then passed with
+`MetadataTimeout`. The locked workspace suite with engine/FFI owned-network
+fixture features passes 215 tests (56 opt-in tests ignored). Additional regressions
+distinguish blocked cache preparation and actual filesystem initialization,
+retain the first reason after joined retirement, and preserve bounded rolling
+cache/exact-file/independent-grant behavior. The FFI facade preserves these closed
+facts during admission and readiness; regenerated Kotlin exposes matching errors.
+No source, peer address or dependency exception text enters this error API.
+These fixtures qualify failure attribution and transport, not public swarms or
+Android decoded playback.

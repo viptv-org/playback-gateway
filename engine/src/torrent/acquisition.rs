@@ -16,6 +16,15 @@ pub enum AcquisitionStatus {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AcquisitionFailure {
     StartupTimeout,
+    SessionTimeout,
+    MetadataTimeout,
+    CachePreparationTimeout,
+    InitializationTimeout,
+    LoopbackTimeout,
+    SessionUnavailable,
+    InitializationFailed,
+    LoopbackUnavailable,
+    RetirementPending,
     PayloadLimit,
     StorageUnavailable,
     CacheUnavailable,
@@ -27,6 +36,10 @@ impl AcquisitionFailure {
     pub fn from_safe_error(error: &str) -> Self {
         match error {
             "Native startup timed out" => Self::StartupTimeout,
+            "Torrent session unavailable" => Self::SessionUnavailable,
+            "Torrent start failed" | "Torrent initialization failed" => Self::InitializationFailed,
+            "Torrent stream unavailable" => Self::LoopbackUnavailable,
+            "Native acquisition retiring" | "Native payload retiring" => Self::RetirementPending,
             "Torrent exceeds cache budget" => Self::PayloadLimit,
             "Torrent disk capacity reached" | "Torrent disk capacity unavailable" => {
                 Self::StorageUnavailable
@@ -59,6 +72,26 @@ struct AcquisitionControl {
     handle: Option<TorrentHandle>,
     io_tasks: Option<OwnedTasks>,
     failure: Option<AcquisitionFailure>,
+    phase: AcquisitionPhase,
+}
+#[derive(Clone, Copy)]
+enum AcquisitionPhase {
+    CachePreparation,
+    Session,
+    Metadata,
+    Initialization,
+    Loopback,
+}
+impl AcquisitionPhase {
+    fn timeout(self) -> AcquisitionFailure {
+        match self {
+            Self::CachePreparation => AcquisitionFailure::CachePreparationTimeout,
+            Self::Metadata => AcquisitionFailure::MetadataTimeout,
+            Self::Initialization => AcquisitionFailure::InitializationTimeout,
+            Self::Loopback => AcquisitionFailure::LoopbackTimeout,
+            Self::Session => AcquisitionFailure::SessionTimeout,
+        }
+    }
 }
 type PendingKey = (String, String);
 pub(super) struct PendingPayload {
@@ -72,6 +105,7 @@ pub(super) struct PendingPayload {
     reserved: std::sync::atomic::AtomicU64,
     // Reaping claims this fence under the registry lock before deleting files.
     reaping: AtomicBool,
+    phase: std::sync::Mutex<AcquisitionPhase>,
 }
 pub(super) struct PendingLease {
     pending: Arc<PendingPayload>,
@@ -194,6 +228,7 @@ impl TorrentManager {
                 handle: None,
                 io_tasks: None,
                 failure: None,
+                phase: AcquisitionPhase::CachePreparation,
             }),
             changed: Notify::new(),
         });
@@ -230,6 +265,11 @@ impl TorrentManager {
                         if worker.tasks.cancellation_token().is_cancelled()
                             || Deadline::now() >= deadline
                         {
+                            if Deadline::now() >= deadline {
+                                control
+                                    .failure
+                                    .get_or_insert(AcquisitionFailure::LoopbackTimeout);
+                            }
                             handle.stop();
                             control.status = AcquisitionStatus::Cancelled;
                         } else {
@@ -239,14 +279,14 @@ impl TorrentManager {
                     }
                     failed => {
                         let failure = match failed {
-                            Err(_) => AcquisitionFailure::StartupTimeout,
+                            Err(_) => worker.timeout_failure(),
                             Ok(Err(error)) => AcquisitionFailure::from_safe_error(&error),
                             Ok(Ok(_)) => unreachable!(),
                         };
                         // Leave ownership in the acquisition until joined cleanup.
                         let mut control = worker.control.lock().unwrap_or_else(|e| e.into_inner());
                         if control.status == AcquisitionStatus::Preparing {
-                            control.failure = Some(failure);
+                            control.failure.get_or_insert(failure);
                             control.status = AcquisitionStatus::Failed;
                         }
                         if let Some(lease) = &control.lease {
@@ -404,6 +444,36 @@ enum NativeInput {
     Metainfo(Vec<u8>),
 }
 impl AcquisitionState {
+    fn timeout_failure(&self) -> AcquisitionFailure {
+        let control = self.control.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(lease) = &control.lease {
+            if let Some(Err(error)) = lease
+                .pending
+                .result
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_ref()
+            {
+                return AcquisitionFailure::from_safe_error(error);
+            }
+        }
+        let phase = if matches!(control.phase, AcquisitionPhase::Loopback) {
+            control.phase
+        } else {
+            control
+                .lease
+                .as_ref()
+                .map(|lease| {
+                    *lease
+                        .pending
+                        .phase
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                })
+                .unwrap_or(control.phase)
+        };
+        phase.timeout()
+    }
     async fn prepare(
         self: &Arc<Self>,
         scope: String,
@@ -470,6 +540,7 @@ impl AcquisitionState {
                             folder: std::sync::Mutex::new(None),
                             reserved: std::sync::atomic::AtomicU64::new(0),
                             reaping: AtomicBool::new(false),
+                            phase: std::sync::Mutex::new(AcquisitionPhase::Session),
                         });
                         registry.pending.insert(key, pending.clone());
                         let producer = pending.clone();
@@ -552,10 +623,12 @@ impl AcquisitionState {
                 return Err("Native acquisition cancelled".into());
             }
             control.io_tasks = Some(io_tasks.clone());
+            control.phase = AcquisitionPhase::Loopback;
         }
         self.manager
             .make_native_handle(entry, self.selection_index(&lease), lease, io_tasks)
             .await
+            .map_err(|_| "Torrent stream unavailable".to_owned())
     }
     fn selection_index(&self, lease: &PendingLease) -> u32 {
         lease.pending.selection.file_index
@@ -584,6 +657,7 @@ impl PendingPayload {
         )
         .await
         .map_err(|_| "Torrent session unavailable")?;
+        *self.phase.lock().unwrap_or_else(|e| e.into_inner()) = AcquisitionPhase::Metadata;
         let input = match input {
             NativeInput::Magnet(s) => AddTorrent::from_url(s),
             NativeInput::Metainfo(b) => AddTorrent::from_bytes(b),
@@ -605,6 +679,7 @@ impl PendingPayload {
         let AddTorrentResponse::ListOnly(listed) = listed else {
             return Err("Native payload unavailable".into());
         };
+        *self.phase.lock().unwrap_or_else(|e| e.into_inner()) = AcquisitionPhase::CachePreparation;
         let files = describe_files(&listed.info)?;
         let size = files
             .iter()
@@ -680,6 +755,7 @@ impl PendingPayload {
             .as_ref()
             .map(|f| f.clone_box())
             .or(storage_factory);
+        *self.phase.lock().unwrap_or_else(|e| e.into_inner()) = AcquisitionPhase::Initialization;
         let response = session
             .add_torrent(
                 AddTorrent::from_bytes(listed.torrent_bytes.to_vec()),
@@ -788,11 +864,13 @@ impl TorrentAcquisition {
                 }
             }
             if timeout_at(self.state.deadline, changed).await.is_err() {
+                let failure = self.state.timeout_failure();
                 self.state
                     .control
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
-                    .failure = Some(AcquisitionFailure::StartupTimeout);
+                    .failure
+                    .get_or_insert(failure);
                 self.cancel();
                 return Err("Native startup timed out".into());
             }
@@ -1245,9 +1323,87 @@ mod tests {
             .unwrap();
         assert!(acquisition.wait_ready().await.is_err());
         assert!(entered.elapsed() < Duration::from_millis(450));
+        assert_eq!(
+            format!("{:?}", acquisition.failure_reason()),
+            "Some(MetadataTimeout)",
+            "a connected peer that never supplies metadata must retain the actual failed stage"
+        );
         assert_eq!(acquisition.cancel_and_wait().await, Settlement::Settled);
         drop(socket);
         manager.reap().await.unwrap();
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn blocked_registry_timeout_is_cache_preparation_not_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let peer = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let manager = manager(temp.path().join("cache"), peer.local_addr().unwrap());
+        let lock = manager.inner.state.lock().await;
+        let hash = "1111111111111111111111111111111111111111".to_owned();
+        let acquisition = manager
+            .begin_native_selected_magnet(
+                "owned".into(),
+                format!("magnet:?xt=urn:btih:{hash}"),
+                hash,
+                0,
+                1,
+                Duration::from_millis(100),
+            )
+            .unwrap();
+        assert!(acquisition.wait_ready().await.is_err());
+        assert_eq!(
+            acquisition.failure_reason(),
+            Some(AcquisitionFailure::CachePreparationTimeout)
+        );
+        drop(lock);
+        assert_eq!(acquisition.cancel_and_wait().await, Settlement::Settled);
+        assert_eq!(
+            acquisition.failure_reason(),
+            Some(AcquisitionFailure::CachePreparationTimeout)
+        );
+        manager.reap().await.unwrap();
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn blocked_storage_timeout_retains_initialization_stage_through_join() {
+        let temp = tempfile::tempdir().unwrap();
+        let peer = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let manager = manager(temp.path().join("cache"), peer.local_addr().unwrap());
+        let gate = Arc::new(StorageGate::default());
+        let _release = ReleaseStorage(gate.clone());
+        *manager.inner.native_storage_factory.lock().unwrap() = Some(Factory(gate.clone()).boxed());
+        let bytes = metainfo();
+        let hash = vet_native_metainfo(&bytes, None, 0, Some(1))
+            .unwrap()
+            .info_hash_hex();
+        let acquisition = manager
+            .begin_native_selected_metainfo(
+                "owned".into(),
+                bytes,
+                hash,
+                0,
+                1,
+                Duration::from_millis(300),
+            )
+            .unwrap();
+        timeout(Duration::from_secs(2), async {
+            while !gate.active.load(Ordering::Acquire) {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(acquisition.wait_ready().await.is_err());
+        assert_eq!(
+            acquisition.failure_reason(),
+            Some(AcquisitionFailure::InitializationTimeout)
+        );
+        gate.release();
+        assert_eq!(acquisition.cancel_and_wait().await, Settlement::Settled);
+        assert_eq!(
+            acquisition.failure_reason(),
+            Some(AcquisitionFailure::InitializationTimeout)
+        );
+        manager.reap().await.unwrap();
+        assert_eq!(manager.inner.state.lock().await.reserved, 0);
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn unresolved_reader_receipt_poison_is_static_and_keeps_full_reservation() {
