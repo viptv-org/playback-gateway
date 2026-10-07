@@ -104,11 +104,25 @@ repository-local target. Its runtime
 requires JNA (the generated binding imports `com.sun.jna`),
 as with the shared core's UniFFI output. Build Android libraries with
 `./ffi/scripts/build-android.sh`; set `ANDROID_NDK_HOME` for a different NDK.
-The script builds armeabi-v7a, arm64-v8a, x86 and x86_64 at API 23 with two
-build jobs and verifies ELF LOAD segment alignment of at least 16 KiB.
-Outputs are ignored under `ffi/generated/android/jniLibs`; package those
-libraries and `ffi/generated/kotlin` into the consuming Android project.
-ABI compilation and host fixtures do not qualify actual device playback.
+The script builds armeabi-v7a, arm64-v8a and x86_64 at API 24 with one default
+build job and verifies ELF LOAD segment alignment of at least 16 KiB. It requires
+a clean committed tree and records its source revision, features and library
+checksums in `ffi/generated/android/build.json`. Native builds use reviewed
+alignment-only Rust flags; unexpected custom flags are refused. Outputs are
+ignored under `ffi/generated/android`.
+
+Export a complete checked consumer bundle with
+`python3 ffi/scripts/export-android.py ARTIFACT_DIRECTORY FULL_SOURCE_SHA`.
+The exporter matches the source stamp, inventories normal/build dependencies for
+all three ABIs, checks dynamic dependencies against Android system libraries and
+preserves package licenses/notices. Missing workspace-root notices are retrieved
+from the dependency's recorded immutable upstream Git revision and checked
+against its Git blob hash. The bundle includes a checksum manifest, native ELF
+reports, package inventory and notices. It refuses missing/unverified license
+provenance. Import the bundle through the consumer's validator rather than
+copying unpinned libraries. Inventory and archive exclusion do not establish
+license compatibility or distribution clearance. ABI compilation and host
+fixtures do not qualify actual device loading or playback.
 
 ## Owned strict selected acquisitions
 
