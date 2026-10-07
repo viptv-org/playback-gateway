@@ -106,6 +106,8 @@ struct ManagerInner {
     acquisition_owners: std::sync::Mutex<Vec<OwnedTasks>>,
     #[cfg(all(test, feature = "test-network-policy"))]
     native_storage_factory: std::sync::Mutex<Option<librqbit::storage::BoxStorageFactory>>,
+    #[cfg(all(test, feature = "test-network-policy"))]
+    native_available_bytes: std::sync::atomic::AtomicU64,
 }
 #[derive(Default)]
 struct ManagerState {
@@ -214,6 +216,8 @@ impl TorrentManager {
                 acquisition_owners: std::sync::Mutex::new(Vec::new()),
                 #[cfg(all(test, feature = "test-network-policy"))]
                 native_storage_factory: std::sync::Mutex::new(None),
+                #[cfg(all(test, feature = "test-network-policy"))]
+                native_available_bytes: std::sync::atomic::AtomicU64::new(u64::MAX),
             }),
         })
     }

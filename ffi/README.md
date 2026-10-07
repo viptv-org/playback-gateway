@@ -91,6 +91,16 @@ range reads complete or are cancelled. Reuse one `TorrentClient` for a cache dir
 is refused by the exclusive cache lock. HTTP access is limited to loopback,
 uses a random capability token, and closes when the lease stops.
 
+Strict native acquisitions measure available filesystem space before allocating
+payload storage and check it against the full aggregate reservation, including
+unselected files and retiring work. Materialized bytes can be charged again
+against current free space; this conservative admission check does not promise
+an exact filesystem ceiling or reserve space against unrelated writers. Shared
+payload avoids an additional charge only through the manager's existing proven
+sharing registry. A refused candidate leaves current grant authority intact.
+Native admission fails closed on platforms without a measured disk adapter;
+the Unix adapter covers Android and the host fixture platform.
+
 If the embedding process enables Rust tracing, configure the target prefix
 `librqbit=off` (including its underscore-prefixed companion crate targets).
 The dependency emits peer addresses and torrent identifiers internally; it

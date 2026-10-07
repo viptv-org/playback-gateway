@@ -555,12 +555,30 @@ impl PendingPayload {
             .iter()
             .try_fold(0u64, |n, f| n.checked_add(f.size))
             .ok_or("Torrent size overflow")?;
+        let disk_manager = manager.inner.clone();
+        let available = owned_fs(&self.tasks, move || {
+            native_available_disk_bytes(&disk_manager.config.cache_dir)
+        })
+        .await?;
+        #[cfg(all(test, feature = "test-network-policy"))]
+        let available = available.min(manager.inner.native_available_bytes.load(Ordering::Acquire));
         {
             let mut registry = manager.inner.state.lock().await;
             if size > manager.inner.config.max_bytes
                 || registry.reserved.saturating_add(size) > manager.inner.config.max_bytes
             {
                 return Err("Torrent exceeds cache budget".into());
+            }
+            // Full reservations include unselected files, sparse/unwritten
+            // payload and retiring work. Charging materialized bytes again is
+            // conservative: filesystem free space alone cannot prove room for
+            // every previously admitted writer's remaining allocation.
+            if registry
+                .reserved
+                .checked_add(size)
+                .is_none_or(|sum| sum > available)
+            {
+                return Err("Torrent disk capacity reached".into());
             }
             if self.tasks.cancellation_token().is_cancelled() {
                 return Err("Native payload cancelled".into());
@@ -636,6 +654,30 @@ impl PendingPayload {
             handles: std::sync::Mutex::new(HashMap::new()),
         }))
     }
+}
+
+#[cfg(unix)]
+fn native_available_disk_bytes(path: &std::path::Path) -> Result<u64, String> {
+    use std::os::unix::ffi::OsStrExt;
+    let path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| "Torrent disk capacity unavailable")?;
+    let mut facts = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    // statvfs writes the complete output structure on success; the private
+    // cache path is a nul-terminated CString retained for the syscall.
+    if unsafe { libc::statvfs(path.as_ptr(), facts.as_mut_ptr()) } != 0 {
+        return Err("Torrent disk capacity unavailable".into());
+    }
+    let facts = unsafe { facts.assume_init() };
+    (facts.f_bavail as u64)
+        .checked_mul(facts.f_frsize as u64)
+        .ok_or_else(|| "Torrent disk capacity unavailable".into())
+}
+
+#[cfg(not(unix))]
+fn native_available_disk_bytes(_path: &std::path::Path) -> Result<u64, String> {
+    // Native admission fails closed when this platform has no measured disk
+    // adapter. Legacy generic torrent paths keep their existing behavior.
+    Err("Torrent disk capacity unavailable".into())
 }
 impl TorrentAcquisition {
     pub fn status(&self) -> AcquisitionStatus {
@@ -840,6 +882,86 @@ mod tests {
             vec![owned],
         )
         .unwrap()
+    }
+    fn multi_file_metainfo(name: &str, unselected_size: u64) -> Vec<u8> {
+        let total = 1 + unselected_size;
+        let pieces = total.div_ceil(16_777_216);
+        let mut bytes = format!(
+            "d4:infod5:filesld6:lengthi1e4:pathl9:owned.mp4eed6:lengthi{unselected_size}e4:pathl10:unused.bineee4:name{}:{name}12:piece lengthi16777216e6:pieces{}:",
+            name.len(), pieces * 20
+        ).into_bytes();
+        bytes.extend(std::iter::repeat_n(7, (pieces * 20) as usize));
+        bytes.extend_from_slice(b"ee");
+        bytes
+    }
+    fn begin_fixture(manager: &TorrentManager, bytes: Vec<u8>) -> TorrentAcquisition {
+        let hash = vet_native_metainfo(&bytes, None, 0, Some(1))
+            .unwrap()
+            .info_hash_hex();
+        manager
+            .begin_native_selected_metainfo("owned".into(), bytes, hash, 0, 1, READ_TIMEOUT)
+            .unwrap()
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_disk_fact_and_full_unselected_payload_refuse_before_storage_allocation() {
+        let temp = tempfile::tempdir().unwrap();
+        let peer = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let manager = manager(temp.path().join("cache"), peer.local_addr().unwrap());
+        manager
+            .inner
+            .native_available_bytes
+            .store(1, Ordering::Release);
+        let acquisition = begin_fixture(&manager, multi_file_metainfo("owned", 1));
+        assert!(acquisition.wait_ready().await.is_err());
+        assert_eq!(acquisition.cancel_and_wait().await, Settlement::Settled);
+        assert_eq!(manager.inner.state.lock().await.reserved, 0);
+        assert!(native_available_disk_bytes(&manager.inner.config.cache_dir).unwrap() > 0);
+        manager.reap().await.unwrap();
+        let oversized = begin_fixture(
+            &manager,
+            multi_file_metainfo("oversized", manager.inner.config.max_bytes),
+        );
+        assert!(oversized.wait_ready().await.is_err());
+        assert_eq!(oversized.cancel_and_wait().await, Settlement::Settled);
+        assert_eq!(manager.inner.state.lock().await.reserved, 0);
+        manager.reap().await.unwrap();
+        assert!(std::fs::read_dir(&manager.inner.config.cache_dir)
+            .unwrap()
+            .all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("torrent-")));
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_shared_payload_charges_once_and_candidate_disk_failure_preserves_outgoing() {
+        let temp = tempfile::tempdir().unwrap();
+        let peer = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let manager = manager(temp.path().join("cache"), peer.local_addr().unwrap());
+        manager
+            .inner
+            .native_available_bytes
+            .store(3, Ordering::Release);
+        let outgoing = begin_fixture(&manager, multi_file_metainfo("shared", 1));
+        let outgoing_handle = outgoing.wait_ready().await.unwrap();
+        assert_eq!(manager.inner.state.lock().await.reserved, 2);
+        let same = begin_fixture(&manager, multi_file_metainfo("shared", 1));
+        let same_handle = same.wait_ready().await.unwrap();
+        assert_eq!(manager.inner.state.lock().await.reserved, 2);
+        let candidate = begin_fixture(&manager, multi_file_metainfo("candidate", 1));
+        assert!(candidate.wait_ready().await.is_err());
+        assert_eq!(candidate.cancel_and_wait().await, Settlement::Settled);
+        assert!(!outgoing_handle.status().stopped);
+        assert!(!same_handle.status().stopped);
+        assert_eq!(manager.inner.state.lock().await.reserved, 2);
+        assert_eq!(outgoing.cancel_and_wait().await, Settlement::Settled);
+        assert!(!same_handle.status().stopped);
+        assert_eq!(manager.inner.state.lock().await.reserved, 2);
+        assert_eq!(same.cancel_and_wait().await, Settlement::Settled);
+        drop(outgoing_handle);
+        drop(same_handle);
+        manager.reap().await.unwrap();
+        assert_eq!(manager.inner.state.lock().await.reserved, 0);
     }
     #[tokio::test]
     async fn cancel_before_first_poll_never_creates_cache_or_publishes_a_handle() {
