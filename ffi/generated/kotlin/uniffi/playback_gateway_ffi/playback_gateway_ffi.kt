@@ -2721,6 +2721,42 @@ sealed class TorrentException: kotlin.Exception() {
             get() = ""
     }
 
+    class StartupTimeout(
+        ) : TorrentException() {
+        override val message
+            get() = ""
+    }
+
+    class PayloadLimit(
+        ) : TorrentException() {
+        override val message
+            get() = ""
+    }
+
+    class StorageUnavailable(
+        ) : TorrentException() {
+        override val message
+            get() = ""
+    }
+
+    class CacheUnavailable(
+        ) : TorrentException() {
+        override val message
+            get() = ""
+    }
+
+    class MetadataInvalid(
+        ) : TorrentException() {
+        override val message
+            get() = ""
+    }
+
+    class FileUnavailable(
+        ) : TorrentException() {
+        override val message
+            get() = ""
+    }
+
 
     companion object ErrorHandler : UniffiRustCallStatusErrorHandler<TorrentException> {
         override fun lift(error_buf: RustBuffer.ByValue): TorrentException = FfiConverterTypeTorrentError.lift(error_buf)
@@ -2741,6 +2777,12 @@ public object FfiConverterTypeTorrentError : FfiConverterRustBuffer<TorrentExcep
             2 -> TorrentException.OperationFailed()
             3 -> TorrentException.Stopped()
             4 -> TorrentException.CallbacksUnsupported()
+            5 -> TorrentException.StartupTimeout()
+            6 -> TorrentException.PayloadLimit()
+            7 -> TorrentException.StorageUnavailable()
+            8 -> TorrentException.CacheUnavailable()
+            9 -> TorrentException.MetadataInvalid()
+            10 -> TorrentException.FileUnavailable()
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
     }
@@ -2763,6 +2805,30 @@ public object FfiConverterTypeTorrentError : FfiConverterRustBuffer<TorrentExcep
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
             )
+            is TorrentException.StartupTimeout -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is TorrentException.PayloadLimit -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is TorrentException.StorageUnavailable -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is TorrentException.CacheUnavailable -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is TorrentException.MetadataInvalid -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is TorrentException.FileUnavailable -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
         }
     }
 
@@ -2782,6 +2848,30 @@ public object FfiConverterTypeTorrentError : FfiConverterRustBuffer<TorrentExcep
             }
             is TorrentException.CallbacksUnsupported -> {
                 buf.putInt(4)
+                Unit
+            }
+            is TorrentException.StartupTimeout -> {
+                buf.putInt(5)
+                Unit
+            }
+            is TorrentException.PayloadLimit -> {
+                buf.putInt(6)
+                Unit
+            }
+            is TorrentException.StorageUnavailable -> {
+                buf.putInt(7)
+                Unit
+            }
+            is TorrentException.CacheUnavailable -> {
+                buf.putInt(8)
+                Unit
+            }
+            is TorrentException.MetadataInvalid -> {
+                buf.putInt(9)
+                Unit
+            }
+            is TorrentException.FileUnavailable -> {
+                buf.putInt(10)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }

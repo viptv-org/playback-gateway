@@ -136,7 +136,7 @@ fn owned_ffi_acquisitions_share_payload_and_retire_independent_byte_authority() 
             seed.bytes.clone(),
             seed.hash.clone(),
             seed.selected,
-            90_000,
+            Some(90_000),
             30_000,
         )
         .unwrap();
@@ -145,7 +145,7 @@ fn owned_ffi_acquisitions_share_payload_and_retire_independent_byte_authority() 
             seed.bytes.clone(),
             seed.hash.clone(),
             seed.selected,
-            90_000,
+            Some(90_000),
             30_000,
         )
         .unwrap();
@@ -255,7 +255,7 @@ fn owned_ffi_metadata_wait_has_prehandle_cancel_and_one_total_budget() {
             format!("magnet:?xt=urn:btih:{hash}"),
             hash.clone(),
             0,
-            1,
+            Some(1),
             30_000,
         )
         .unwrap();
@@ -268,9 +268,12 @@ fn owned_ffi_metadata_wait_has_prehandle_cancel_and_one_total_budget() {
     client.reap().unwrap();
     let started = Instant::now();
     let b = client
-        .begin_selected(format!("magnet:?xt=urn:btih:{hash}"), hash, 0, 1, 250)
+        .begin_selected(format!("magnet:?xt=urn:btih:{hash}"), hash, 0, Some(1), 250)
         .unwrap();
-    assert!(b.wait_ready().is_err());
+    assert!(matches!(
+        b.wait_ready(),
+        Err(playback_gateway_ffi::TorrentError::StartupTimeout)
+    ));
     assert!(started.elapsed() < Duration::from_millis(600));
     assert_eq!(b.cancel_and_wait().unwrap(), TorrentSettlement::Settled);
     drop(a);
@@ -293,7 +296,7 @@ fn missing_piece_native_and_http_body_reads_are_cancelled_and_joined() {
             seed.bytes.clone(),
             seed.hash.clone(),
             seed.selected,
-            90_000,
+            Some(90_000),
             30_000,
         )
         .unwrap();
@@ -339,7 +342,7 @@ fn late_foreign_handle_return_has_no_bytes_and_remains_charged_until_disposal() 
             seed.bytes.clone(),
             seed.hash.clone(),
             seed.selected,
-            90_000,
+            Some(90_000),
             30_000,
         )
         .unwrap();
@@ -373,4 +376,35 @@ fn late_foreign_handle_return_has_no_bytes_and_remains_charged_until_disposal() 
     drop(late);
     client.reap().unwrap();
     assert_eq!(payloads(), 0);
+}
+
+#[test]
+fn native_ffi_retains_full_payload_limit_including_unselected_files() {
+    let cache = tempfile::tempdir().unwrap();
+    let peer = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let client = TorrentClient::new_native_owned(
+        cache.path().join("cache").to_str().unwrap().into(),
+        256 * 1024 * 1024,
+        vec![peer.local_addr().unwrap().to_string()],
+    )
+    .unwrap();
+    // A tiny selected file cannot authorize the unselected full-torrent reservation.
+    let mut bytes = b"d4:infod5:filesld6:lengthi1e4:pathl5:a.mkveed6:lengthi268435456e4:pathl5:b.mkveee4:name5:owned12:piece lengthi16777216e6:pieces340:".to_vec();
+    bytes.extend([7; 340]);
+    bytes.extend_from_slice(b"ee");
+    let hash = playback_engine::torrent::vet_native_metainfo(&bytes, None, 0, Some(1))
+        .unwrap()
+        .info_hash_hex();
+    let acquisition = client
+        .begin_selected_metainfo(bytes, hash, 0, Some(1), 30_000)
+        .unwrap();
+    assert!(matches!(
+        acquisition.wait_ready(),
+        Err(playback_gateway_ffi::TorrentError::PayloadLimit)
+    ));
+    assert_eq!(
+        acquisition.cancel_and_wait().unwrap(),
+        TorrentSettlement::Settled
+    );
+    client.reap().unwrap();
 }

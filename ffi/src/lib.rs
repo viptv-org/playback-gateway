@@ -20,6 +20,30 @@ pub enum TorrentError {
     Stopped,
     #[error("Strict handles require status polling")]
     CallbacksUnsupported,
+    #[error("Native startup deadline reached")]
+    StartupTimeout,
+    #[error("Torrent exceeds payload budget")]
+    PayloadLimit,
+    #[error("Torrent storage unavailable")]
+    StorageUnavailable,
+    #[error("Torrent cache unavailable")]
+    CacheUnavailable,
+    #[error("Native metadata invalid")]
+    MetadataInvalid,
+    #[error("Selected torrent file unavailable")]
+    FileUnavailable,
+}
+fn native_failure(reason: playback_engine::torrent::AcquisitionFailure) -> TorrentError {
+    use playback_engine::torrent::AcquisitionFailure as F;
+    match reason {
+        F::StartupTimeout => TorrentError::StartupTimeout,
+        F::PayloadLimit => TorrentError::PayloadLimit,
+        F::StorageUnavailable => TorrentError::StorageUnavailable,
+        F::CacheUnavailable => TorrentError::CacheUnavailable,
+        F::MetadataInvalid => TorrentError::MetadataInvalid,
+        F::FileUnavailable => TorrentError::FileUnavailable,
+        F::OperationFailed => TorrentError::OperationFailed,
+    }
 }
 #[derive(Clone, uniffi::Record)]
 pub struct TorrentOptions {
@@ -96,7 +120,11 @@ impl TorrentAcquisition {
     pub fn wait_ready(&self) -> Result<Arc<TorrentHandle>, TorrentError> {
         let handle = runtime()?
             .block_on(self.acquisition.wait_ready())
-            .map_err(|_| TorrentError::OperationFailed)?;
+            .map_err(|error| {
+                native_failure(self.acquisition.failure_reason().unwrap_or_else(|| {
+                    playback_engine::torrent::AcquisitionFailure::from_safe_error(&error)
+                }))
+            })?;
         Ok(Arc::new(TorrentHandle {
             handle,
             callback: Mutex::new(None),

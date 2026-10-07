@@ -12,6 +12,37 @@ pub enum AcquisitionStatus {
     Failed,
     SettlementFailed,
 }
+/// Closed observable facts; dependency diagnostics and source data never cross this boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AcquisitionFailure {
+    StartupTimeout,
+    PayloadLimit,
+    StorageUnavailable,
+    CacheUnavailable,
+    MetadataInvalid,
+    FileUnavailable,
+    OperationFailed,
+}
+impl AcquisitionFailure {
+    pub fn from_safe_error(error: &str) -> Self {
+        match error {
+            "Native startup timed out" => Self::StartupTimeout,
+            "Torrent exceeds cache budget" => Self::PayloadLimit,
+            "Torrent disk capacity reached" | "Torrent disk capacity unavailable" => {
+                Self::StorageUnavailable
+            }
+            "Torrent settlement failed"
+            | "Torrent cache unavailable"
+            | "Torrent cache lock unavailable"
+            | "Torrent cache already in use"
+            | "Torrent cache cleanup failed"
+            | "Torrent cache permissions unavailable" => Self::CacheUnavailable,
+            "Invalid native metadata" | "Invalid native metainfo" => Self::MetadataInvalid,
+            "Native exact selection denied" => Self::FileUnavailable,
+            _ => Self::OperationFailed,
+        }
+    }
+}
 pub struct TorrentAcquisition {
     state: Arc<AcquisitionState>,
 }
@@ -27,6 +58,7 @@ struct AcquisitionControl {
     lease: Option<Arc<PendingLease>>,
     handle: Option<TorrentHandle>,
     io_tasks: Option<OwnedTasks>,
+    failure: Option<AcquisitionFailure>,
 }
 type PendingKey = (String, String);
 pub(super) struct PendingPayload {
@@ -161,6 +193,7 @@ impl TorrentManager {
                 lease: None,
                 handle: None,
                 io_tasks: None,
+                failure: None,
             }),
             changed: Notify::new(),
         });
@@ -204,10 +237,16 @@ impl TorrentManager {
                             control.status = AcquisitionStatus::Ready;
                         }
                     }
-                    _ => {
+                    failed => {
+                        let failure = match failed {
+                            Err(_) => AcquisitionFailure::StartupTimeout,
+                            Ok(Err(error)) => AcquisitionFailure::from_safe_error(&error),
+                            Ok(Ok(_)) => unreachable!(),
+                        };
                         // Leave ownership in the acquisition until joined cleanup.
                         let mut control = worker.control.lock().unwrap_or_else(|e| e.into_inner());
                         if control.status == AcquisitionStatus::Preparing {
+                            control.failure = Some(failure);
                             control.status = AcquisitionStatus::Failed;
                         }
                         if let Some(lease) = &control.lease {
@@ -696,6 +735,13 @@ fn native_available_disk_bytes(_path: &std::path::Path) -> Result<u64, String> {
     Err("Torrent disk capacity unavailable".into())
 }
 impl TorrentAcquisition {
+    pub fn failure_reason(&self) -> Option<AcquisitionFailure> {
+        self.state
+            .control
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .failure
+    }
     pub fn status(&self) -> AcquisitionStatus {
         if self.state.manager.has_failed_settlement() {
             return AcquisitionStatus::SettlementFailed;
@@ -727,6 +773,11 @@ impl TorrentAcquisition {
                 }
             }
             if timeout_at(self.state.deadline, changed).await.is_err() {
+                self.state
+                    .control
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .failure = Some(AcquisitionFailure::StartupTimeout);
                 self.cancel();
                 return Err("Native startup timed out".into());
             }

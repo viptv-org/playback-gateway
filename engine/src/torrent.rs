@@ -3,7 +3,7 @@
 //! A process manager owns independent per-scope sessions and a shared cache budget.
 use crate::torrent_stream::LoopbackStream;
 mod acquisition;
-pub use acquisition::{AcquisitionStatus, TorrentAcquisition};
+pub use acquisition::{AcquisitionFailure, AcquisitionStatus, TorrentAcquisition};
 use acquisition::{PendingLease, PendingPayload};
 pub use librqbit::native_metainfo::{NativeMetainfo, NativeSelection};
 use librqbit::network_policy::NetworkPolicy;

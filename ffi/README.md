@@ -150,6 +150,12 @@ caller supplies its remaining monotonic startup budget; the engine captures one
 absolute deadline before validation and queueing and caps it at thirty seconds.
 Metadata, registry waits, initialization and endpoint creation share that deadline.
 
+`waitReady()` preserves closed failure variants for the startup deadline, full
+payload budget, measured storage, cache ownership, invalid metadata and exact-file
+selection. Other failures remain `OperationFailed`. These variants contain no
+source input or dependency diagnostics; the embedding application owns wording
+and recovery after joined retirement.
+
 `verifiedSize` is nullable. A supplied positive size must match the exact
 authorized file in vetted metadata. Without a size, canonical v1 metadata must
 resolve that explicit index to a positive length before storage allocation;
