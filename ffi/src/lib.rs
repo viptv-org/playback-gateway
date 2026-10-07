@@ -332,6 +332,9 @@ impl TorrentClient {
 }
 #[uniffi::export]
 impl TorrentHandle {
+    pub fn metadata_file_count(&self) -> u32 {
+        self.handle.metadata_file_count()
+    }
     pub fn files(&self) -> Vec<TorrentFile> {
         self.handle
             .files()

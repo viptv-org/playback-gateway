@@ -949,6 +949,7 @@ mod tests {
             .unwrap();
         let first = unknown.wait_ready().await.unwrap();
         assert_eq!(first.files()[0].size, 1);
+        assert_eq!(first.metadata_file_count(), 2);
         assert_eq!(manager.inner.state.lock().await.reserved, 18);
         let known = manager
             .begin_native_selected_metainfo("owned".into(), bytes, hash, 0, Some(1), READ_TIMEOUT)
@@ -963,6 +964,31 @@ mod tests {
         drop(second);
         drop(unknown);
         drop(known);
+        manager.reap().await.unwrap();
+        assert_eq!(manager.inner.state.lock().await.reserved, 0);
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn unknown_size_nonzero_index_retains_real_metadata_count_without_unselected_lengths() {
+        let temp = tempfile::tempdir().unwrap();
+        let peer = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let manager = manager(temp.path().join("cache"), peer.local_addr().unwrap());
+        let bytes = multi_file_metainfo("owned", 17);
+        let hash = vet_native_metainfo(&bytes, None, 1, None)
+            .unwrap()
+            .info_hash_hex();
+        let acquisition = manager
+            .begin_native_selected_metainfo("owned".into(), bytes, hash, 1, None, READ_TIMEOUT)
+            .unwrap();
+        let handle = acquisition.wait_ready().await.unwrap();
+        assert_eq!(handle.files().len(), 1);
+        assert_eq!(handle.files()[0].index, 1);
+        assert_eq!(handle.files()[0].size, 17);
+        assert_eq!(handle.metadata_file_count(), 2);
+        assert!(handle.stream_url(0).is_err());
+        assert_eq!(manager.inner.state.lock().await.reserved, 18);
+        assert_eq!(acquisition.cancel_and_wait().await, Settlement::Settled);
+        drop(handle);
+        drop(acquisition);
         manager.reap().await.unwrap();
         assert_eq!(manager.inner.state.lock().await.reserved, 0);
     }

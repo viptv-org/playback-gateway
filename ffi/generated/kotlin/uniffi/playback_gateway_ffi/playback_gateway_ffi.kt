@@ -783,6 +783,8 @@ internal open class UniffiVTableCallbackInterfaceTorrentProgressListener(
 
 
 
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -825,6 +827,8 @@ fun uniffi_playback_gateway_ffi_checksum_method_torrentclient_start_selected(
 fun uniffi_playback_gateway_ffi_checksum_method_torrentclient_start_selected_metainfo(
 ): Short
 fun uniffi_playback_gateway_ffi_checksum_method_torrenthandle_files(
+): Short
+fun uniffi_playback_gateway_ffi_checksum_method_torrenthandle_metadata_file_count(
 ): Short
 fun uniffi_playback_gateway_ffi_checksum_method_torrenthandle_read_range(
 ): Short
@@ -936,6 +940,8 @@ fun uniffi_playback_gateway_ffi_fn_free_torrenthandle(`ptr`: Pointer,uniffi_out_
 ): Unit
 fun uniffi_playback_gateway_ffi_fn_method_torrenthandle_files(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+fun uniffi_playback_gateway_ffi_fn_method_torrenthandle_metadata_file_count(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+): Int
 fun uniffi_playback_gateway_ffi_fn_method_torrenthandle_read_range(`ptr`: Pointer,`index`: Int,`offset`: Long,`length`: Int,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_playback_gateway_ffi_fn_method_torrenthandle_set_progress_listener(`ptr`: Pointer,`listener`: Long,uniffi_out_err: UniffiRustCallStatus,
@@ -1118,6 +1124,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_playback_gateway_ffi_checksum_method_torrenthandle_files() != 49004.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_playback_gateway_ffi_checksum_method_torrenthandle_metadata_file_count() != 4806.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_playback_gateway_ffi_checksum_method_torrenthandle_read_range() != 33092.toShort()) {
@@ -2277,6 +2286,8 @@ public interface TorrentHandleInterface {
 
     fun `files`(): List<TorrentFile>
 
+    fun `metadataFileCount`(): kotlin.UInt
+
     fun `readRange`(`index`: kotlin.UInt, `offset`: kotlin.ULong, `length`: kotlin.UInt): kotlin.ByteArray
 
     /**
@@ -2389,6 +2400,18 @@ open class TorrentHandle: Disposable, AutoCloseable, TorrentHandleInterface
     callWithPointer {
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_playback_gateway_ffi_fn_method_torrenthandle_files(
+        it, _status)
+}
+    }
+    )
+    }
+
+
+    override fun `metadataFileCount`(): kotlin.UInt {
+            return FfiConverterUInt.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_playback_gateway_ffi_fn_method_torrenthandle_metadata_file_count(
         it, _status)
 }
     }

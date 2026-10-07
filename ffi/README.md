@@ -59,6 +59,8 @@ full-torrent reservation remain shared. `files()` returns only the selected
 file, retaining its original metadata index (it need not be zero). Invalid or
 unsupported indices fail; no largest-file fallback occurs. `streamUrl`,
 `readRange`, HTTP GET/HEAD/ranges and file-size lookup refuse other indices.
+`metadataFileCount()` returns the vetted metadata cardinality for exact-index
+validation, without exposing another file's name or length.
 
 Stopping or disposing one independent handle does not retire another handle or
 its listener. Explicit aliases of a handle still refer to the same lease and

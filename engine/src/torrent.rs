@@ -870,6 +870,10 @@ impl TorrentHandle {
     pub fn selected_file(&self) -> &TorrentFile {
         &self.state.entry.files[self.state.selected as usize]
     }
+    /// Vetted metadata cardinality, without exposing unselected names or lengths.
+    pub fn metadata_file_count(&self) -> u32 {
+        u32::try_from(self.state.entry.files.len()).unwrap_or(u32::MAX)
+    }
     /// Private capability URL. Never send it to public clients or logs.
     pub fn stream_url(&self, index: u32) -> Result<String, String> {
         if self.state.stopped.load(Ordering::Acquire) || self.state.file(index).is_none() {
