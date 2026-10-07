@@ -59,7 +59,7 @@ pub struct TorrentConfig {
     pub cache_dir: PathBuf,
     pub max_bytes: u64,
     /// Optional fixed disk-slot reservation per ordinary-video input.
-    /// Archives and native exact acquisition retain full-payload storage.
+    /// Archives retain full-payload storage; native exact acquisition also opts in.
     pub piece_cache_bytes: Option<u64>,
     pub listen_port: Option<u16>,
     /// Peer/DHT connections are an explicit opt-in exception to HTTP egress policy.

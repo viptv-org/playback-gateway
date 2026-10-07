@@ -84,8 +84,9 @@ The cache must fit at least two complete torrent pieces. Set
 `TORRENT_PIECE_CACHE_BYTES=0` to use full-payload storage for every torrent.
 The engine library opts into rolling storage through `TorrentConfig`.
 
-Torrents containing archive files, small torrents that fit the per-input budget,
-and strict native exact acquisition retain full-payload reservation/storage.
+Torrents containing archive files and small torrents that fit the per-input budget
+retain full-payload reservation/storage. The Android native facade enables the
+same rolling piece cache with exact-file authority and a supplied aggregate cap.
 Compressed archive extraction also reserves its complete verified spool.
 Rolling input does not bound FFmpeg's output spool; media delivery has separate
 limits. See [rolling torrent cache](docs/ROLLING_TORRENT_CACHE.md).

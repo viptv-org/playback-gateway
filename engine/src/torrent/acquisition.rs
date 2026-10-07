@@ -610,6 +610,17 @@ impl PendingPayload {
             .iter()
             .try_fold(0u64, |n, f| n.checked_add(f.size))
             .ok_or("Torrent size overflow")?;
+        let rolling = manager
+            .inner
+            .config
+            .piece_cache_bytes
+            .filter(|budget| size > *budget);
+        if let Some(budget) = rolling {
+            if u64::from(listed.info.piece_length).saturating_mul(2) > budget {
+                return Err("Torrent exceeds cache budget".into());
+            }
+        }
+        let size = rolling.unwrap_or(size);
         let disk_manager = manager.inner.clone();
         let available = owned_fs(&self.tasks, move || {
             native_available_disk_bytes(&disk_manager.config.cache_dir)
@@ -624,7 +635,7 @@ impl PendingPayload {
             {
                 return Err("Torrent exceeds cache budget".into());
             }
-            // Full reservations include unselected files, sparse/unwritten
+            // Reservations include each input's bounded slots or small full
             // payload and retiring work. Charging materialized bytes again is
             // conservative: filesystem free space alone cannot prove room for
             // every previously admitted writer's remaining allocation.
@@ -656,6 +667,10 @@ impl PendingPayload {
             private_dir(&prepare_folder)
         })
         .await?;
+        let storage_factory = rolling.map(|capacity| {
+            use librqbit::storage::StorageFactoryExt;
+            librqbit::storage::rolling::RollingStorageFactory { capacity }.boxed()
+        });
         #[cfg(all(test, feature = "test-network-policy"))]
         let storage_factory = manager
             .inner
@@ -663,7 +678,8 @@ impl PendingPayload {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .as_ref()
-            .map(|f| f.clone_box());
+            .map(|f| f.clone_box())
+            .or(storage_factory);
         let response = session
             .add_torrent(
                 AddTorrent::from_bytes(listed.torrent_bytes.to_vec()),
@@ -679,7 +695,6 @@ impl PendingPayload {
                     only_files: Some(vec![self.selection.file_index as usize]),
                     initial_peers: Some(manager.inner.config.initial_peers.clone()),
                     overwrite: false,
-                    #[cfg(all(test, feature = "test-network-policy"))]
                     storage_factory,
                     ..Default::default()
                 }),
@@ -1103,6 +1118,88 @@ mod tests {
         drop(same_handle);
         manager.reap().await.unwrap();
         assert_eq!(manager.inner.state.lock().await.reserved, 0);
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn rolling_native_shared_charge_and_capacity_refusal_preserve_outgoing() {
+        let temp = tempfile::tempdir().unwrap();
+        let peer = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let budget = MIN_CACHE_BYTES / 2;
+        let manager = TorrentManager::new_native_owned(
+            TorrentConfig {
+                enabled: true,
+                cache_dir: temp.path().join("cache"),
+                enable_dht: false,
+                max_bytes: MIN_CACHE_BYTES,
+                piece_cache_bytes: Some(budget),
+                ..Default::default()
+            },
+            vec![peer.local_addr().unwrap()],
+        )
+        .unwrap();
+        let outgoing = begin_fixture(
+            &manager,
+            multi_file_metainfo("shared-large", 3 * 1024 * 1024 * 1024),
+        );
+        let first = outgoing.wait_ready().await.unwrap();
+        let shared = begin_fixture(
+            &manager,
+            multi_file_metainfo("shared-large", 3 * 1024 * 1024 * 1024),
+        );
+        let second = shared.wait_ready().await.unwrap();
+        assert_eq!(manager.inner.state.lock().await.reserved, budget);
+        let candidate = begin_fixture(
+            &manager,
+            multi_file_metainfo("candidate-large", 3 * 1024 * 1024 * 1024),
+        );
+        let third = candidate.wait_ready().await.unwrap();
+        assert_eq!(manager.inner.state.lock().await.reserved, MIN_CACHE_BYTES);
+        let refused = begin_fixture(
+            &manager,
+            multi_file_metainfo("refused-large", 3 * 1024 * 1024 * 1024),
+        );
+        assert!(refused.wait_ready().await.is_err());
+        assert_eq!(
+            refused.failure_reason(),
+            Some(AcquisitionFailure::PayloadLimit)
+        );
+        assert!(!first.status().stopped && !second.status().stopped && !third.status().stopped);
+        assert_eq!(refused.cancel_and_wait().await, Settlement::Settled);
+        assert_eq!(outgoing.cancel_and_wait().await, Settlement::Settled);
+        assert!(!second.status().stopped);
+        assert_eq!(manager.inner.state.lock().await.reserved, MIN_CACHE_BYTES);
+        assert_eq!(shared.cancel_and_wait().await, Settlement::Settled);
+        assert_eq!(candidate.cancel_and_wait().await, Settlement::Settled);
+        drop((first, second, third));
+        manager.reap().await.unwrap();
+        assert_eq!(manager.inner.state.lock().await.reserved, 0);
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn rolling_native_piece_slot_requirement_reports_capacity_before_storage() {
+        let temp = tempfile::tempdir().unwrap();
+        let peer = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let manager = TorrentManager::new_native_owned(
+            TorrentConfig {
+                enabled: true,
+                cache_dir: temp.path().join("cache"),
+                enable_dht: false,
+                piece_cache_bytes: Some(16 * 1024 * 1024),
+                ..Default::default()
+            },
+            vec![peer.local_addr().unwrap()],
+        )
+        .unwrap();
+        let acquisition = begin_fixture(
+            &manager,
+            multi_file_metainfo("large-pieces", 3 * 1024 * 1024 * 1024),
+        );
+        assert!(acquisition.wait_ready().await.is_err());
+        assert_eq!(
+            acquisition.failure_reason(),
+            Some(AcquisitionFailure::PayloadLimit)
+        );
+        assert_eq!(manager.inner.state.lock().await.reserved, 0);
+        assert_eq!(acquisition.cancel_and_wait().await, Settlement::Settled);
+        manager.reap().await.unwrap();
     }
     #[tokio::test]
     async fn cancel_before_first_poll_never_creates_cache_or_publishes_a_handle() {

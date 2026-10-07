@@ -379,7 +379,7 @@ fn late_foreign_handle_return_has_no_bytes_and_remains_charged_until_disposal() 
 }
 
 #[test]
-fn native_ffi_retains_full_payload_limit_including_unselected_files() {
+fn native_ffi_large_unselected_payload_uses_bounded_cache() {
     let cache = tempfile::tempdir().unwrap();
     let peer = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let client = TorrentClient::new_native_owned(
@@ -388,23 +388,46 @@ fn native_ffi_retains_full_payload_limit_including_unselected_files() {
         vec![peer.local_addr().unwrap().to_string()],
     )
     .unwrap();
-    // A tiny selected file cannot authorize the unselected full-torrent reservation.
-    let mut bytes = b"d4:infod5:filesld6:lengthi1e4:pathl5:a.mkveed6:lengthi268435456e4:pathl5:b.mkveee4:name5:owned12:piece lengthi16777216e6:pieces340:".to_vec();
-    bytes.extend([7; 340]);
+    // An unselected 3 GiB file does not require full-payload device storage.
+    let mut bytes = b"d4:infod5:filesld6:lengthi1e4:pathl5:a.mkveed6:lengthi3221225472e4:pathl5:b.mkveee4:name5:owned12:piece lengthi16777216e6:pieces3860:".to_vec();
+    bytes.extend([7; 3860]);
     bytes.extend_from_slice(b"ee");
     let hash = playback_engine::torrent::vet_native_metainfo(&bytes, None, 0, Some(1))
         .unwrap()
         .info_hash_hex();
     let acquisition = client
-        .begin_selected_metainfo(bytes, hash, 0, Some(1), 30_000)
+        .begin_selected_metainfo(bytes.clone(), hash.clone(), 0, Some(1), 30_000)
+        .unwrap();
+    let handle = acquisition.wait_ready().unwrap();
+    assert!(handle.stream_url(1).is_err());
+    let payload = std::fs::read_dir(cache.path().join("cache"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|e| e.path().join("pieces.cache"))
+        .find(|p| p.exists())
+        .unwrap();
+    assert_eq!(
+        std::fs::metadata(&payload).unwrap().len(),
+        256 * 1024 * 1024
+    );
+    let candidate = client
+        .begin_selected_metainfo(bytes, hash, 1, None, 30_000)
         .unwrap();
     assert!(matches!(
-        acquisition.wait_ready(),
+        candidate.wait_ready(),
         Err(playback_gateway_ffi::TorrentError::PayloadLimit)
     ));
+    assert!(!handle.status().stopped);
+    assert_eq!(
+        candidate.cancel_and_wait().unwrap(),
+        TorrentSettlement::Settled
+    );
     assert_eq!(
         acquisition.cancel_and_wait().unwrap(),
         TorrentSettlement::Settled
     );
+    drop(handle);
+    drop(acquisition);
     client.reap().unwrap();
+    assert!(!payload.exists());
 }

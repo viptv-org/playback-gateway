@@ -10,10 +10,11 @@ pieces of the admitted torrent. Engine embedders explicitly set
 
 A non-archive torrent larger than this per-input budget reserves that budget
 rather than its full logical payload. Small torrents, torrents containing
-archive files/volumes, and strict native exact-acquisition inputs retain their
-full-payload policy. Compressed archives require a complete extracted spool.
-The Android strict in-process acquisition/FFI contract is not changed by this
-service-side implementation.
+archive files/volumes retain their full-payload policy. Compressed archives
+require a complete extracted spool. Strict native exact acquisition supports the
+same bounded piece slots when configured. The Android production facade enables
+a 256 MiB per-input cache under its supplied aggregate budget; authorization,
+independent grants, measured disk admission and joined retirement remain strict.
 
 All active input reservations and archive spools share the global byte limit.
 Concurrent readers of the same namespace/torrent share one reservation; separate
@@ -81,5 +82,6 @@ Use the FFmpeg 9.0.2 binaries from the qualified runtime image for the media
 fixture. Host FFprobe 6.1 lacks the existing required HTTP `request_size` option.
 
 These controlled fixtures do not qualify hostile/public swarms, sustained 4K
-bitrate, sparse-piece availability or production deployment. Strict native
-acquisition and compressed archives require their separate qualification paths.
+bitrate, sparse-piece availability or production deployment. Android decoded playback and compressed archives require their separate
+qualification paths. Native TCP tests additionally cover a 100 GiB exact-file
+input with 4 MiB retained storage and cross-file reads with independent grants.

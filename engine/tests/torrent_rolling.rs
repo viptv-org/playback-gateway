@@ -9,6 +9,14 @@ use std::time::Duration;
 /// Seeks force eviction/re-download; simultaneous readers share the same input.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn rolling_cache_reads_large_file_seeks_back_and_reclaims() {
+    rolling_read_case(false).await;
+}
+#[cfg(feature = "test-network-policy")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_rolling_cross_file_readers_keep_independent_grants() {
+    rolling_read_case(true).await;
+}
+async fn rolling_read_case(native: bool) {
     let seed = tempfile::tempdir().unwrap();
     let data: Vec<u8> = (0..2 * 1024 * 1024)
         .map(|i| ((i * 31 + i / 16384) % 251) as u8)
@@ -58,21 +66,81 @@ async fn rolling_cache_reads_large_file_seeks_back_and_reclaims() {
     let cache = tempfile::tempdir().unwrap();
     let root = cache.path().join("cache");
     let budget = 65536;
-    let manager = TorrentManager::new(TorrentConfig {
+    let address = format!("127.0.0.1:{port}").parse().unwrap();
+    let config = TorrentConfig {
         enabled: true,
         cache_dir: root.clone(),
         enable_dht: false,
-        initial_peers: vec![format!("127.0.0.1:{port}").parse().unwrap()],
+        initial_peers: vec![address],
         max_bytes: playback_engine::torrent::MIN_CACHE_BYTES,
         piece_cache_bytes: Some(budget),
         idle_timeout: Duration::ZERO,
         ..Default::default()
-    })
-    .unwrap();
-    let handle = manager
-        .start_metainfo("rolling", bytes.to_vec(), None)
-        .await
-        .unwrap();
+    };
+    let manager = if native {
+        #[cfg(feature = "test-network-policy")]
+        {
+            let mut config = config;
+            config.initial_peers.clear();
+            TorrentManager::new_native_owned(config, vec![address]).unwrap()
+        }
+        #[cfg(not(feature = "test-network-policy"))]
+        {
+            unreachable!()
+        }
+    } else {
+        TorrentManager::new(config).unwrap()
+    };
+    let index = 1;
+    let acquisitions = if native {
+        let hash = playback_engine::torrent::vet_native_metainfo(
+            &bytes,
+            None,
+            index,
+            Some(data.len() as u64),
+        )
+        .unwrap()
+        .info_hash_hex();
+        Some((
+            manager
+                .begin_native_selected_metainfo(
+                    "rolling".into(),
+                    bytes.to_vec(),
+                    hash.clone(),
+                    index,
+                    Some(data.len() as u64),
+                    Duration::from_secs(30),
+                )
+                .unwrap(),
+            manager
+                .begin_native_selected_metainfo(
+                    "rolling".into(),
+                    bytes.to_vec(),
+                    hash,
+                    index,
+                    Some(data.len() as u64),
+                    Duration::from_secs(30),
+                )
+                .unwrap(),
+        ))
+    } else {
+        None
+    };
+    let (handle, shared) = if let Some((a, b)) = &acquisitions {
+        (a.wait_ready().await.unwrap(), b.wait_ready().await.unwrap())
+    } else {
+        (
+            manager
+                .start_metainfo("rolling", bytes.to_vec(), None)
+                .await
+                .unwrap(),
+            manager
+                .start_metainfo("rolling", bytes.to_vec(), None)
+                .await
+                .unwrap(),
+        )
+    };
+    assert_eq!(handle.selected_file().index, index);
     let remaining = manager
         .reserve_cache(playback_engine::torrent::MIN_CACHE_BYTES - budget)
         .await
@@ -81,15 +149,18 @@ async fn rolling_cache_reads_large_file_seeks_back_and_reclaims() {
         manager.reserve_cache(1).await.is_err(),
         "active rolling reservations count against the global budget"
     );
-    let index = handle.selected_file().index;
-    let shared = manager
-        .start_metainfo("rolling", bytes.to_vec(), None)
-        .await
-        .unwrap();
-    assert_eq!(
-        handle.stream_url(index).unwrap(),
-        shared.stream_url(index).unwrap()
-    );
+    if !native {
+        assert_eq!(
+            handle.stream_url(index).unwrap(),
+            shared.stream_url(index).unwrap()
+        );
+    } else {
+        assert_ne!(
+            handle.stream_url(index).unwrap(),
+            shared.stream_url(index).unwrap()
+        );
+        assert!(handle.read_range(0, 0, 1).await.is_err());
+    }
     let payloads: Vec<_> = std::fs::read_dir(&root)
         .unwrap()
         .filter_map(|e| {
@@ -137,9 +208,21 @@ async fn rolling_cache_reads_large_file_seeks_back_and_reclaims() {
         "sequential playback must reach EOF through a cache smaller than the video"
     );
     check_bound();
-    handle.stop();
-    shared.stop();
+    if let Some((a, b)) = acquisitions {
+        assert_eq!(a.cancel_and_wait().await, librqbit::Settlement::Settled);
+        assert!(handle.read_range(index, 0, 1).await.is_err());
+        assert_eq!(shared.read_range(index, 0, 100).await.unwrap(), data[..100]);
+        assert_eq!(b.cancel_and_wait().await, librqbit::Settlement::Settled);
+    } else {
+        handle.stop();
+        shared.stop();
+    }
     drop(remaining);
+    if native {
+        // Strict acquisition keeps its reservation until returned handles retire.
+        drop(handle);
+        drop(shared);
+    }
     manager.reap().await.unwrap();
     assert!(!payloads[0].exists());
     #[cfg(target_os = "linux")]
@@ -356,6 +439,16 @@ async fn rolling_peer_disconnect_retries_partial_piece_without_advertising_cache
 /// 64-bit offsets correctly, including re-downloading an evicted first piece.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn hundred_gib_torrent_seeks_with_four_mib_cache() {
+    hundred_gib_case(false).await;
+}
+
+#[cfg(feature = "test-network-policy")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_hundred_gib_exact_file_seeks_with_four_mib_cache() {
+    hundred_gib_case(true).await;
+}
+
+async fn hundred_gib_case(native: bool) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let temp = tempfile::tempdir().unwrap();
     let piece_len = 2 * 1024 * 1024usize;
@@ -435,7 +528,7 @@ async fn hundred_gib_torrent_seeks_with_four_mib_cache() {
     });
     let root = temp.path().join("cache");
     let budget = 4 * 1024 * 1024;
-    let manager = TorrentManager::new(TorrentConfig {
+    let config = TorrentConfig {
         enabled: true,
         cache_dir: root.clone(),
         enable_dht: false,
@@ -444,12 +537,49 @@ async fn hundred_gib_torrent_seeks_with_four_mib_cache() {
         piece_cache_bytes: Some(budget),
         idle_timeout: Duration::ZERO,
         ..Default::default()
-    })
-    .unwrap();
-    let handle = manager
-        .start_metainfo("huge", metainfo, None)
-        .await
-        .unwrap();
+    };
+    let manager = if native {
+        #[cfg(feature = "test-network-policy")]
+        {
+            let mut config = config;
+            config.initial_peers.clear();
+            TorrentManager::new_native_owned(config, vec![address]).unwrap()
+        }
+        #[cfg(not(feature = "test-network-policy"))]
+        {
+            unreachable!()
+        }
+    } else {
+        TorrentManager::new(config).unwrap()
+    };
+    let acquisition = if native {
+        let hash =
+            playback_engine::torrent::vet_native_metainfo(&metainfo, None, 0, Some(file_size))
+                .unwrap()
+                .info_hash_hex();
+        Some(
+            manager
+                .begin_native_selected_metainfo(
+                    "huge".into(),
+                    metainfo.clone(),
+                    hash,
+                    0,
+                    Some(file_size),
+                    Duration::from_secs(30),
+                )
+                .unwrap(),
+        )
+    } else {
+        None
+    };
+    let handle = if let Some(a) = &acquisition {
+        a.wait_ready().await.unwrap()
+    } else {
+        manager
+            .start_metainfo("huge", metainfo, None)
+            .await
+            .unwrap()
+    };
     assert_eq!(handle.selected_file().size, file_size);
     for index in [0, count / 2 + 1, count - 1, 0] {
         let offset = index as u64 * piece_len as u64 + 123;
@@ -475,13 +605,21 @@ async fn hundred_gib_torrent_seeks_with_four_mib_cache() {
         use std::os::unix::fs::MetadataExt;
         assert!(std::fs::metadata(&payload).unwrap().blocks() * 512 <= budget);
     }
-    assert_eq!(
-        handle
-            .stop_and_settle_until(tokio::time::Instant::now() + Duration::from_secs(3))
-            .await,
-        librqbit::Settlement::Settled
-    );
+    if let Some(a) = acquisition {
+        assert!(handle.read_range(1, 0, 1).await.is_err());
+        assert_eq!(a.cancel_and_wait().await, librqbit::Settlement::Settled);
+        assert!(handle.read_range(0, 0, 1).await.is_err());
+    } else {
+        assert_eq!(
+            handle
+                .stop_and_settle_until(tokio::time::Instant::now() + Duration::from_secs(3))
+                .await,
+            librqbit::Settlement::Settled
+        );
+    }
+    drop(handle);
     manager.reap().await.unwrap();
+    assert!(!payload.exists());
     peer.abort();
     let _ = peer.await;
 }

@@ -55,7 +55,7 @@ idle deadline or when a new reservation needs their space.
 `startSelectedMetainfo(metainfo, fileIndex)` require an explicit metadata index.
 Every call allocates a separate stop state, reader accounting and random loopback
 capability, even for the same hash/index in one client. Cached payload and its
-full-torrent reservation remain shared. `files()` returns only the selected
+bounded input-cache reservation remain shared. `files()` returns only the selected
 file, retaining its original metadata index (it need not be zero). Invalid or
 unsupported indices fail; no largest-file fallback occurs. `streamUrl`,
 `readRange`, HTTP GET/HEAD/ranges and file-size lookup refuse other indices.
@@ -171,9 +171,9 @@ reader and final-consumer dependency retirement. It returns `Settled` or the
 static `SettlementFailed`. A late wait result has no usable byte authority.
 Explicit clones retain the same grant and cancellation state.
 
-Same hash/index acquisitions share a pending payload and its full-payload cache
+Same hash/index acquisitions share a pending payload and its bounded input-cache
 charge. Their grants, cancellation, random tokens and listeners are independent.
-Different selected indices have separate dependency jobs and full-payload charges.
+Different selected indices have separate dependency jobs and input-cache charges.
 Pending jobs retain their provisional directory, session owner and reservation
 through failed or dropped acquisitions. Reaping disposes only closed, joined
 owners without a sticky settlement failure or remaining public handle references.
@@ -220,3 +220,15 @@ public/LAN interfaces. Strict clients use the maintained public-only dependency
 policy; these isolated owned fixtures do not qualify public-network operation.
 
 The alignment flags follow [Android's page-size guidance](https://developer.android.com/guide/practices/page-sizes). ELF alignment does not verify APK ZIP alignment or device behavior.
+
+## Native rolling piece storage
+
+`newNativePublic` enables a 256 MiB per-input piece cache within `maxCacheBytes`.
+Large exact-file inputs reserve bounded slots instead of their logical torrent
+size; smaller inputs retain full storage. A budget must fit two torrent pieces.
+Current reads, in-flight writes and checksum work pin slots. Eviction invalidates
+availability before re-download; no evictable pieces are advertised or uploaded.
+Measured disk admission and retired/unsettled reservations remain enforced.
+Same-owner sharing does not share grant tokens or revocation; cache cleanup waits
+for native work, readers and returned handles to retire. Library managers can
+explicitly opt in through `TorrentConfig::piece_cache_bytes`.

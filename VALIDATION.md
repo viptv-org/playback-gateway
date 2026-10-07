@@ -1,3 +1,22 @@
+# Native rolling input cache — 2026-10-07
+
+The strict native acquisition path supports bounded piece slots. The production
+UniFFI facade enables 256 MiB per input within its caller-supplied aggregate
+budget; Android retains its 2 GiB aggregate ceiling. Logical torrent size no
+longer determines large-input admission. Exact-file validation, authorization,
+public discovery restrictions, independent grants, measured disk accounting and
+joined retirement remain enforced. Engine embedding can explicitly opt in.
+
+The locked workspace suite with engine/facade owned-network fixture features
+passes: 213 passed, zero failed, 56 ignored. Formatting and whitespace checks
+pass. Native controlled TCP fixtures verify a valid 100 GiB exact-file input through
+4 MiB retained storage, large-offset/backward reads and actual re-download after
+eviction. A separate 64 KiB cache fixture verifies cross-file pieces, concurrent
+independent grants, byte identity, sequential EOF and revocation without stopping
+the other reader. Native unit/facade fixtures check shared charges and aggregate
+candidate refusal without retiring outgoing work. These are controlled byte
+transport tests, not Android decode, public swarm or full-movie qualification.
+
 # Validation checkpoint — 2026-10-07
 
 ## Rolling torrent input cache

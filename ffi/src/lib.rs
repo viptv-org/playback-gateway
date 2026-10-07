@@ -205,6 +205,7 @@ impl TorrentClient {
             enabled: true,
             cache_dir: PathBuf::from(cache_dir),
             max_bytes: max_cache_bytes,
+            piece_cache_bytes: Some(256 * 1024 * 1024),
             ..Default::default()
         })
         .map_err(|_| TorrentError::InvalidOptions)?;
@@ -349,6 +350,7 @@ impl TorrentClient {
                 enabled: true,
                 cache_dir: PathBuf::from(cache_dir),
                 max_bytes: max_cache_bytes,
+                piece_cache_bytes: Some(256 * 1024 * 1024),
                 enable_dht: false,
                 ..Default::default()
             },
