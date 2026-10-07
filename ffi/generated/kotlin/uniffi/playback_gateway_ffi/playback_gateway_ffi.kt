@@ -763,6 +763,26 @@ internal open class UniffiVTableCallbackInterfaceTorrentProgressListener(
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -779,6 +799,20 @@ internal open class UniffiVTableCallbackInterfaceTorrentProgressListener(
 internal interface IntegrityCheckingUniffiLib : Library {
     // Integrity check functions only
     fun uniffi_playback_gateway_ffi_checksum_func_default_torrent_options(
+): Short
+fun uniffi_playback_gateway_ffi_checksum_method_torrentacquisition_cancel(
+): Short
+fun uniffi_playback_gateway_ffi_checksum_method_torrentacquisition_cancel_and_wait(
+): Short
+fun uniffi_playback_gateway_ffi_checksum_method_torrentacquisition_status(
+): Short
+fun uniffi_playback_gateway_ffi_checksum_method_torrentacquisition_wait_ready(
+): Short
+fun uniffi_playback_gateway_ffi_checksum_method_torrentclient_begin_selected(
+): Short
+fun uniffi_playback_gateway_ffi_checksum_method_torrentclient_begin_selected_metainfo(
+): Short
+fun uniffi_playback_gateway_ffi_checksum_method_torrentclient_has_failed_settlement(
 ): Short
 fun uniffi_playback_gateway_ffi_checksum_method_torrentclient_reap(
 ): Short
@@ -800,9 +834,13 @@ fun uniffi_playback_gateway_ffi_checksum_method_torrenthandle_status(
 ): Short
 fun uniffi_playback_gateway_ffi_checksum_method_torrenthandle_stop(
 ): Short
+fun uniffi_playback_gateway_ffi_checksum_method_torrenthandle_stop_and_wait(
+): Short
 fun uniffi_playback_gateway_ffi_checksum_method_torrenthandle_stream_url(
 ): Short
 fun uniffi_playback_gateway_ffi_checksum_constructor_torrentclient_new(
+): Short
+fun uniffi_playback_gateway_ffi_checksum_constructor_torrentclient_new_native_public(
 ): Short
 fun uniffi_playback_gateway_ffi_checksum_method_torrentprogresslistener_on_status(
 ): Short
@@ -856,12 +894,32 @@ internal interface UniffiLib : Library {
     }
 
     // FFI functions
-    fun uniffi_playback_gateway_ffi_fn_clone_torrentclient(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_playback_gateway_ffi_fn_clone_torrentacquisition(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+): Pointer
+fun uniffi_playback_gateway_ffi_fn_free_torrentacquisition(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+): Unit
+fun uniffi_playback_gateway_ffi_fn_method_torrentacquisition_cancel(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+): Unit
+fun uniffi_playback_gateway_ffi_fn_method_torrentacquisition_cancel_and_wait(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_playback_gateway_ffi_fn_method_torrentacquisition_status(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_playback_gateway_ffi_fn_method_torrentacquisition_wait_ready(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+): Pointer
+fun uniffi_playback_gateway_ffi_fn_clone_torrentclient(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
 ): Pointer
 fun uniffi_playback_gateway_ffi_fn_free_torrentclient(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
 fun uniffi_playback_gateway_ffi_fn_constructor_torrentclient_new(`cacheDir`: RustBuffer.ByValue,`options`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Pointer
+fun uniffi_playback_gateway_ffi_fn_constructor_torrentclient_new_native_public(`cacheDir`: RustBuffer.ByValue,`maxCacheBytes`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Pointer
+fun uniffi_playback_gateway_ffi_fn_method_torrentclient_begin_selected(`ptr`: Pointer,`magnet`: RustBuffer.ByValue,`infoHash`: RustBuffer.ByValue,`fileIndex`: Int,`verifiedSize`: Long,`remainingBudgetMillis`: Int,uniffi_out_err: UniffiRustCallStatus,
+): Pointer
+fun uniffi_playback_gateway_ffi_fn_method_torrentclient_begin_selected_metainfo(`ptr`: Pointer,`metainfo`: RustBuffer.ByValue,`infoHash`: RustBuffer.ByValue,`fileIndex`: Int,`verifiedSize`: Long,`remainingBudgetMillis`: Int,uniffi_out_err: UniffiRustCallStatus,
+): Pointer
+fun uniffi_playback_gateway_ffi_fn_method_torrentclient_has_failed_settlement(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+): Byte
 fun uniffi_playback_gateway_ffi_fn_method_torrentclient_reap(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
 fun uniffi_playback_gateway_ffi_fn_method_torrentclient_start(`ptr`: Pointer,`magnet`: RustBuffer.ByValue,`fileIndex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
@@ -886,6 +944,8 @@ fun uniffi_playback_gateway_ffi_fn_method_torrenthandle_status(`ptr`: Pointer,un
 ): RustBuffer.ByValue
 fun uniffi_playback_gateway_ffi_fn_method_torrenthandle_stop(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
+fun uniffi_playback_gateway_ffi_fn_method_torrenthandle_stop_and_wait(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 fun uniffi_playback_gateway_ffi_fn_method_torrenthandle_stream_url(`ptr`: Pointer,`index`: Int,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_playback_gateway_ffi_fn_init_callback_vtable_torrentprogresslistener(`vtable`: UniffiVTableCallbackInterfaceTorrentProgressListener,
@@ -1021,6 +1081,27 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_playback_gateway_ffi_checksum_func_default_torrent_options() != 47744.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_playback_gateway_ffi_checksum_method_torrentacquisition_cancel() != 38658.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_playback_gateway_ffi_checksum_method_torrentacquisition_cancel_and_wait() != 6307.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_playback_gateway_ffi_checksum_method_torrentacquisition_status() != 34576.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_playback_gateway_ffi_checksum_method_torrentacquisition_wait_ready() != 49803.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_playback_gateway_ffi_checksum_method_torrentclient_begin_selected() != 383.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_playback_gateway_ffi_checksum_method_torrentclient_begin_selected_metainfo() != 32945.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_playback_gateway_ffi_checksum_method_torrentclient_has_failed_settlement() != 51585.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_playback_gateway_ffi_checksum_method_torrentclient_reap() != 11437.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1051,10 +1132,16 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_playback_gateway_ffi_checksum_method_torrenthandle_stop() != 2900.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_playback_gateway_ffi_checksum_method_torrenthandle_stop_and_wait() != 24695.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_playback_gateway_ffi_checksum_method_torrenthandle_stream_url() != 26915.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_playback_gateway_ffi_checksum_constructor_torrentclient_new() != 11434.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_playback_gateway_ffi_checksum_constructor_torrentclient_new_native_public() != 14112.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_playback_gateway_ffi_checksum_method_torrentprogresslistener_on_status() != 29532.toShort()) {
@@ -1501,11 +1588,306 @@ public object FfiConverterByteArray: FfiConverterRustBuffer<ByteArray> {
 //
 
 
+public interface TorrentAcquisitionInterface {
+
+    fun `cancel`()
+
+    fun `cancelAndWait`(): TorrentSettlement
+
+    fun `status`(): TorrentAcquisitionStatus
+
+    /**
+     * Blocks only until the captured startup deadline; call on an IO dispatcher.
+     */
+    fun `waitReady`(): TorrentHandle
+
+    companion object
+}
+
+open class TorrentAcquisition: Disposable, AutoCloseable, TorrentAcquisitionInterface
+{
+
+    constructor(pointer: Pointer) {
+        this.pointer = pointer
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(pointer))
+    }
+
+    /**
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noPointer: NoPointer) {
+        this.pointer = null
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(pointer))
+    }
+
+    protected val pointer: Pointer?
+    protected val cleanable: UniffiCleaner.Cleanable
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithPointer(block: (ptr: Pointer) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the pointer being freed concurrently.
+        try {
+            return block(this.uniffiClonePointer())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val pointer: Pointer?) : Runnable {
+        override fun run() {
+            pointer?.let { ptr ->
+                uniffiRustCall { status ->
+                    UniffiLib.INSTANCE.uniffi_playback_gateway_ffi_fn_free_torrentacquisition(ptr, status)
+                }
+            }
+        }
+    }
+
+    fun uniffiClonePointer(): Pointer {
+        return uniffiRustCall() { status ->
+            UniffiLib.INSTANCE.uniffi_playback_gateway_ffi_fn_clone_torrentacquisition(pointer!!, status)
+        }
+    }
+
+    override fun `cancel`()
+        =
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_playback_gateway_ffi_fn_method_torrentacquisition_cancel(
+        it, _status)
+}
+    }
+
+
+
+
+    @Throws(TorrentException::class)override fun `cancelAndWait`(): TorrentSettlement {
+            return FfiConverterTypeTorrentSettlement.lift(
+    callWithPointer {
+    uniffiRustCallWithError(TorrentException) { _status ->
+    UniffiLib.INSTANCE.uniffi_playback_gateway_ffi_fn_method_torrentacquisition_cancel_and_wait(
+        it, _status)
+}
+    }
+    )
+    }
+
+
+    override fun `status`(): TorrentAcquisitionStatus {
+            return FfiConverterTypeTorrentAcquisitionStatus.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_playback_gateway_ffi_fn_method_torrentacquisition_status(
+        it, _status)
+}
+    }
+    )
+    }
+
+
+
+    /**
+     * Blocks only until the captured startup deadline; call on an IO dispatcher.
+     */
+    @Throws(TorrentException::class)override fun `waitReady`(): TorrentHandle {
+            return FfiConverterTypeTorrentHandle.lift(
+    callWithPointer {
+    uniffiRustCallWithError(TorrentException) { _status ->
+    UniffiLib.INSTANCE.uniffi_playback_gateway_ffi_fn_method_torrentacquisition_wait_ready(
+        it, _status)
+}
+    }
+    )
+    }
+
+
+
+
+
+
+    companion object
+
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTorrentAcquisition: FfiConverter<TorrentAcquisition, Pointer> {
+
+    override fun lower(value: TorrentAcquisition): Pointer {
+        return value.uniffiClonePointer()
+    }
+
+    override fun lift(value: Pointer): TorrentAcquisition {
+        return TorrentAcquisition(value)
+    }
+
+    override fun read(buf: ByteBuffer): TorrentAcquisition {
+        // The Rust code always writes pointers as 8 bytes, and will
+        // fail to compile if they don't fit.
+        return lift(Pointer(buf.getLong()))
+    }
+
+    override fun allocationSize(value: TorrentAcquisition) = 8UL
+
+    override fun write(value: TorrentAcquisition, buf: ByteBuffer) {
+        // The Rust code always expects pointers written as 8 bytes,
+        // and will fail to compile if they don't fit.
+        buf.putLong(Pointer.nativeValue(lower(value)))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a Pointer/Arc<T>
+// to the live Rust struct on the other side of the FFI.
+//
+// Each instance implements core operations for working with the Rust `Arc<T>` and the
+// Kotlin Pointer to work with the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque pointer to the underlying Rust struct.
+//     Method calls need to read this pointer from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its pointer should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the pointer, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the pointer, but is interrupted
+//      before it can pass the pointer over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read pointer value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
 /**
  * Clients sharing a cache must share this object; each cache has an exclusive
  * lock. Methods performing IO block and belong on the caller's IO dispatcher.
  */
 public interface TorrentClientInterface {
+
+    /**
+     * Return owned cancellation before IO. The caller supplies its remaining
+     * monotonic startup budget, bounded to a total of thirty seconds.
+     */
+    fun `beginSelected`(`magnet`: kotlin.String, `infoHash`: kotlin.String, `fileIndex`: kotlin.UInt, `verifiedSize`: kotlin.ULong, `remainingBudgetMillis`: kotlin.UInt): TorrentAcquisition
+
+    fun `beginSelectedMetainfo`(`metainfo`: kotlin.ByteArray, `infoHash`: kotlin.String, `fileIndex`: kotlin.UInt, `verifiedSize`: kotlin.ULong, `remainingBudgetMillis`: kotlin.UInt): TorrentAcquisition
+
+    fun `hasFailedSettlement`(): kotlin.Boolean
 
     fun `reap`()
 
@@ -1625,6 +2007,48 @@ open class TorrentClient: Disposable, AutoCloseable, TorrentClientInterface
     }
 
 
+    /**
+     * Return owned cancellation before IO. The caller supplies its remaining
+     * monotonic startup budget, bounded to a total of thirty seconds.
+     */
+    @Throws(TorrentException::class)override fun `beginSelected`(`magnet`: kotlin.String, `infoHash`: kotlin.String, `fileIndex`: kotlin.UInt, `verifiedSize`: kotlin.ULong, `remainingBudgetMillis`: kotlin.UInt): TorrentAcquisition {
+            return FfiConverterTypeTorrentAcquisition.lift(
+    callWithPointer {
+    uniffiRustCallWithError(TorrentException) { _status ->
+    UniffiLib.INSTANCE.uniffi_playback_gateway_ffi_fn_method_torrentclient_begin_selected(
+        it, FfiConverterString.lower(`magnet`),FfiConverterString.lower(`infoHash`),FfiConverterUInt.lower(`fileIndex`),FfiConverterULong.lower(`verifiedSize`),FfiConverterUInt.lower(`remainingBudgetMillis`),_status)
+}
+    }
+    )
+    }
+
+
+
+    @Throws(TorrentException::class)override fun `beginSelectedMetainfo`(`metainfo`: kotlin.ByteArray, `infoHash`: kotlin.String, `fileIndex`: kotlin.UInt, `verifiedSize`: kotlin.ULong, `remainingBudgetMillis`: kotlin.UInt): TorrentAcquisition {
+            return FfiConverterTypeTorrentAcquisition.lift(
+    callWithPointer {
+    uniffiRustCallWithError(TorrentException) { _status ->
+    UniffiLib.INSTANCE.uniffi_playback_gateway_ffi_fn_method_torrentclient_begin_selected_metainfo(
+        it, FfiConverterByteArray.lower(`metainfo`),FfiConverterString.lower(`infoHash`),FfiConverterUInt.lower(`fileIndex`),FfiConverterULong.lower(`verifiedSize`),FfiConverterUInt.lower(`remainingBudgetMillis`),_status)
+}
+    }
+    )
+    }
+
+
+    override fun `hasFailedSettlement`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_playback_gateway_ffi_fn_method_torrentclient_has_failed_settlement(
+        it, _status)
+}
+    }
+    )
+    }
+
+
+
     @Throws(TorrentException::class)override fun `reap`()
         =
     callWithPointer {
@@ -1702,8 +2126,23 @@ open class TorrentClient: Disposable, AutoCloseable, TorrentClientInterface
 
 
 
+    companion object {
 
-    companion object
+    /**
+     * Strict production construction fixes the public discovery policy.
+     */
+    @Throws(TorrentException::class) fun `newNativePublic`(`cacheDir`: kotlin.String, `maxCacheBytes`: kotlin.ULong): TorrentClient {
+            return FfiConverterTypeTorrentClient.lift(
+    uniffiRustCallWithError(TorrentException) { _status ->
+    UniffiLib.INSTANCE.uniffi_playback_gateway_ffi_fn_constructor_torrentclient_new_native_public(
+        FfiConverterString.lower(`cacheDir`),FfiConverterULong.lower(`maxCacheBytes`),_status)
+}
+    )
+    }
+
+
+
+    }
 
 }
 
@@ -1849,6 +2288,11 @@ public interface TorrentHandleInterface {
     fun `status`(): TorrentProgress
 
     fun `stop`()
+
+    /**
+     * Only strict handles can prove completion without foreign callbacks.
+     */
+    fun `stopAndWait`(): TorrentSettlement
 
     /**
      * Internally generated capability token; callers cannot weaken the token.
@@ -2002,6 +2446,22 @@ open class TorrentHandle: Disposable, AutoCloseable, TorrentHandleInterface
 }
     }
 
+
+
+
+    /**
+     * Only strict handles can prove completion without foreign callbacks.
+     */
+    @Throws(TorrentException::class)override fun `stopAndWait`(): TorrentSettlement {
+            return FfiConverterTypeTorrentSettlement.lift(
+    callWithPointer {
+    uniffiRustCallWithError(TorrentException) { _status ->
+    UniffiLib.INSTANCE.uniffi_playback_gateway_ffi_fn_method_torrenthandle_stop_and_wait(
+        it, _status)
+}
+    }
+    )
+    }
 
 
 
@@ -2178,6 +2638,39 @@ public object FfiConverterTypeTorrentProgress: FfiConverterRustBuffer<TorrentPro
 
 
 
+enum class TorrentAcquisitionStatus {
+
+    PREPARING,
+    READY,
+    CANCELLED,
+    FAILED,
+    SETTLEMENT_FAILED;
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTorrentAcquisitionStatus: FfiConverterRustBuffer<TorrentAcquisitionStatus> {
+    override fun read(buf: ByteBuffer) = try {
+        TorrentAcquisitionStatus.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: TorrentAcquisitionStatus) = 4UL
+
+    override fun write(value: TorrentAcquisitionStatus, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
 
 sealed class TorrentException: kotlin.Exception() {
 
@@ -2194,6 +2687,12 @@ sealed class TorrentException: kotlin.Exception() {
     }
 
     class Stopped(
+        ) : TorrentException() {
+        override val message
+            get() = ""
+    }
+
+    class CallbacksUnsupported(
         ) : TorrentException() {
         override val message
             get() = ""
@@ -2218,6 +2717,7 @@ public object FfiConverterTypeTorrentError : FfiConverterRustBuffer<TorrentExcep
             1 -> TorrentException.InvalidOptions()
             2 -> TorrentException.OperationFailed()
             3 -> TorrentException.Stopped()
+            4 -> TorrentException.CallbacksUnsupported()
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
     }
@@ -2233,6 +2733,10 @@ public object FfiConverterTypeTorrentError : FfiConverterRustBuffer<TorrentExcep
                 4UL
             )
             is TorrentException.Stopped -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is TorrentException.CallbacksUnsupported -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
             )
@@ -2253,10 +2757,44 @@ public object FfiConverterTypeTorrentError : FfiConverterRustBuffer<TorrentExcep
                 buf.putInt(3)
                 Unit
             }
+            is TorrentException.CallbacksUnsupported -> {
+                buf.putInt(4)
+                Unit
+            }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
     }
 
 }
+
+
+
+
+enum class TorrentSettlement {
+
+    SETTLED,
+    SETTLEMENT_FAILED;
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTorrentSettlement: FfiConverterRustBuffer<TorrentSettlement> {
+    override fun read(buf: ByteBuffer) = try {
+        TorrentSettlement.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: TorrentSettlement) = 4UL
+
+    override fun write(value: TorrentSettlement, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
 
 
 

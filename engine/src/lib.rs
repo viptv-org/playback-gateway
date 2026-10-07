@@ -219,8 +219,8 @@ pub mod torrent;
 mod torrent_stream;
 #[cfg(feature = "torrent")]
 pub use torrent::{
-    TorrentCacheReservation, TorrentConfig, TorrentFile, TorrentHandle, TorrentManager,
-    TorrentReadSettler, TorrentStatus,
+    AcquisitionStatus, Settlement, TorrentAcquisition, TorrentCacheReservation, TorrentConfig,
+    TorrentFile, TorrentHandle, TorrentManager, TorrentReadSettler, TorrentStatus,
 };
 
 #[cfg(feature = "torrent")]

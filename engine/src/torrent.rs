@@ -2,8 +2,13 @@
 //! the library does not provide the gateway's vetted HTTP egress seam.
 //! A process manager owns independent per-scope sessions and a shared cache budget.
 use crate::torrent_stream::LoopbackStream;
+mod acquisition;
+pub use acquisition::{AcquisitionStatus, TorrentAcquisition};
+use acquisition::{PendingLease, PendingPayload};
 pub use librqbit::native_metainfo::{NativeMetainfo, NativeSelection};
 use librqbit::network_policy::NetworkPolicy;
+use librqbit::OwnedTasks;
+pub use librqbit::Settlement;
 /// Vet upstream metainfo and preserve exact info bytes for an explicit selected file.
 pub fn vet_native_metainfo(
     bytes: &[u8],
@@ -98,12 +103,16 @@ struct ManagerInner {
     cache_lock: OnceCell<Arc<std::fs::File>>,
     state: Mutex<ManagerState>,
     settlement_failed: AtomicBool,
+    acquisition_owners: std::sync::Mutex<Vec<OwnedTasks>>,
+    #[cfg(all(test, feature = "test-network-policy"))]
+    native_storage_factory: std::sync::Mutex<Option<librqbit::storage::BoxStorageFactory>>,
 }
 #[derive(Default)]
 struct ManagerState {
     scopes: HashMap<String, Arc<Session>>,
     entries: HashMap<(String, String), Arc<Entry>>,
     reserved: u64,
+    pending: HashMap<(String, String), Arc<PendingPayload>>,
 }
 struct Entry {
     _cache_lock: Arc<std::fs::File>,
@@ -138,6 +147,8 @@ pub(crate) struct HandleState {
     reads: Arc<TorrentReads>,
     pub(crate) stopped: AtomicBool,
     server: OnceCell<LoopbackStream>,
+    io_tasks: OwnedTasks,
+    native_lease: Option<Arc<PendingLease>>,
 }
 impl std::fmt::Debug for TorrentHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -200,6 +211,9 @@ impl TorrentManager {
                 cache_lock: OnceCell::new(),
                 state: Mutex::new(ManagerState::default()),
                 settlement_failed: AtomicBool::new(false),
+                acquisition_owners: std::sync::Mutex::new(Vec::new()),
+                #[cfg(all(test, feature = "test-network-policy"))]
+                native_storage_factory: std::sync::Mutex::new(None),
             }),
         })
     }
@@ -616,6 +630,8 @@ impl TorrentManager {
             reads: Arc::new(TorrentReads::default()),
             stopped: AtomicBool::new(false),
             server: OnceCell::new(),
+            io_tasks: OwnedTasks::new(Default::default()),
+            native_lease: None,
         });
         let server = LoopbackStream::start(Arc::downgrade(&state)).await?;
         state
@@ -631,9 +647,41 @@ impl TorrentManager {
         }
         Ok(TorrentHandle { state })
     }
+    async fn make_native_handle(
+        &self,
+        entry: Arc<Entry>,
+        selected: u32,
+        lease: Arc<PendingLease>,
+        io_tasks: OwnedTasks,
+    ) -> Result<TorrentHandle, String> {
+        entry.users.fetch_add(1, Ordering::AcqRel);
+        let state = Arc::new(HandleState {
+            entry,
+            manager: self.inner.clone(),
+            selected,
+            mode: LeaseMode::SelectedFile,
+            owners: std::sync::Mutex::new(1),
+            reads: Arc::new(TorrentReads::default()),
+            stopped: AtomicBool::new(false),
+            server: OnceCell::new(),
+            io_tasks,
+            native_lease: Some(lease),
+        });
+        let server =
+            LoopbackStream::start_owned(Arc::downgrade(&state), state.io_tasks.child()).await?;
+        state
+            .server
+            .set(server)
+            .map_err(|_| "Torrent stream unavailable")?;
+        Ok(TorrentHandle { state })
+    }
+    pub fn has_failed_settlement(&self) -> bool {
+        self.inner.settlement_failed.load(Ordering::Acquire)
+    }
     /// Pause idle torrents and remove expired entries. Under pressure only idle
     /// entries may be evicted; active inputs retain their reserved bytes.
     pub async fn reap(&self) -> Result<(), String> {
+        self.reap_native().await?;
         let mut state = self.inner.state.lock().await;
         self.evict(&mut state, None).await
     }
@@ -836,6 +884,21 @@ impl TorrentHandle {
     }
     pub fn status(&self) -> TorrentStatus {
         let stats = self.state.entry.managed.stats();
+        if self.is_strict() {
+            let total_bytes = self.selected_file().size;
+            let downloaded_bytes = stats
+                .file_progress
+                .get(self.state.selected as usize)
+                .copied()
+                .unwrap_or_default()
+                .min(total_bytes);
+            return TorrentStatus {
+                downloaded_bytes,
+                total_bytes,
+                finished: downloaded_bytes == total_bytes,
+                stopped: self.state.stopped.load(Ordering::Acquire),
+            };
+        }
         TorrentStatus {
             downloaded_bytes: stats.progress_bytes,
             total_bytes: stats.total_bytes,
@@ -845,9 +908,35 @@ impl TorrentHandle {
     }
     /// Invalidates this lease and every explicit clone. Independent leases,
     /// including selected-only leases for the same file, remain active.
-    /// This does not join the listener or cancel pending piece waits.
+    /// Use stop_and_settle_until for a joined completion receipt.
     pub fn stop(&self) {
         self.state.release();
+    }
+    pub fn is_strict(&self) -> bool {
+        self.state.native_lease.is_some()
+    }
+    pub async fn stop_and_settle_until(&self, deadline: tokio::time::Instant) -> Settlement {
+        self.stop();
+        let mut joined = self.state.io_tasks.cancel_and_wait_until(deadline).await;
+        if let Some(server) = self.state.server.get() {
+            joined &= server.stop_and_wait_until(deadline).await;
+        }
+        joined &= tokio::time::timeout_at(deadline, self.settle_closed_reads())
+            .await
+            .is_ok();
+        if let Some(lease) = &self.state.native_lease {
+            joined &= lease.settle_until(deadline).await;
+        }
+        joined &= !self.state.io_tasks.has_failed_settlement();
+        if joined {
+            Settlement::Settled
+        } else {
+            self.state
+                .manager
+                .settlement_failed
+                .store(true, Ordering::Release);
+            Settlement::SettlementFailed
+        }
     }
 }
 impl HandleState {
@@ -856,10 +945,14 @@ impl HandleState {
             return;
         }
         self.reads.closed.store(true, Ordering::Release);
+        self.io_tasks.cancel();
         if let Some(server) = self.server.get() {
             server.stop();
         }
-        if self.entry.users.fetch_sub(1, Ordering::AcqRel) == 1 {
+        if let Some(lease) = &self.native_lease {
+            lease.release();
+        }
+        if self.entry.users.fetch_sub(1, Ordering::AcqRel) == 1 && self.native_lease.is_none() {
             mark_idle(&self.entry, &self.manager);
         }
     }
@@ -876,6 +969,7 @@ impl HandleState {
         offset: u64,
         length: u32,
     ) -> Result<Vec<u8>, String> {
+        let _operation = self.io_tasks.register().ok_or("Torrent stream stopped")?;
         if self.stopped.load(Ordering::Acquire) || length > MAX_RANGE_BYTES {
             return Err("Torrent stream unavailable".into());
         }
@@ -896,25 +990,35 @@ impl HandleState {
             return Err("Invalid torrent range".into());
         }
         let count = u64::from(length).min(file.size - offset) as usize;
-        let mut reader = self
-            .entry
-            .managed
-            .clone()
-            .stream(index as usize)
-            .map_err(|_| "Torrent stream unavailable")?;
-        reader
-            .seek(std::io::SeekFrom::Start(offset))
-            .await
-            .map_err(|_| "Torrent seek failed")?;
-        let mut bytes = vec![0; count];
-        timeout(READ_TIMEOUT, reader.read_exact(&mut bytes))
-            .await
-            .map_err(|_| "Torrent read timed out")?
-            .map_err(|_| "Torrent read failed")?;
-        if self.stopped.load(Ordering::Acquire) {
-            return Err("Torrent stream stopped".into());
+        let work = self
+            .io_tasks
+            .track_future(async {
+                let mut reader = self
+                    .entry
+                    .managed
+                    .clone()
+                    .stream(index as usize)
+                    .map_err(|_| "Torrent stream unavailable")?;
+                reader
+                    .seek(std::io::SeekFrom::Start(offset))
+                    .await
+                    .map_err(|_| "Torrent seek failed")?;
+                let mut bytes = vec![0; count];
+                timeout(READ_TIMEOUT, reader.read_exact(&mut bytes))
+                    .await
+                    .map_err(|_| "Torrent read timed out")?
+                    .map_err(|_| "Torrent read failed")?;
+                if self.stopped.load(Ordering::Acquire) {
+                    return Err("Torrent stream stopped".into());
+                }
+                Ok(bytes)
+            })
+            .ok_or("Torrent stream stopped")?;
+        tokio::select! {
+            biased;
+            _ = self.io_tasks.cancellation_token().cancelled() => Err("Torrent stream stopped".into()),
+            result = work => result,
         }
-        Ok(bytes)
     }
 }
 impl Entry {
@@ -941,6 +1045,9 @@ impl Drop for TorrentReadGuard {
     }
 }
 fn mark_idle(entry: &Arc<Entry>, manager: &Arc<ManagerInner>) {
+    if manager.network_policy.is_native() {
+        return;
+    }
     if !entry.is_unused() {
         return;
     }

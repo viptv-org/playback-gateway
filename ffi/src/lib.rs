@@ -18,6 +18,8 @@ pub enum TorrentError {
     OperationFailed,
     #[error("Torrent handle stopped")]
     Stopped,
+    #[error("Strict handles require status polling")]
+    CallbacksUnsupported,
 }
 #[derive(Clone, uniffi::Record)]
 pub struct TorrentOptions {
@@ -65,6 +67,60 @@ pub struct TorrentHandle {
     handle: playback_engine::TorrentHandle,
     callback: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum TorrentSettlement {
+    Settled,
+    SettlementFailed,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum TorrentAcquisitionStatus {
+    Preparing,
+    Ready,
+    Cancelled,
+    Failed,
+    SettlementFailed,
+}
+#[derive(uniffi::Object)]
+pub struct TorrentAcquisition {
+    acquisition: playback_engine::TorrentAcquisition,
+}
+fn settlement(value: playback_engine::Settlement) -> TorrentSettlement {
+    match value {
+        playback_engine::Settlement::Settled => TorrentSettlement::Settled,
+        playback_engine::Settlement::SettlementFailed => TorrentSettlement::SettlementFailed,
+    }
+}
+#[uniffi::export]
+impl TorrentAcquisition {
+    /// Blocks only until the captured startup deadline; call on an IO dispatcher.
+    pub fn wait_ready(&self) -> Result<Arc<TorrentHandle>, TorrentError> {
+        let handle = runtime()?
+            .block_on(self.acquisition.wait_ready())
+            .map_err(|_| TorrentError::OperationFailed)?;
+        Ok(Arc::new(TorrentHandle {
+            handle,
+            callback: Mutex::new(None),
+        }))
+    }
+    pub fn status(&self) -> TorrentAcquisitionStatus {
+        use playback_engine::AcquisitionStatus as S;
+        match self.acquisition.status() {
+            S::Preparing => TorrentAcquisitionStatus::Preparing,
+            S::Ready => TorrentAcquisitionStatus::Ready,
+            S::Cancelled => TorrentAcquisitionStatus::Cancelled,
+            S::Failed => TorrentAcquisitionStatus::Failed,
+            S::SettlementFailed => TorrentAcquisitionStatus::SettlementFailed,
+        }
+    }
+    pub fn cancel(&self) {
+        self.acquisition.cancel();
+    }
+    pub fn cancel_and_wait(&self) -> Result<TorrentSettlement, TorrentError> {
+        Ok(settlement(
+            runtime()?.block_on(self.acquisition.cancel_and_wait()),
+        ))
+    }
+}
 // A process-lifetime runtime avoids dropping a runtime from a foreign callback
 // on one of its own workers. Managers still cancel all session IO on final drop.
 fn runtime() -> Result<&'static Runtime, TorrentError> {
@@ -106,6 +162,74 @@ impl TorrentClient {
         .map_err(|_| TorrentError::InvalidOptions)?;
         runtime()?;
         Ok(Arc::new(Self { manager }))
+    }
+    /// Strict production construction fixes the public discovery policy.
+    #[uniffi::constructor]
+    pub fn new_native_public(
+        cache_dir: String,
+        max_cache_bytes: u64,
+    ) -> Result<Arc<Self>, TorrentError> {
+        if cache_dir.is_empty() {
+            return Err(TorrentError::InvalidOptions);
+        }
+        runtime()?;
+        let manager = TorrentManager::new_native_public(TorrentConfig {
+            enabled: true,
+            cache_dir: PathBuf::from(cache_dir),
+            max_bytes: max_cache_bytes,
+            ..Default::default()
+        })
+        .map_err(|_| TorrentError::InvalidOptions)?;
+        Ok(Arc::new(Self { manager }))
+    }
+    /// Return owned cancellation before IO. The caller supplies its remaining
+    /// monotonic startup budget, bounded to a total of thirty seconds.
+    pub fn begin_selected(
+        &self,
+        magnet: String,
+        info_hash: String,
+        file_index: u32,
+        verified_size: u64,
+        remaining_budget_millis: u32,
+    ) -> Result<Arc<TorrentAcquisition>, TorrentError> {
+        let _enter = runtime()?.enter();
+        let acquisition = self
+            .manager
+            .begin_native_selected_magnet(
+                "native".into(),
+                magnet,
+                info_hash,
+                file_index,
+                verified_size,
+                Duration::from_millis(remaining_budget_millis.into()),
+            )
+            .map_err(|_| TorrentError::OperationFailed)?;
+        Ok(Arc::new(TorrentAcquisition { acquisition }))
+    }
+    pub fn begin_selected_metainfo(
+        &self,
+        metainfo: Vec<u8>,
+        info_hash: String,
+        file_index: u32,
+        verified_size: u64,
+        remaining_budget_millis: u32,
+    ) -> Result<Arc<TorrentAcquisition>, TorrentError> {
+        let _enter = runtime()?.enter();
+        let acquisition = self
+            .manager
+            .begin_native_selected_metainfo(
+                "native".into(),
+                metainfo,
+                info_hash,
+                file_index,
+                verified_size,
+                Duration::from_millis(remaining_budget_millis.into()),
+            )
+            .map_err(|_| TorrentError::OperationFailed)?;
+        Ok(Arc::new(TorrentAcquisition { acquisition }))
+    }
+    pub fn has_failed_settlement(&self) -> bool {
+        self.manager.has_failed_settlement()
     }
     pub fn start(
         &self,
@@ -176,6 +300,36 @@ impl TorrentClient {
             .map_err(|_| TorrentError::OperationFailed)
     }
 }
+#[cfg(feature = "test-network-policy")]
+#[uniffi::export]
+impl TorrentClient {
+    /// Separately compiled test artifacts only; absent from Android release bindings.
+    #[uniffi::constructor]
+    pub fn new_native_owned(
+        cache_dir: String,
+        max_cache_bytes: u64,
+        owned_peers: Vec<String>,
+    ) -> Result<Arc<Self>, TorrentError> {
+        runtime()?;
+        let peers = owned_peers
+            .iter()
+            .map(|p| p.parse())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| TorrentError::InvalidOptions)?;
+        let manager = TorrentManager::new_native_owned(
+            TorrentConfig {
+                enabled: true,
+                cache_dir: PathBuf::from(cache_dir),
+                max_bytes: max_cache_bytes,
+                enable_dht: false,
+                ..Default::default()
+            },
+            peers,
+        )
+        .map_err(|_| TorrentError::InvalidOptions)?;
+        Ok(Arc::new(Self { manager }))
+    }
+}
 #[uniffi::export]
 impl TorrentHandle {
     pub fn files(&self) -> Vec<TorrentFile> {
@@ -220,6 +374,9 @@ impl TorrentHandle {
         self: Arc<Self>,
         listener: Box<dyn TorrentProgressListener>,
     ) -> Result<(), TorrentError> {
+        if self.handle.is_strict() {
+            return Err(TorrentError::CallbacksUnsupported);
+        }
         let mut slot = self
             .callback
             .lock()
@@ -244,6 +401,17 @@ impl TorrentHandle {
             }
         }));
         Ok(())
+    }
+    /// Only strict handles can prove completion without foreign callbacks.
+    pub fn stop_and_wait(&self) -> Result<TorrentSettlement, TorrentError> {
+        if !self.handle.is_strict() {
+            self.stop();
+            return Ok(TorrentSettlement::SettlementFailed);
+        }
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        Ok(settlement(
+            runtime()?.block_on(self.handle.stop_and_settle_until(deadline)),
+        ))
     }
     pub fn stop(&self) {
         self.handle.stop();

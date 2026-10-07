@@ -114,6 +114,16 @@ cancellable acquisition, bounded joined shutdown or public-only peer/DHT policy,
 and do not qualify a native authorization integration. See the
 [facade boundaries](ffi/README.md#opt-in-independent-selected-file-leases).
 
+The separate strict native path uses `new_native_public` and
+`begin_native_selected_magnet` / `begin_native_selected_metainfo` with an exact
+hash/index/verified size and the caller's remaining monotonic budget. It owns
+cancellation before IO, shares pending exact-file payloads with independent byte
+grants, and exposes joined retirement or sticky failed settlement. Strict foreign
+handles use status polling and refuse callbacks. See
+[owned selected acquisitions](ffi/README.md#owned-strict-selected-acquisitions)
+for the ABI and remaining qualification limits; this does not activate a client
+or establish a bound on arbitrary stalled OS IO.
+
 Native integrations can construct `TorrentManager::new_native_public` and use
 `start_native_selected_magnet` / `start_native_selected_metainfo` with an exact
 canonical hash, file index and verified selected size. These sessions enforce

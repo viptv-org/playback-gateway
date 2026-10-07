@@ -66,15 +66,13 @@ observe its stop. Legacy `start`/`startMetainfo` continue to share same-file lea
 state and allow all torrent file indices; gateway/archive callers retain those
 semantics. Do not infer independent authority from a legacy handle's clone.
 
-These methods are not authorization-ready native playback qualification. Starts
-still block before a handle exists; stop aborts rather than joins the listener,
-and missing-piece reads can wait up to 30 seconds. Total acquisition deadlines,
-cancellable acquisition, bounded joined reader/session/dependency settlement,
-public-only peer/DHT/bootstrap filtering and bounded dependency metadata
-allocation remain required work. No capability advertisement or activation is
-provided by this facade. Status remains whole-torrent byte progress, not playback
-completion or history. Android ABI/device and full license qualification are
-separate gates.
+These compatibility methods are not native authorization qualification. Starts
+block before a handle exists and plain stop only signals cleanup. Use the owned
+strict acquisition APIs below for one startup deadline, cancellable acquisition,
+public-only network policy and joined retirement receipts. No capability
+advertisement or activation is provided by this facade. Status remains
+whole-torrent byte progress, not playback completion or history. Android ABI,
+device and full license qualification are separate gates.
 
 Only BitTorrent v1 over TCP is supported. HTTP trackers are stripped before
 library admission, private tracker torrents are refused, and webseed metainfo
@@ -112,17 +110,71 @@ Outputs are ignored under `ffi/generated/android/jniLibs`; package those
 libraries and `ffi/generated/kotlin` into the consuming Android project.
 ABI compilation and host fixtures do not qualify actual device playback.
 
+## Owned strict selected acquisitions
+
+Construct `TorrentClient.newNativePublic(cacheDir, maxCacheBytes)` for the fixed
+public DHT/TCP policy. The legacy constructor cannot call the strict begin APIs.
+`beginSelected(magnet, infoHash, fileIndex, verifiedSize, remainingBudgetMillis)`
+and `beginSelectedMetainfo(metainfo, infoHash, fileIndex, verifiedSize,
+remainingBudgetMillis)` return a `TorrentAcquisition` before queuing IO. The
+caller supplies its remaining monotonic startup budget; the engine captures one
+absolute deadline before validation and queueing and caps it at thirty seconds.
+Metadata, registry waits, initialization and endpoint creation share that deadline.
+
+Keep the acquisition alive while its returned handle is authorized. Poll
+`status()` or call `waitReady()` on an IO dispatcher. `cancel()` fences ready
+publication and stops byte authority immediately; `cancelAndWait()` uses one
+two-second deadline for joined acquisition, listener, connection, body, native
+reader and final-consumer dependency retirement. It returns `Settled` or the
+static `SettlementFailed`. A late wait result has no usable byte authority.
+Explicit clones retain the same grant and cancellation state.
+
+Same hash/index acquisitions share a pending payload and its full-payload cache
+charge. Their grants, cancellation, random tokens and listeners are independent.
+Different selected indices have separate dependency jobs and full-payload charges.
+Pending jobs retain their provisional directory, session owner and reservation
+through failed or dropped acquisitions. Reaping disposes only closed, joined
+owners without a sticky settlement failure or remaining public handle references.
+An unresolved or failed owner fences further strict admission; a failed settlement
+keeps its charge and cache lock even after delayed work eventually exits.
+
+Strict handles reject `setProgressListener` before spawning any foreign callback.
+Use bounded status polling; strict progress exposes only the selected file's
+size and verified bytes. `stopAndWait()` provides joined handle retirement;
+legacy handles return `SettlementFailed` because their foreign callbacks do not
+have joined invocation receipts. Legacy start methods and explicit clone aliases
+retain their shared/all-file compatibility behavior.
+
+The literal `127.0.0.1` endpoint uses an independent unpredictable 244-bit token
+per grant. GET, HEAD, native reads and single ranges are selected-file only.
+Wrong tokens, other indices, traversal, malformed ranges and multiple Range
+headers return no file bytes; other file sizes are not disclosed.
+
+The `test-network-policy` feature adds a separately compiled
+`newNativeOwned` constructor for exact owned TCP fixtures. It is absent from the
+normal generated Kotlin and Android native artifacts. Run these fixture binaries
+in a loopback-only namespace, with DHT and trackers disabled. Rebuild the normal
+archive-free library before regenerating committed Kotlin with the existing
+`build-bindings.sh` script.
+
+These APIs expose honest completion receipts. Arbitrarily stalled synchronous OS
+IO cannot be forced to exit within two seconds in process; it produces retained,
+sticky failed settlement rather than successful cleanup. Android ABI, decoded
+media, public networking, device resources and distribution remain separate
+qualification gates. Native activation is not provided by this facade.
+
 Run `./ffi/scripts/check-native-deps.sh` to verify the default facade and explicit
 Android native dependency graphs exclude archive/control crates. Both artifact
 build scripts require this check. Dependency exclusion is not a complete license
 review or device qualification.
 
-Run `CARGO_BUILD_JOBS=2 cargo test --locked -p playback-gateway-ffi`. The host
+Run `CARGO_BUILD_JOBS=1 cargo test --locked -p playback-gateway-ffi`. The host
 fixtures use owned TCP seeders with DHT/trackers disabled and exercise legacy
 selection, independent selected-file leases, seek/range bytes, callbacks and
 stop. On Linux run synthetic seeder tests in a loopback-only network namespace:
 the pinned dependency's peer listener binds wildcard interfaces, unlike the byte
 endpoint's literal `127.0.0.1`. Keep fixture peer listeners inaccessible from
-public/LAN interfaces; public-only dependency networking remains unimplemented.
+public/LAN interfaces. Strict clients use the maintained public-only dependency
+policy; these isolated owned fixtures do not qualify public-network operation.
 
 The alignment flags follow [Android's page-size guidance](https://developer.android.com/guide/practices/page-sizes). ELF alignment does not verify APK ZIP alignment or device behavior.
