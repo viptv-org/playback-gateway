@@ -1004,7 +1004,9 @@ impl PeerConnectionHandler for &PeerHandler {
                 }
             }
             Message::Extended(ExtendedMessage::UtPex(pex)) => {
-                if self.state.metadata.info.private {
+                if self.state.shared.connector.network_policy.is_native() {
+                    return Ok(());
+                } else if self.state.metadata.info.private {
                     warn!(
                         "recieved noncompliant PEX message from {}, ignoring",
                         self.addr
@@ -1049,7 +1051,10 @@ impl PeerConnectionHandler for &PeerHandler {
     }
 
     fn on_extended_handshake(&self, hs: &ExtendedHandshake<ByteBuf>) -> anyhow::Result<()> {
-        if !self.state.metadata.info.private && hs.ut_pex().is_some() {
+        if !self.state.shared.connector.network_policy.is_native()
+            && !self.state.metadata.info.private
+            && hs.ut_pex().is_some()
+        {
             self.state.clone().spawn(
                 error_span!(
                     parent: self.state.shared.span.clone(),

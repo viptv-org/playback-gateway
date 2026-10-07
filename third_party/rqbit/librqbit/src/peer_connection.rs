@@ -268,7 +268,7 @@ impl<H: PeerConnectionHandler> PeerConnection<H> {
         let supports_extended = handshake_supports_extended;
 
         if supports_extended {
-            let mut my_extended = ExtendedHandshake::new();
+            let mut my_extended = native_extended_handshake(&self.connector.network_policy);
             my_extended.v = Some(ByteBuf(crate::client_name_and_version().as_bytes()));
             my_extended.yourip = Some(PeerIP(self.addr.ip()));
             self.handler
@@ -446,5 +446,31 @@ impl<H: PeerConnectionHandler> PeerConnection<H> {
                 r
             }
         }
+    }
+}
+
+fn native_extended_handshake(
+    policy: &librqbit_core::network_policy::NetworkPolicy,
+) -> ExtendedHandshake<ByteBuf<'static>> {
+    let mut handshake = ExtendedHandshake::new();
+    if policy.is_native() {
+        handshake
+            .m
+            .remove(peer_binary_protocol::EXTENDED_UT_PEX_KEY);
+    }
+    handshake
+}
+#[cfg(test)]
+mod native_policy_tests {
+    use super::*;
+    #[test]
+    fn native_handshake_does_not_advertise_peer_exchange() {
+        use librqbit_core::network_policy::NetworkPolicy;
+        assert!(native_extended_handshake(&NetworkPolicy::Gateway)
+            .ut_pex()
+            .is_some());
+        let handshake = native_extended_handshake(&NetworkPolicy::PublicDhtTcpV1);
+        assert!(handshake.ut_pex().is_none());
+        assert!(handshake.ut_metadata().is_some());
     }
 }

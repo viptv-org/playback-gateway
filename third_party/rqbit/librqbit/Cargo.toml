@@ -13,6 +13,7 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
+test-network-policy = ["librqbit-core/test-network-policy"]
 default = ["default-tls", "http-api-client"]
 tokio-console = ["console-subscriber", "tokio/tracing"]
 http-api = ["axum", "tower-http"]

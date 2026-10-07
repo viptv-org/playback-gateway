@@ -1,0 +1,17 @@
+[package]
+name = "torrent-policy"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-only"
+description = "Generic bounded v1 metainfo and native torrent network policy"
+
+[features]
+default = []
+test-network-policy = []
+
+[dependencies]
+sha1 = "0.10.6"
+hex = "0.4"
+unicode-normalization = "0.1.24"
+url = "2"
+anyhow = "1"

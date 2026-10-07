@@ -1,3 +1,9 @@
 [workspace]
 resolver = "2"
 members = ["librqbit", "librqbit_core", "dht", "tracker_comms"]
+
+[patch.crates-io]
+librqbit = { path = "librqbit" }
+librqbit-core = { path = "librqbit_core" }
+librqbit-dht = { path = "dht" }
+librqbit-tracker-comms = { path = "tracker_comms" }

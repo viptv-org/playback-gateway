@@ -39,6 +39,7 @@ pub(crate) async fn read_metainfo_from_peer(
     >();
     let (writer_tx, writer_rx) = tokio::sync::mpsc::unbounded_channel::<WriterRequest>();
     let handler = Handler {
+        strict_metadata: connector.network_policy.is_native(),
         addr,
         info_hash,
         writer_tx,
@@ -78,8 +79,8 @@ struct HandlerLocked {
 
 impl HandlerLocked {
     fn new(metadata_size: u32) -> anyhow::Result<Self> {
-        if metadata_size > 32 * 1024 * 1024 {
-            anyhow::bail!("metadata size {} is too big", metadata_size);
+        if metadata_size == 0 || metadata_size > 4 * 1024 * 1024 {
+            anyhow::bail!("Invalid native metadata size");
         }
         let buffer = vec![0u8; metadata_size as usize];
         let total_pieces: usize = (metadata_size as u64)
@@ -140,6 +141,7 @@ impl HandlerLocked {
 pub type TorrentAndInfoBytes = (TorrentMetaV1Info<ByteBufOwned>, ByteBufOwned);
 
 struct Handler {
+    strict_metadata: bool,
     addr: SocketAddr,
     info_hash: Id20,
     writer_tx: UnboundedSender<WriterRequest>,
@@ -168,10 +170,13 @@ impl PeerConnectionHandler for Handler {
 
         if let Message::Extended(ExtendedMessage::UtMetadata(UtMetadata::Data {
             piece,
-            total_size: _,
+            total_size,
             data,
         })) = msg
         {
+            if self.locked.read().as_ref().map(|l| l.metadata_size) != Some(total_size) {
+                anyhow::bail!("Invalid native metadata size");
+            }
             let piece_ready =
                 self.locked
                     .write()
@@ -180,6 +185,9 @@ impl PeerConnectionHandler for Handler {
                     .record_piece(piece, &data, self.info_hash)?;
             if piece_ready {
                 let buf = Bytes::from(self.locked.write().take().unwrap().buffer);
+                if self.strict_metadata {
+                    librqbit_core::native_metainfo::validate_native_info(&buf)?;
+                }
                 let info = from_bytes::<TorrentMetaV1Info<ByteBuf>>(&buf)
                     .map(|i| {
                         use clone_to_owned::CloneToOwned;
@@ -254,6 +262,12 @@ mod tests {
     use crate::spawn_utils::BlockingSpawner;
 
     use super::read_metainfo_from_peer;
+
+    #[test]
+    fn native_metadata_advertisement_is_bounded_before_buffer_allocation() {
+        assert!(super::HandlerLocked::new(4 * 1024 * 1024 + 1).is_err());
+        assert!(super::HandlerLocked::new(0).is_err());
+    }
 
     static LOG_INIT: Once = std::sync::Once::new();
 

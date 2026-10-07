@@ -1,5 +1,9 @@
 // Maintained playback-gateway changes: owned cancellation and joined settlement.
-use librqbit_core::owned_tasks::OwnedTasks;
+use librqbit_core::{
+    native_metainfo::{vet_native_metainfo, NativeSelection},
+    network_policy::NetworkPolicy,
+    owned_tasks::OwnedTasks,
+};
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
@@ -112,7 +116,8 @@ pub struct Session {
     dht: Option<Dht>,
     pub(crate) connector: Arc<StreamConnector>,
     reqwest_client: reqwest::Client,
-    udp_tracker_client: UdpTrackerClient,
+    udp_tracker_client: Option<UdpTrackerClient>,
+    network_policy: NetworkPolicy,
 
     // Lifecycle management
     cancellation_token: CancellationToken,
@@ -234,6 +239,9 @@ fn merge_two_optional_streams<T>(
 // Serialize/deserialize is for Tauri.
 #[derive(Default, Serialize, Deserialize)]
 pub struct AddTorrentOptions {
+    /// Non-wire, caller-verified exact file authority required by native sessions.
+    #[serde(skip)]
+    pub native_selection: Option<NativeSelection>,
     /// Start in paused state.
     #[serde(default)]
     pub paused: bool,
@@ -382,6 +390,10 @@ impl SessionPersistenceConfig {
 
 #[derive(Default)]
 pub struct SessionOptions {
+    /// Explicit engine policy, never supplied by source metadata or serialized input.
+    pub network_policy: NetworkPolicy,
+    /// Suppress tracker client construction, including its UDP socket and worker.
+    pub disable_trackers: bool,
     /// Turn on to disable DHT.
     pub disable_dht: bool,
     /// Turn on to disable DHT persistence. By default it will re-use stored DHT
@@ -504,6 +516,24 @@ impl Session {
         mut opts: SessionOptions,
     ) -> BoxFuture<'static, anyhow::Result<Arc<Self>>> {
         async move {
+            if opts.network_policy.is_native() {
+                if opts.enable_upnp_port_forwarding
+                    || opts.socks_proxy_url.is_some()
+                    || opts.blocklist_url.is_some()
+                    || opts.persistence.is_some()
+                    || opts.fastresume
+                    || opts.listen_port_range.is_some()
+                    || opts.dht_config.is_some()
+                    || !opts.trackers.is_empty()
+                {
+                    bail!("Native session configuration denied");
+                }
+                opts.disable_dht_persistence = true;
+                opts.disable_trackers = true;
+                if !opts.network_policy.allows_dht() {
+                    opts.disable_dht = true;
+                }
+            }
             let peer_id = opts
                 .peer_id
                 .unwrap_or_else(|| generate_azereus_style(*b"rQ", crate_version!()));
@@ -542,6 +572,7 @@ impl Session {
                 let dht = if opts.disable_dht_persistence {
                     DhtBuilder::with_config(DhtConfig {
                         task_owner: Some(tasks.clone()),
+                        network_policy: opts.network_policy.clone(),
                         ..Default::default()
                     })
                     .await
@@ -634,7 +665,10 @@ impl Session {
                 builder.build().context("error building HTTP(S) client")?
             };
 
-            let stream_connector = Arc::new(StreamConnector::from(proxy_config));
+            let stream_connector = Arc::new(StreamConnector::new(
+                proxy_config,
+                opts.network_policy.clone(),
+            ));
 
             let blocklist: blocklist::Blocklist = if let Some(blocklist_url) = opts.blocklist_url {
                 blocklist::Blocklist::load_from_url(&blocklist_url)
@@ -645,9 +679,15 @@ impl Session {
                 blocklist::Blocklist::empty()
             };
 
-            let udp_tracker_client = UdpTrackerClient::new_owned(tasks.child())
-                .await
-                .context("error creating UDP tracker client")?;
+            let udp_tracker_client = if opts.disable_trackers {
+                None
+            } else {
+                Some(
+                    UdpTrackerClient::new_owned(tasks.child())
+                        .await
+                        .context("error creating UDP tracker client")?,
+                )
+            };
 
             let session = Arc::new(Self {
                 persistence,
@@ -673,6 +713,7 @@ impl Session {
                     opts.concurrent_init_limit.unwrap_or(3),
                 )),
                 udp_tracker_client,
+                network_policy: opts.network_policy,
                 ratelimits: Limits::new(opts.ratelimits),
                 trackers: opts.trackers,
                 #[cfg(feature = "disable-upload")]
@@ -910,13 +951,18 @@ impl Session {
         if let Some(dht) = self.dht.as_ref() {
             dht.tasks().cancel();
         }
-        self.udp_tracker_client.cancel();
+        if let Some(client) = self.udp_tracker_client.as_ref() {
+            client.cancel();
+        }
         let session_done = self.tasks.wait_until(deadline).await;
         let dht_done = match self.dht.as_ref() {
             Some(dht) => dht.tasks().wait_until(deadline).await,
             None => true,
         };
-        let tracker_done = self.udp_tracker_client.tasks().wait_until(deadline).await;
+        let tracker_done = match self.udp_tracker_client.as_ref() {
+            Some(client) => client.tasks().wait_until(deadline).await,
+            None => true,
+        };
         // Optional persistent stores can own driver tasks outside this worker
         // registry. Do not certify those configurations without their receipt.
         let settled = session_done && dht_done && tracker_done && self.persistence.is_none();
@@ -943,7 +989,10 @@ impl Session {
                 .dht
                 .as_ref()
                 .is_some_and(|dht| dht.tasks().has_pending_work())
-            || self.udp_tracker_client.tasks().has_pending_work()
+            || self
+                .udp_tracker_client
+                .as_ref()
+                .is_some_and(|c| c.tasks().has_pending_work())
     }
     pub fn has_failed_settlement(&self) -> bool {
         self.tasks.has_failed_settlement()
@@ -951,7 +1000,10 @@ impl Session {
                 .dht
                 .as_ref()
                 .is_some_and(|dht| dht.tasks().has_failed_settlement())
-            || self.udp_tracker_client.tasks().has_failed_settlement()
+            || self
+                .udp_tracker_client
+                .as_ref()
+                .is_some_and(|c| c.tasks().has_failed_settlement())
     }
 
     /// Run a callback given the currently managed torrents.
@@ -976,6 +1028,24 @@ impl Session {
                 result = async {
             let _admission = self.tasks.register().context("session is closing")?;
             let mut opts = opts.unwrap_or_default();
+            if self.network_policy.is_native() {
+                let selection = opts.native_selection.context("Native exact selection required")?;
+                if selection.verified_size == 0 || selection.file_index >= 4096 || opts.only_files_regex.is_some()
+                    || opts.only_files.as_deref() != Some(&[selection.file_index as usize])
+                    || opts.trackers.as_ref().is_some_and(|t| !t.is_empty()) {
+                    bail!("Native exact selection denied");
+                }
+                for addr in opts.initial_peers.as_deref().unwrap_or_default() {
+                    // Public source input cannot add peers; fixture policy admits only owned endpoints.
+                    if matches!(self.network_policy, NetworkPolicy::PublicDhtTcpV1) { bail!("Native peer hints denied"); }
+                    self.network_policy.validate_destination(*addr)?;
+                }
+                if let AddTorrent::Url(raw) = &add {
+                    let canonical = format!("magnet:?xt=urn:btih:{}", hex::encode(selection.info_hash));
+                    if raw.as_ref() != canonical { bail!("Native source input denied"); }
+                }
+                opts.disable_trackers = true;
+            }
             let payload_tasks = self.tasks.child();
             let _payload_admission = payload_tasks.register().context("payload is closing")?;
             let add_res = match add {
@@ -1017,6 +1087,11 @@ impl Session {
                             )
                         }
                         AddTorrent::TorrentFileBytes(bytes) => {
+                            let bytes = if self.network_policy.is_native() {
+                                let vetted = vet_native_metainfo(&bytes)?;
+                                opts.native_selection.context("Native exact selection required")?.verify(&vetted)?;
+                                Bytes::copy_from_slice(vetted.canonical_bytes())
+                            } else { bytes };
                             torrent_from_bytes(bytes).context("error decoding torrent")?
                         }
                     };
@@ -1121,6 +1196,11 @@ impl Session {
 
         let private = metadata.as_ref().is_some_and(|m| m.info.private);
 
+        let trackers = if self.network_policy.is_native() || opts.disable_trackers {
+            Vec::new()
+        } else {
+            trackers
+        };
         let make_peer_rx = || {
             self.make_peer_rx(
                 info_hash,
@@ -1167,6 +1247,12 @@ impl Session {
             }
         };
 
+        if self.network_policy.is_native() {
+            let vetted = vet_native_metainfo(&metadata.torrent_bytes)?;
+            opts.native_selection
+                .context("Native exact selection required")?
+                .verify(&vetted)?;
+        }
         trace!("Torrent metadata: {:#?}", &metadata.info);
 
         let only_files = compute_only_files(
@@ -1456,16 +1542,18 @@ impl Session {
             info_hash,
             session: self.clone(),
         };
-        let tracker_rx = TrackerComms::start(
-            info_hash,
-            self.peer_id,
-            trackers.into_iter().collect(),
-            Box::new(tracker_rx_stats),
-            force_tracker_interval,
-            announce_port,
-            self.reqwest_client.clone(),
-            self.udp_tracker_client.clone(),
-        );
+        let tracker_rx = self.udp_tracker_client.as_ref().and_then(|client| {
+            TrackerComms::start(
+                info_hash,
+                self.peer_id,
+                trackers.into_iter().collect(),
+                Box::new(tracker_rx_stats),
+                force_tracker_interval,
+                announce_port,
+                self.reqwest_client.clone(),
+                client.clone(),
+            )
+        });
 
         let initial_peers_rx = if initial_peers.is_empty() {
             None
@@ -1542,7 +1630,15 @@ impl Session {
                 Ok(ResolveMagnetResult {
                     metadata: TorrentMetadata::new(
                         info,
-                        torrent_file_from_info_bytes(&info_bytes, trackers)?,
+                        if self.network_policy.is_native() {
+                            let mut wrapper = Vec::with_capacity(info_bytes.len() + 8);
+                            wrapper.extend_from_slice(b"d4:info");
+                            wrapper.extend_from_slice(&info_bytes);
+                            wrapper.push(b'e');
+                            Bytes::copy_from_slice(vet_native_metainfo(&wrapper)?.canonical_bytes())
+                        } else {
+                            torrent_file_from_info_bytes(&info_bytes, trackers)?
+                        },
                         info_bytes.0,
                     )?,
                     peer_rx: rx,
@@ -1674,5 +1770,96 @@ mod tests {
         assert_eq!(parsed.meta.info, generated_parsed.meta.info);
         assert_eq!(parsed.info_bytes, generated_parsed.info_bytes);
         assert_eq!(parsed_trackers, get_trackers(&generated_parsed.meta));
+    }
+}
+
+#[cfg(test)]
+mod native_policy_tests {
+    use super::*;
+    #[tokio::test]
+    async fn native_session_has_no_hidden_tracker_worker_or_listener() {
+        let folder = tempfile::tempdir().unwrap();
+        let session = Session::new_with_opts(
+            folder.path().to_owned(),
+            SessionOptions {
+                network_policy: NetworkPolicy::PublicDhtTcpV1,
+                disable_dht: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(session.udp_tracker_client.is_none());
+        assert!(session.dht.is_none());
+        assert!(session.tcp_listen_port.is_none());
+        assert!(
+            session
+                .shutdown_and_wait_until(tokio::time::Instant::now() + Duration::from_secs(1))
+                .await
+        );
+    }
+    #[tokio::test]
+    async fn native_discovery_and_identity_refusals_do_not_touch_storage() {
+        let folder = tempfile::tempdir().unwrap();
+        let output = folder.path().join("not-created");
+        for options in [
+            SessionOptions {
+                network_policy: NetworkPolicy::PublicDhtTcpV1,
+                enable_upnp_port_forwarding: true,
+                ..Default::default()
+            },
+            SessionOptions {
+                network_policy: NetworkPolicy::PublicDhtTcpV1,
+                listen_port_range: Some(1..2),
+                ..Default::default()
+            },
+            SessionOptions {
+                network_policy: NetworkPolicy::PublicDhtTcpV1,
+                socks_proxy_url: Some("socks5://127.0.0.1:1".into()),
+                ..Default::default()
+            },
+        ] {
+            assert!(Session::new_with_opts(output.clone(), options)
+                .await
+                .is_err());
+        }
+        let session = Session::new_with_opts(
+            output.clone(),
+            SessionOptions {
+                network_policy: NetworkPolicy::PublicDhtTcpV1,
+                disable_dht: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(session
+            .add_torrent(
+                AddTorrent::from_bytes(b"invalid".to_vec()),
+                Some(AddTorrentOptions::default())
+            )
+            .await
+            .is_err());
+        let selection =
+            NativeSelection::from_hex("0000000000000000000000000000000000000000", 0, 1).unwrap();
+        assert!(session
+            .add_torrent(
+                AddTorrent::from_url(
+                    "magnet:?xt=urn:btih:0000000000000000000000000000000000000000&x.pe=127.0.0.1:1"
+                ),
+                Some(AddTorrentOptions {
+                    native_selection: Some(selection),
+                    only_files: Some(vec![0]),
+                    ..Default::default()
+                })
+            )
+            .await
+            .is_err());
+        assert!(!output.exists());
+        assert!(
+            session
+                .shutdown_and_wait_until(tokio::time::Instant::now() + Duration::from_secs(1))
+                .await
+        );
     }
 }

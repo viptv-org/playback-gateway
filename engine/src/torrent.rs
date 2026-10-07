@@ -2,6 +2,23 @@
 //! the library does not provide the gateway's vetted HTTP egress seam.
 //! A process manager owns independent per-scope sessions and a shared cache budget.
 use crate::torrent_stream::LoopbackStream;
+pub use librqbit::native_metainfo::{NativeMetainfo, NativeSelection};
+use librqbit::network_policy::NetworkPolicy;
+/// Vet upstream metainfo and preserve exact info bytes for an explicit selected file.
+pub fn vet_native_metainfo(
+    bytes: &[u8],
+    expected_hash: Option<&str>,
+    index: u32,
+    expected_size: Option<u64>,
+) -> Result<NativeMetainfo, String> {
+    let vetted = librqbit::native_metainfo::vet_native_metainfo(bytes)
+        .map_err(|_| "Invalid native metainfo")?;
+    vetted
+        .verify_selection(expected_hash, index, expected_size)
+        .map_err(|_| "Native exact selection denied")?;
+    Ok(vetted)
+}
+
 use librqbit::{
     torrent_from_bytes, torrent_from_bytes_ext, AddTorrent, AddTorrentOptions, AddTorrentResponse,
     ByteBufOwned, Session, SessionOptions, TorrentMetaV1Info,
@@ -77,6 +94,7 @@ pub struct TorrentManager {
 struct ManagerInner {
     runtime: OnceCell<tokio::runtime::Handle>,
     config: TorrentConfig,
+    network_policy: NetworkPolicy,
     cache_lock: OnceCell<Arc<std::fs::File>>,
     state: Mutex<ManagerState>,
     settlement_failed: AtomicBool,
@@ -134,6 +152,40 @@ impl std::fmt::Debug for TorrentManager {
 
 impl TorrentManager {
     pub fn new(config: TorrentConfig) -> Result<Self, String> {
+        Self::new_with_policy(config, NetworkPolicy::Gateway)
+    }
+    /// Production native policy has fixed discovery and no source-added peers/listener.
+    pub fn new_native_public(mut config: TorrentConfig) -> Result<Self, String> {
+        if !config.initial_peers.is_empty() || config.listen_port.is_some() {
+            return Err("Native network configuration denied".into());
+        }
+        config.enable_dht = true;
+        Self::new_with_policy(config, NetworkPolicy::PublicDhtTcpV1)
+    }
+    /// Only separately compiled fixture artifacts can admit exact owned private TCP seeders.
+    #[cfg(feature = "test-network-policy")]
+    pub fn new_native_owned(
+        mut config: TorrentConfig,
+        owned: Vec<SocketAddr>,
+    ) -> Result<Self, String> {
+        if config.enable_dht
+            || config.listen_port.is_some()
+            || !config.initial_peers.is_empty()
+            || owned.is_empty()
+        {
+            return Err("Owned fixture configuration denied".into());
+        }
+        let policy = NetworkPolicy::OwnedPrivateTcp(owned.clone());
+        if !owned.iter().all(|a| policy.allows(*a)) {
+            return Err("Owned fixture destination denied".into());
+        }
+        config.initial_peers = owned;
+        Self::new_with_policy(config, policy)
+    }
+    fn new_with_policy(
+        config: TorrentConfig,
+        network_policy: NetworkPolicy,
+    ) -> Result<Self, String> {
         if config.max_bytes < MIN_CACHE_BYTES
             || config.listen_port == Some(u16::MAX)
             || config.listen_port == Some(0)
@@ -144,6 +196,7 @@ impl TorrentManager {
             inner: Arc::new(ManagerInner {
                 runtime: OnceCell::new(),
                 config,
+                network_policy,
                 cache_lock: OnceCell::new(),
                 state: Mutex::new(ManagerState::default()),
                 settlement_failed: AtomicBool::new(false),
@@ -177,8 +230,14 @@ impl TorrentManager {
             .map(|(k, v)| (k.into_owned(), v.into_owned()))
             .collect();
         magnet.query_pairs_mut().clear().extend_pairs(fields);
-        self.start(scope, AddTorrent::from_url(magnet.as_str()), index, mode)
-            .await
+        self.start(
+            scope,
+            AddTorrent::from_url(magnet.as_str()),
+            index,
+            mode,
+            None,
+        )
+        .await
     }
     /// The caller fetches HTTP metainfo using its vetted redirect/DNS policy.
     pub async fn start_metainfo(
@@ -206,6 +265,55 @@ impl TorrentManager {
             AddTorrent::from_bytes(strip_trackers(&bytes)?),
             index,
             mode,
+            None,
+        )
+        .await
+    }
+    pub async fn start_native_selected_metainfo(
+        &self,
+        scope: &str,
+        bytes: Vec<u8>,
+        expected_hash: &str,
+        index: u32,
+        verified_size: u64,
+    ) -> Result<TorrentHandle, String> {
+        if !self.inner.network_policy.is_native() || !self.inner.config.enabled {
+            return Err("Native transport unavailable".into());
+        }
+        let selection = NativeSelection::from_hex(expected_hash, index, verified_size)
+            .map_err(|_| "Native exact selection denied")?;
+        let vetted = vet_native_metainfo(&bytes, Some(expected_hash), index, Some(verified_size))?;
+        self.start(
+            scope,
+            AddTorrent::from_bytes(vetted.canonical_bytes().to_vec()),
+            Some(index),
+            LeaseMode::SelectedFile,
+            Some(selection),
+        )
+        .await
+    }
+    pub async fn start_native_selected_magnet(
+        &self,
+        scope: &str,
+        source: &str,
+        expected_hash: &str,
+        index: u32,
+        verified_size: u64,
+    ) -> Result<TorrentHandle, String> {
+        if !self.inner.network_policy.is_native() || !self.inner.config.enabled {
+            return Err("Native transport unavailable".into());
+        }
+        let selection = NativeSelection::from_hex(expected_hash, index, verified_size)
+            .map_err(|_| "Native exact selection denied")?;
+        if source != format!("magnet:?xt=urn:btih:{expected_hash}") {
+            return Err("Native source input denied".into());
+        }
+        self.start(
+            scope,
+            AddTorrent::from_url(source),
+            Some(index),
+            LeaseMode::SelectedFile,
+            Some(selection),
         )
         .await
     }
@@ -269,7 +377,11 @@ impl TorrentManager {
         input: AddTorrent<'_>,
         index: Option<u32>,
         mode: LeaseMode,
+        native_selection: Option<NativeSelection>,
     ) -> Result<TorrentHandle, String> {
+        if self.inner.network_policy.is_native() && native_selection.is_none() {
+            return Err("Native exact selection required".into());
+        }
         if scope.is_empty() || scope.len() > 256 {
             return Err("Invalid torrent scope".into());
         }
@@ -304,6 +416,11 @@ impl TorrentManager {
             known_hash.and_then(|hash| state.entries.get(&(scope.clone(), hash)).cloned())
         {
             let selected = select_file(&entry.files, index)?;
+            if native_selection.is_some_and(|n| {
+                entry.files.get(selected as usize).map(|f| f.size) != Some(n.verified_size)
+            }) {
+                return Err("Native exact selection denied".into());
+            }
             return self.lease_entry(entry, selected, mode).await;
         }
         let session = match state.scopes.get(&scope) {
@@ -320,10 +437,16 @@ impl TorrentManager {
                 let session = Session::new_with_opts(
                     self.inner.config.cache_dir.clone(),
                     SessionOptions {
+                        network_policy: self.inner.network_policy.clone(),
+                        disable_trackers: self.inner.network_policy.is_native(),
                         disable_dht: !self.inner.config.enable_dht,
                         disable_dht_persistence: true,
                         persistence: None,
-                        listen_port_range: Some(listen..listen + 1),
+                        listen_port_range: if self.inner.network_policy.is_native() {
+                            None
+                        } else {
+                            Some(listen..listen + 1)
+                        },
                         enable_upnp_port_forwarding: false,
                         concurrent_init_limit: Some(2),
                         ..Default::default()
@@ -341,6 +464,8 @@ impl TorrentManager {
                 input,
                 Some(AddTorrentOptions {
                     list_only: true,
+                    native_selection,
+                    only_files: native_selection.map(|n| vec![n.file_index as usize]),
                     disable_trackers: true,
                     initial_peers: Some(self.inner.config.initial_peers.clone()),
                     ..Default::default()
@@ -372,6 +497,12 @@ impl TorrentManager {
             }
         };
         let selected = select_file(&files, index)?;
+        if native_selection.is_some_and(|n| {
+            files.get(selected as usize).map(|f| f.size) != Some(n.verified_size)
+                || hash != hex_hash(n.info_hash)
+        }) {
+            return Err("Native exact selection denied".into());
+        }
         let key = (scope, hash);
         if let Some(entry) = state.entries.get(&key).cloned() {
             return self.lease_entry(entry, selected, mode).await;
@@ -405,6 +536,8 @@ impl TorrentManager {
                             .to_owned(),
                     ),
                     disable_trackers: true,
+                    native_selection,
+                    only_files: native_selection.map(|n| vec![n.file_index as usize]),
                     overwrite: false,
                     initial_peers: Some(self.inner.config.initial_peers.clone()),
                     ..Default::default()
@@ -1079,3 +1212,7 @@ impl Drop for ManagerInner {
 
 #[cfg(test)]
 mod lifetime_tests;
+
+fn hex_hash(hash: [u8; 20]) -> String {
+    hash.iter().map(|b| format!("{b:02x}")).collect()
+}

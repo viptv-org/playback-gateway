@@ -60,3 +60,17 @@ FFmpeg test patterns. Creation commands and provenance accompany
 [decodable fixtures](engine/assets/rar-media/README.md). The temporary RAR writer
 is not redistributed. Cargo.lock pins dependencies; supply-chain/package
 distribution review remains separate from local functional qualification.
+
+## Native metadata validator attribution
+
+The independent `torrent-policy/src/metainfo.rs` adapts VIPTV core's
+`crates/viptv-core/src/native_metainfo.rs`. This generic added crate is GPL-2.0-only
+and carries an explicit SPDX notice; it introduces no product identity. Its
+network policy source is Apache-2.0. Inherited rqbit sources retain their
+Apache-2.0 notices and package label; maintained librqbit-core consumes the
+separate GPL-2.0-only policy crate. Native artifact inventory must report both
+licenses and preserve notices. This does not clear unrelated distribution or
+archive license findings.
+
+The generic native network/metadata boundary and versioned bootstrap inventory
+are documented in [native network policy](docs/NATIVE_NETWORK_POLICY.md).

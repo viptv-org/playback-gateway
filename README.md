@@ -114,6 +114,18 @@ cancellable acquisition, bounded joined shutdown or public-only peer/DHT policy,
 and do not qualify a native authorization integration. See the
 [facade boundaries](ffi/README.md#opt-in-independent-selected-file-leases).
 
+Native integrations can construct `TorrentManager::new_native_public` and use
+`start_native_selected_magnet` / `start_native_selected_metainfo` with an exact
+canonical hash, file index and verified selected size. These sessions enforce
+public destination policy and bounded metadata at the dependency boundaries,
+suppress tracker/PEX workers and use a versioned bootstrap inventory. They
+require the generic expected selection before payload file access. The separate
+`test-network-policy` build feature permits only exact owned private TCP seeders
+with DHT disabled; production native artifacts exclude it. Backend metadata
+consumers can adopt the lightweight `torrent-policy` crate without the engine.
+See [native network policy](docs/NATIVE_NETWORK_POLICY.md). Acquisition lifetime,
+FFI adoption and physical/public-peer qualification remain independent gates.
+
 The dependency additions are pinned in Cargo.lock. See
 [provenance](PROVENANCE.md) for licensing restrictions. Never enable librqbit
 tracing targets in production: they emit peer addresses and torrent identifiers.

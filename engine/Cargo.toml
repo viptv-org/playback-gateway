@@ -6,6 +6,7 @@ license = "GPL-2.0-only"
 description = "Managed, capability-addressed HLS playback engine: direct delivery, the managed ladder, probing and session leases. No database, no identity, no accounts."
 
 [features]
+test-network-policy = ["torrent", "librqbit/test-network-policy"]
 default = ["media", "torrent", "archive"]
 media = ["dep:axum"]
 torrent = ["dep:librqbit", "dep:bencode", "dep:hyper", "dep:hyper-util", "dep:http-body-util"]

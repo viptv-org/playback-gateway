@@ -11,11 +11,13 @@ readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
+test-network-policy = ["torrent-policy/test-network-policy"]
 default = ["sha1-crypto-hash"]
 sha1-crypto-hash = ["bencode/sha1-crypto-hash"]
 sha1-ring = ["bencode/sha1-ring"]
 
 [dependencies]
+torrent-policy = { path = "../../../torrent-policy" }
 tracing = "0.1.40"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 hex = "0.4"

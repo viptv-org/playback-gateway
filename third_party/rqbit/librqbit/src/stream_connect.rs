@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 
 use anyhow::Context;
+use librqbit_core::network_policy::NetworkPolicy;
 
 #[derive(Debug, Clone)]
 pub(crate) struct SocksProxyConfig {
@@ -58,15 +59,28 @@ impl SocksProxyConfig {
 #[derive(Debug, Default)]
 pub(crate) struct StreamConnector {
     proxy_config: Option<SocksProxyConfig>,
+    pub(crate) network_policy: NetworkPolicy,
 }
 
 impl From<Option<SocksProxyConfig>> for StreamConnector {
     fn from(proxy_config: Option<SocksProxyConfig>) -> Self {
-        Self { proxy_config }
+        Self {
+            proxy_config,
+            network_policy: NetworkPolicy::Gateway,
+        }
     }
 }
 
 impl StreamConnector {
+    pub(crate) fn new(
+        proxy_config: Option<SocksProxyConfig>,
+        network_policy: NetworkPolicy,
+    ) -> Self {
+        Self {
+            proxy_config,
+            network_policy,
+        }
+    }
     pub async fn connect(
         &self,
         addr: SocketAddr,
@@ -74,6 +88,7 @@ impl StreamConnector {
         Box<dyn tokio::io::AsyncRead + Send + Unpin>,
         Box<dyn tokio::io::AsyncWrite + Send + Unpin>,
     )> {
+        self.network_policy.validate_destination(addr)?;
         if let Some(proxy) = self.proxy_config.as_ref() {
             let (r, w) = proxy.connect(addr).await?;
             return Ok((Box::new(r), Box::new(w)));
@@ -84,5 +99,24 @@ impl StreamConnector {
             .context("error connecting")?
             .into_split();
         Ok((Box::new(r), Box::new(w)))
+    }
+}
+
+#[cfg(test)]
+mod native_policy_tests {
+    use super::*;
+    #[tokio::test]
+    async fn native_denied_tcp_never_reaches_owned_listener() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let connector = StreamConnector::new(None, NetworkPolicy::PublicDhtTcpV1);
+        assert!(connector
+            .connect(listener.local_addr().unwrap())
+            .await
+            .is_err());
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(30), listener.accept())
+                .await
+                .is_err()
+        );
     }
 }

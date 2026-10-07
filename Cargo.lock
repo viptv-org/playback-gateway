@@ -1788,6 +1788,7 @@ dependencies = [
  "serde",
  "tokio",
  "tokio-util",
+ "torrent-policy",
  "tracing",
  "url",
 ]
@@ -2910,6 +2911,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1"
+version = "0.10.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.2.17",
+ "digest 0.10.7",
+]
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3293,6 +3305,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f4f7f0dd8d50a853a531c426359045b1998f04219d88799810762cd4ad314234"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "torrent-policy"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "hex",
+ "sha1",
+ "unicode-normalization",
+ "url",
 ]
 
 [[package]]

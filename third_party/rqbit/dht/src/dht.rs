@@ -27,6 +27,7 @@ use dashmap::DashMap;
 use futures::{
     future::BoxFuture, stream::FuturesUnordered, FutureExt, Stream, StreamExt, TryFutureExt,
 };
+use librqbit_core::network_policy::{NetworkPolicy, PUBLIC_BOOTSTRAP};
 
 use leaky_bucket::RateLimiter;
 use librqbit_core::{
@@ -506,7 +507,10 @@ impl<C: RecursiveRequestCallbacks> RecursiveRequest<C> {
 
         if let Some(peers) = response.values {
             for peer in peers {
-                self.peer_tx.send(SocketAddr::V4(peer.addr))?;
+                let peer = SocketAddr::V4(peer.addr);
+                if self.dht.network_policy.allows(peer) {
+                    self.peer_tx.send(peer)?;
+                }
             }
         }
 
@@ -563,6 +567,9 @@ impl<C: RecursiveRequestCallbacks> RecursiveRequest<C> {
     }
 
     fn should_request_node(&self, node_id: Id20, addr: SocketAddr, depth: usize) -> bool {
+        if !self.dht.network_policy.allows(addr) {
+            return false;
+        }
         if depth >= self.max_depth {
             return false;
         }
@@ -630,6 +637,7 @@ pub struct DhtState {
 
     cancellation_token: CancellationToken,
     tasks: OwnedTasks,
+    network_policy: NetworkPolicy,
 
     pub(crate) peer_store: PeerStore,
 }
@@ -642,6 +650,7 @@ impl DhtState {
         listen_addr: SocketAddr,
         peer_store: PeerStore,
         tasks: OwnedTasks,
+        network_policy: NetworkPolicy,
     ) -> Self {
         let routing_table = routing_table.unwrap_or_else(|| RoutingTable::new(id, None));
         Self {
@@ -655,6 +664,7 @@ impl DhtState {
             peer_store,
             cancellation_token: tasks.cancellation_token().clone(),
             tasks,
+            network_policy,
         }
     }
 
@@ -682,6 +692,7 @@ impl DhtState {
         request: Request,
         addr: SocketAddr,
     ) -> anyhow::Result<ResponseOrError> {
+        self.network_policy.validate_destination(addr)?;
         self.rate_limiter.acquire_one().await;
         let (tid, message) = self.create_request(request);
         let key = (tid, addr);
@@ -781,6 +792,7 @@ impl DhtState {
         msg: Message<ByteBufOwned>,
         addr: SocketAddr,
     ) -> anyhow::Result<()> {
+        self.network_policy.validate_destination(addr)?;
         let generate_compact_nodes = |target| {
             let nodes = self
                 .routing_table
@@ -996,10 +1008,17 @@ impl DhtWorker {
     }
 
     async fn bootstrap_hostname(&self, hostname: &str) -> anyhow::Result<()> {
-        let addrs = tokio::net::lookup_host(hostname)
+        let addrs: Vec<_> = tokio::net::lookup_host(hostname)
             .await
-            .with_context(|| format!("error looking up {}", hostname))?;
-        RecursiveRequest::find_node_for_routing_table(self.dht.clone(), self.dht.id, addrs).await
+            .context("Bootstrap resolution failed")?
+            .collect();
+        self.dht.network_policy.validate_resolution(&addrs)?;
+        RecursiveRequest::find_node_for_routing_table(
+            self.dht.clone(),
+            self.dht.id,
+            addrs.into_iter(),
+        )
+        .await
     }
 
     async fn bootstrap_hostname_with_backoff(&self, addr: &str) -> anyhow::Result<()> {
@@ -1162,6 +1181,16 @@ impl DhtWorker {
                 ownership,
             }) = input_rx.recv().await
             {
+                if !self.dht.network_policy.allows(addr) {
+                    if let Some(tid) = our_tid {
+                        self.on_send_error(
+                            tid,
+                            addr,
+                            anyhow::anyhow!("Network destination denied"),
+                        );
+                    }
+                    continue;
+                }
                 if our_tid.is_none() {
                     trace!("{}: sending {:?}", addr, &message);
                 }
@@ -1200,6 +1229,9 @@ impl DhtWorker {
                     .recv_from(&mut buf)
                     .await
                     .context("error reading from UDP socket")?;
+                if !self.dht.network_policy.allows(addr) {
+                    continue;
+                }
                 match bprotocol::deserialize_message::<ByteBufOwned>(&buf[..size]) {
                     Ok(msg) => match output_tx.send((msg, addr)).await {
                         Ok(_) => {}
@@ -1281,6 +1313,7 @@ impl DhtWorker {
 
 #[derive(Default)]
 pub struct DhtConfig {
+    pub network_policy: NetworkPolicy,
     pub peer_id: Option<Id20>,
     pub bootstrap_addrs: Option<Vec<String>>,
     pub routing_table: Option<RoutingTable>,
@@ -1301,6 +1334,15 @@ impl DhtState {
     #[inline(never)]
     pub fn with_config(mut config: DhtConfig) -> BoxFuture<'static, anyhow::Result<Arc<Self>>> {
         async move {
+            if config.network_policy.is_native() {
+                if !config.network_policy.allows_dht()
+                    || config.bootstrap_addrs.is_some()
+                    || config.routing_table.is_some()
+                    || config.peer_store.is_some()
+                {
+                    bail!("Native DHT configuration denied");
+                }
+            }
             let tasks = match config.task_owner.take() {
                 Some(owner) => {
                     if config.cancellation_token.is_some() {
@@ -1330,9 +1372,13 @@ impl DhtState {
                 .peer_id
                 .unwrap_or_else(|| (generate_azereus_style(*b"rQ", crate_version!())));
             info!("starting up DHT with peer id {:?}", peer_id);
-            let bootstrap_addrs = config
-                .bootstrap_addrs
-                .unwrap_or_else(|| crate::DHT_BOOTSTRAP.iter().map(|v| v.to_string()).collect());
+            let bootstrap_addrs = if config.network_policy.is_native() {
+                PUBLIC_BOOTSTRAP.iter().map(|s| s.to_string()).collect()
+            } else {
+                config
+                    .bootstrap_addrs
+                    .unwrap_or_else(|| crate::DHT_BOOTSTRAP.iter().map(|v| v.to_string()).collect())
+            };
 
             let (in_tx, in_rx) = unbounded_channel();
             let state = Arc::new(Self::new_internal(
@@ -1342,6 +1388,7 @@ impl DhtState {
                 listen_addr,
                 config.peer_store.unwrap_or_else(|| PeerStore::new(peer_id)),
                 tasks.clone(),
+                config.network_policy,
             ));
 
             let _ = state.tasks.spawn(error_span!("dht"), {
@@ -1394,5 +1441,90 @@ impl DhtState {
 
     pub fn clone_routing_table(&self) -> RoutingTable {
         self.routing_table.read().clone()
+    }
+}
+
+#[cfg(test)]
+mod native_policy_tests {
+    use super::*;
+    fn isolated_state(sender: UnboundedSender<WorkerSendRequest>) -> Arc<DhtState> {
+        let id = Id20::new([0; 20]);
+        Arc::new(DhtState::new_internal(
+            id,
+            sender,
+            None,
+            "127.0.0.1:1".parse().unwrap(),
+            PeerStore::new(id),
+            OwnedTasks::new(CancellationToken::new()),
+            NetworkPolicy::PublicDhtTcpV1,
+        ))
+    }
+    #[tokio::test]
+    async fn native_private_request_and_routing_node_are_refused_before_enqueue() {
+        let (sender, mut receiver) = unbounded_channel();
+        let state = isolated_state(sender);
+        let denied = "127.0.0.1:6881".parse().unwrap();
+        assert!(state.request(Request::Ping, denied).await.is_err());
+        assert!(receiver.try_recv().is_err());
+        let request = RecursiveRequest {
+            tasks: state.tasks.clone(),
+            parent_owner: None,
+            max_depth: 4,
+            info_hash: state.id,
+            request: Request::FindNode(state.id),
+            dht: state.clone(),
+            useful_nodes_limit: 32,
+            useful_nodes: RwLock::new(Vec::new()),
+            peer_tx: unbounded_channel().0,
+            node_tx: unbounded_channel().0,
+            callbacks: RecursiveRequestCallbacksFindNodes {},
+        };
+        assert!(!request.should_request_node(Id20::new([1; 20]), denied, 0));
+        assert!(request.useful_nodes.read().is_empty());
+        state.tasks.cancel();
+    }
+    #[tokio::test]
+    async fn native_final_datagram_boundary_denies_bypass_contact() {
+        let target = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let (sender, receiver) = unbounded_channel();
+        let state = isolated_state(sender.clone());
+        let (_, message) = state.create_request(Request::Ping);
+        sender
+            .send(WorkerSendRequest {
+                our_tid: None,
+                message,
+                addr: target.local_addr().unwrap(),
+                ownership: None,
+            })
+            .unwrap();
+        // Drop the state-held sender by closing receiver admission through a bounded select.
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let worker = DhtWorker {
+            socket,
+            dht: state.clone(),
+        };
+        let (output, _) = channel(1);
+        let _ = tokio::time::timeout(
+            Duration::from_millis(30),
+            worker.framer(&worker.socket, receiver, output),
+        )
+        .await;
+        let mut buffer = [0; 1024];
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), target.recv_from(&mut buffer))
+                .await
+                .is_err()
+        );
+        state.tasks.cancel();
+    }
+    #[tokio::test]
+    async fn native_bootstrap_override_is_denied_before_udp_bind() {
+        assert!(DhtState::with_config(DhtConfig {
+            network_policy: NetworkPolicy::PublicDhtTcpV1,
+            bootstrap_addrs: Some(vec!["127.0.0.1:1".into()]),
+            ..Default::default()
+        })
+        .await
+        .is_err());
     }
 }

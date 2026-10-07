@@ -19,3 +19,6 @@ assert_cfg::exactly_one! {
 }
 
 pub mod owned_tasks;
+
+pub mod native_metainfo;
+pub mod network_policy;

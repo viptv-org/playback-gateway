@@ -12,5 +12,10 @@ for features in default torrent; do
     echo "Native $features dependency graph contains archive/control implementation." >&2
     exit 1
   fi
+  feature_graph="$(cargo tree --locked -p playback-gateway-ffi "${options[@]}" --edges features --prefix none)"
+  if grep -Fq 'feature "test-network-policy"' <<<"$feature_graph"; then
+    echo "Native artifact graph enables the isolated fixture policy." >&2
+    exit 1
+  fi
   echo "Verified native $features dependency graph excludes archive/control crates."
 done
