@@ -914,9 +914,9 @@ fun uniffi_playback_gateway_ffi_fn_constructor_torrentclient_new(`cacheDir`: Rus
 ): Pointer
 fun uniffi_playback_gateway_ffi_fn_constructor_torrentclient_new_native_public(`cacheDir`: RustBuffer.ByValue,`maxCacheBytes`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Pointer
-fun uniffi_playback_gateway_ffi_fn_method_torrentclient_begin_selected(`ptr`: Pointer,`magnet`: RustBuffer.ByValue,`infoHash`: RustBuffer.ByValue,`fileIndex`: Int,`verifiedSize`: Long,`remainingBudgetMillis`: Int,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_playback_gateway_ffi_fn_method_torrentclient_begin_selected(`ptr`: Pointer,`magnet`: RustBuffer.ByValue,`infoHash`: RustBuffer.ByValue,`fileIndex`: Int,`verifiedSize`: RustBuffer.ByValue,`remainingBudgetMillis`: Int,uniffi_out_err: UniffiRustCallStatus,
 ): Pointer
-fun uniffi_playback_gateway_ffi_fn_method_torrentclient_begin_selected_metainfo(`ptr`: Pointer,`metainfo`: RustBuffer.ByValue,`infoHash`: RustBuffer.ByValue,`fileIndex`: Int,`verifiedSize`: Long,`remainingBudgetMillis`: Int,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_playback_gateway_ffi_fn_method_torrentclient_begin_selected_metainfo(`ptr`: Pointer,`metainfo`: RustBuffer.ByValue,`infoHash`: RustBuffer.ByValue,`fileIndex`: Int,`verifiedSize`: RustBuffer.ByValue,`remainingBudgetMillis`: Int,uniffi_out_err: UniffiRustCallStatus,
 ): Pointer
 fun uniffi_playback_gateway_ffi_fn_method_torrentclient_has_failed_settlement(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
 ): Byte
@@ -1093,10 +1093,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_playback_gateway_ffi_checksum_method_torrentacquisition_wait_ready() != 49803.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_playback_gateway_ffi_checksum_method_torrentclient_begin_selected() != 383.toShort()) {
+    if (lib.uniffi_playback_gateway_ffi_checksum_method_torrentclient_begin_selected() != 976.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_playback_gateway_ffi_checksum_method_torrentclient_begin_selected_metainfo() != 32945.toShort()) {
+    if (lib.uniffi_playback_gateway_ffi_checksum_method_torrentclient_begin_selected_metainfo() != 54112.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_playback_gateway_ffi_checksum_method_torrentclient_has_failed_settlement() != 51585.toShort()) {
@@ -1883,9 +1883,9 @@ public interface TorrentClientInterface {
      * Return owned cancellation before IO. The caller supplies its remaining
      * monotonic startup budget, bounded to a total of thirty seconds.
      */
-    fun `beginSelected`(`magnet`: kotlin.String, `infoHash`: kotlin.String, `fileIndex`: kotlin.UInt, `verifiedSize`: kotlin.ULong, `remainingBudgetMillis`: kotlin.UInt): TorrentAcquisition
+    fun `beginSelected`(`magnet`: kotlin.String, `infoHash`: kotlin.String, `fileIndex`: kotlin.UInt, `verifiedSize`: kotlin.ULong?, `remainingBudgetMillis`: kotlin.UInt): TorrentAcquisition
 
-    fun `beginSelectedMetainfo`(`metainfo`: kotlin.ByteArray, `infoHash`: kotlin.String, `fileIndex`: kotlin.UInt, `verifiedSize`: kotlin.ULong, `remainingBudgetMillis`: kotlin.UInt): TorrentAcquisition
+    fun `beginSelectedMetainfo`(`metainfo`: kotlin.ByteArray, `infoHash`: kotlin.String, `fileIndex`: kotlin.UInt, `verifiedSize`: kotlin.ULong?, `remainingBudgetMillis`: kotlin.UInt): TorrentAcquisition
 
     fun `hasFailedSettlement`(): kotlin.Boolean
 
@@ -2011,12 +2011,12 @@ open class TorrentClient: Disposable, AutoCloseable, TorrentClientInterface
      * Return owned cancellation before IO. The caller supplies its remaining
      * monotonic startup budget, bounded to a total of thirty seconds.
      */
-    @Throws(TorrentException::class)override fun `beginSelected`(`magnet`: kotlin.String, `infoHash`: kotlin.String, `fileIndex`: kotlin.UInt, `verifiedSize`: kotlin.ULong, `remainingBudgetMillis`: kotlin.UInt): TorrentAcquisition {
+    @Throws(TorrentException::class)override fun `beginSelected`(`magnet`: kotlin.String, `infoHash`: kotlin.String, `fileIndex`: kotlin.UInt, `verifiedSize`: kotlin.ULong?, `remainingBudgetMillis`: kotlin.UInt): TorrentAcquisition {
             return FfiConverterTypeTorrentAcquisition.lift(
     callWithPointer {
     uniffiRustCallWithError(TorrentException) { _status ->
     UniffiLib.INSTANCE.uniffi_playback_gateway_ffi_fn_method_torrentclient_begin_selected(
-        it, FfiConverterString.lower(`magnet`),FfiConverterString.lower(`infoHash`),FfiConverterUInt.lower(`fileIndex`),FfiConverterULong.lower(`verifiedSize`),FfiConverterUInt.lower(`remainingBudgetMillis`),_status)
+        it, FfiConverterString.lower(`magnet`),FfiConverterString.lower(`infoHash`),FfiConverterUInt.lower(`fileIndex`),FfiConverterOptionalULong.lower(`verifiedSize`),FfiConverterUInt.lower(`remainingBudgetMillis`),_status)
 }
     }
     )
@@ -2024,12 +2024,12 @@ open class TorrentClient: Disposable, AutoCloseable, TorrentClientInterface
 
 
 
-    @Throws(TorrentException::class)override fun `beginSelectedMetainfo`(`metainfo`: kotlin.ByteArray, `infoHash`: kotlin.String, `fileIndex`: kotlin.UInt, `verifiedSize`: kotlin.ULong, `remainingBudgetMillis`: kotlin.UInt): TorrentAcquisition {
+    @Throws(TorrentException::class)override fun `beginSelectedMetainfo`(`metainfo`: kotlin.ByteArray, `infoHash`: kotlin.String, `fileIndex`: kotlin.UInt, `verifiedSize`: kotlin.ULong?, `remainingBudgetMillis`: kotlin.UInt): TorrentAcquisition {
             return FfiConverterTypeTorrentAcquisition.lift(
     callWithPointer {
     uniffiRustCallWithError(TorrentException) { _status ->
     UniffiLib.INSTANCE.uniffi_playback_gateway_ffi_fn_method_torrentclient_begin_selected_metainfo(
-        it, FfiConverterByteArray.lower(`metainfo`),FfiConverterString.lower(`infoHash`),FfiConverterUInt.lower(`fileIndex`),FfiConverterULong.lower(`verifiedSize`),FfiConverterUInt.lower(`remainingBudgetMillis`),_status)
+        it, FfiConverterByteArray.lower(`metainfo`),FfiConverterString.lower(`infoHash`),FfiConverterUInt.lower(`fileIndex`),FfiConverterOptionalULong.lower(`verifiedSize`),FfiConverterUInt.lower(`remainingBudgetMillis`),_status)
 }
     }
     )
@@ -2909,6 +2909,38 @@ public object FfiConverterOptionalUInt: FfiConverterRustBuffer<kotlin.UInt?> {
         } else {
             buf.put(1)
             FfiConverterUInt.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalULong: FfiConverterRustBuffer<kotlin.ULong?> {
+    override fun read(buf: ByteBuffer): kotlin.ULong? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterULong.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.ULong?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterULong.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.ULong?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterULong.write(value, buf)
         }
     }
 }

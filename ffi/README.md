@@ -148,6 +148,13 @@ caller supplies its remaining monotonic startup budget; the engine captures one
 absolute deadline before validation and queueing and caps it at thirty seconds.
 Metadata, registry waits, initialization and endpoint creation share that deadline.
 
+`verifiedSize` is nullable. A supplied positive size must match the exact
+authorized file in vetted metadata. Without a size, canonical v1 metadata must
+resolve that explicit index to a positive length before storage allocation;
+hash/index remain mandatory and no alternate file is selected. Every payload
+reservation includes all metadata file lengths. Matching known/unknown-size
+acquisitions may share a proven payload while retaining independent authority.
+
 Keep the acquisition alive while its returned handle is authorized. Poll
 `status()` or call `waitReady()` on an IO dispatcher. `cancel()` fences ready
 publication and stops byte authority immediately; `cancelAndWait()` uses one

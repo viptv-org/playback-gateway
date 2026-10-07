@@ -1030,7 +1030,7 @@ impl Session {
             let mut opts = opts.unwrap_or_default();
             if self.network_policy.is_native() {
                 let selection = opts.native_selection.context("Native exact selection required")?;
-                if selection.verified_size == 0 || selection.file_index >= 4096 || opts.only_files_regex.is_some()
+                if selection.verified_size == Some(0) || selection.file_index >= 4096 || opts.only_files_regex.is_some()
                     || opts.only_files.as_deref() != Some(&[selection.file_index as usize])
                     || opts.trackers.as_ref().is_some_and(|t| !t.is_empty()) {
                     bail!("Native exact selection denied");

@@ -87,7 +87,7 @@ impl TorrentManager {
         source: String,
         expected_hash: String,
         index: u32,
-        verified_size: u64,
+        verified_size: impl Into<Option<u64>>,
         budget: Duration,
     ) -> Result<TorrentAcquisition, String> {
         self.begin_native(
@@ -95,7 +95,7 @@ impl TorrentManager {
             NativeInput::Magnet(source),
             expected_hash,
             index,
-            verified_size,
+            verified_size.into(),
             budget,
         )
     }
@@ -105,7 +105,7 @@ impl TorrentManager {
         bytes: Vec<u8>,
         expected_hash: String,
         index: u32,
-        verified_size: u64,
+        verified_size: impl Into<Option<u64>>,
         budget: Duration,
     ) -> Result<TorrentAcquisition, String> {
         self.begin_native(
@@ -113,7 +113,7 @@ impl TorrentManager {
             NativeInput::Metainfo(bytes),
             expected_hash,
             index,
-            verified_size,
+            verified_size.into(),
             budget,
         )
     }
@@ -123,7 +123,7 @@ impl TorrentManager {
         input: NativeInput,
         expected_hash: String,
         index: u32,
-        verified_size: u64,
+        verified_size: Option<u64>,
         budget: Duration,
     ) -> Result<TorrentAcquisition, String> {
         let deadline = Deadline::now() + budget.min(READ_TIMEOUT);
@@ -146,7 +146,7 @@ impl TorrentManager {
                 NativeInput::Magnet(source)
             }
             NativeInput::Metainfo(bytes) => NativeInput::Metainfo(
-                vet_native_metainfo(&bytes, Some(&expected_hash), index, Some(verified_size))?
+                vet_native_metainfo(&bytes, Some(&expected_hash), index, verified_size)?
                     .canonical_bytes()
                     .to_vec(),
             ),
@@ -404,7 +404,11 @@ impl AcquisitionState {
                 let pending = match registry.pending.get(&key) {
                     Some(pending)
                         if pending.selection.file_index == selection.file_index
-                            && pending.selection.verified_size == selection.verified_size
+                            && !pending
+                                .selection
+                                .verified_size
+                                .zip(selection.verified_size)
+                                .is_some_and(|(existing, requested)| existing != requested)
                             && !pending.tasks.cancellation_token().is_cancelled()
                             && !pending.reaping.load(Ordering::Acquire) =>
                     {
@@ -483,6 +487,18 @@ impl AcquisitionState {
                 _ = pending.tasks.cancellation_token().cancelled() => return Err("Native payload cancelled".into()),
             }
         };
+        let selected_size = entry
+            .files
+            .get(selection.file_index as usize)
+            .map(|file| file.size)
+            .filter(|size| *size > 0)
+            .ok_or("Native exact selection denied")?;
+        if selection
+            .verified_size
+            .is_some_and(|size| size != selected_size)
+        {
+            return Err("Native exact selection denied".into());
+        }
         let lease = self
             .control
             .lock()
@@ -901,6 +917,54 @@ mod tests {
         manager
             .begin_native_selected_metainfo("owned".into(), bytes, hash, 0, 1, READ_TIMEOUT)
             .unwrap()
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn unknown_selected_size_resolves_exact_metadata_and_charges_all_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let peer = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let manager = manager(temp.path().join("cache"), peer.local_addr().unwrap());
+        let bytes = multi_file_metainfo("owned", 17);
+        let hash = vet_native_metainfo(&bytes, None, 0, None)
+            .unwrap()
+            .info_hash_hex();
+        assert!(manager
+            .begin_native_selected_metainfo(
+                "owned".into(),
+                bytes.clone(),
+                hash.clone(),
+                0,
+                Some(2),
+                READ_TIMEOUT
+            )
+            .is_err());
+        let unknown = manager
+            .begin_native_selected_metainfo(
+                "owned".into(),
+                bytes.clone(),
+                hash.clone(),
+                0,
+                None,
+                READ_TIMEOUT,
+            )
+            .unwrap();
+        let first = unknown.wait_ready().await.unwrap();
+        assert_eq!(first.files()[0].size, 1);
+        assert_eq!(manager.inner.state.lock().await.reserved, 18);
+        let known = manager
+            .begin_native_selected_metainfo("owned".into(), bytes, hash, 0, Some(1), READ_TIMEOUT)
+            .unwrap();
+        let second = known.wait_ready().await.unwrap();
+        assert_eq!(manager.inner.state.lock().await.reserved, 18);
+        assert_eq!(unknown.cancel_and_wait().await, Settlement::Settled);
+        assert!(first.stream_url(0).is_err());
+        assert!(second.stream_url(0).is_ok());
+        assert_eq!(known.cancel_and_wait().await, Settlement::Settled);
+        drop(first);
+        drop(second);
+        drop(unknown);
+        drop(known);
+        manager.reap().await.unwrap();
+        assert_eq!(manager.inner.state.lock().await.reserved, 0);
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn native_disk_fact_and_full_unselected_payload_refuse_before_storage_allocation() {

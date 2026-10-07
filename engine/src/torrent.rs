@@ -435,7 +435,9 @@ impl TorrentManager {
         {
             let selected = select_file(&entry.files, index)?;
             if native_selection.is_some_and(|n| {
-                entry.files.get(selected as usize).map(|f| f.size) != Some(n.verified_size)
+                n.verified_size.is_some_and(|size| {
+                    entry.files.get(selected as usize).map(|f| f.size) != Some(size)
+                })
             }) {
                 return Err("Native exact selection denied".into());
             }
@@ -516,7 +518,8 @@ impl TorrentManager {
         };
         let selected = select_file(&files, index)?;
         if native_selection.is_some_and(|n| {
-            files.get(selected as usize).map(|f| f.size) != Some(n.verified_size)
+            n.verified_size
+                .is_some_and(|size| files.get(selected as usize).map(|f| f.size) != Some(size))
                 || hash != hex_hash(n.info_hash)
         }) {
             return Err("Native exact selection denied".into());

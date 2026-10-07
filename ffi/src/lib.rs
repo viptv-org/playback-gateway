@@ -189,7 +189,7 @@ impl TorrentClient {
         magnet: String,
         info_hash: String,
         file_index: u32,
-        verified_size: u64,
+        verified_size: Option<u64>,
         remaining_budget_millis: u32,
     ) -> Result<Arc<TorrentAcquisition>, TorrentError> {
         let _enter = runtime()?.enter();
@@ -211,7 +211,7 @@ impl TorrentClient {
         metainfo: Vec<u8>,
         info_hash: String,
         file_index: u32,
-        verified_size: u64,
+        verified_size: Option<u64>,
         remaining_budget_millis: u32,
     ) -> Result<Arc<TorrentAcquisition>, TorrentError> {
         let _enter = runtime()?.enter();
