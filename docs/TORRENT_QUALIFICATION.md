@@ -24,11 +24,14 @@ Canceled blocking extraction retains its global reservation and key admission
 until actual completion; quota and byte-capacity regressions cover that case.
 An output retains its input through actual worker/read teardown.
 
-The cache reserves full logical torrent payload size before download, plus
-declared compressed-member spool size before extraction. Active inputs cannot
-be evicted; server reaping removes fully idle inputs promptly. Filesystem
-metadata/block rounding remains outside the logical budget. Use the supplied
-cache tmpfs or an equivalent independent filesystem limit for a kernel bound.
+Full-storage mode reserves logical torrent payload size before download, plus
+declared compressed-member spool size before extraction. Rolling mode reserves
+fixed piece slots for non-archive inputs larger than the per-input budget;
+see [rolling cache implementation and checks](ROLLING_TORRENT_CACHE.md).
+Active input reservations cannot be evicted; server reaping removes fully idle
+inputs promptly. Rolling mode evicts individual pieces within an active input.
+Filesystem metadata/block rounding remains outside the logical budget. Use the
+supplied cache tmpfs or an equivalent independent filesystem limit for a kernel bound.
 
 ## Real media
 
@@ -53,7 +56,7 @@ CARGO_BUILD_JOBS=2 PLAYBACK_TEST_FFMPEG=/usr/bin/ffmpeg \
 builds its Workers library fixtures, and executes them with the selected fresh
 image's FFmpeg/ffprobe. Each test runs once as UID10001 with network none,
 read-only root, no capabilities, two CPUs and bounded memory. The modes are
-`torrent`, `stored-rar`, `compressed-rar`, `bounded-archive`, and `egress`. The bounded mode
+`torrent`, `rolling-torrent`, `stored-rar`, `compressed-rar`, `bounded-archive`, and `egress`. The bounded mode
 uses an actual 2 MiB archive-cache tmpfs and checks preparation ENOSPC,
 `processing_failed`, partial-spool removal and recovery. It does not qualify
 failure of a previously ready viewer or the public service binary's API paths.

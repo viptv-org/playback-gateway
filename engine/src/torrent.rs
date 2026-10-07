@@ -58,6 +58,9 @@ pub struct TorrentConfig {
     pub enabled: bool,
     pub cache_dir: PathBuf,
     pub max_bytes: u64,
+    /// Optional fixed disk-slot reservation per ordinary-video input.
+    /// Archives and native exact acquisition retain full-payload storage.
+    pub piece_cache_bytes: Option<u64>,
     pub listen_port: Option<u16>,
     /// Peer/DHT connections are an explicit opt-in exception to HTTP egress policy.
     pub enable_dht: bool,
@@ -71,6 +74,7 @@ impl Default for TorrentConfig {
             enabled: false,
             cache_dir: PathBuf::from("data/torrent-cache"),
             max_bytes: 2 * 1024 * 1024 * 1024,
+            piece_cache_bytes: None,
             listen_port: None,
             enable_dht: true,
             initial_peers: Vec::new(),
@@ -199,6 +203,12 @@ impl TorrentManager {
         config: TorrentConfig,
         network_policy: NetworkPolicy,
     ) -> Result<Self, String> {
+        if config
+            .piece_cache_bytes
+            .is_some_and(|n| n < 32 * 1024 || n > config.max_bytes)
+        {
+            return Err("Invalid torrent piece cache budget".into());
+        }
         if config.max_bytes < MIN_CACHE_BYTES
             || config.listen_port == Some(u16::MAX)
             || config.listen_port == Some(0)
@@ -535,6 +545,25 @@ impl TorrentManager {
             .iter()
             .try_fold(0u64, |acc, file| acc.checked_add(file.size))
             .ok_or("Torrent size overflow")?;
+        // A shared entry may later open another file. Archive entries retain
+        // full storage so extraction/volume readers never observe evicted data.
+        let rolling = self.inner.config.piece_cache_bytes.filter(|budget| {
+            !self.inner.network_policy.is_native()
+                && size > *budget
+                && files.iter().all(|f| {
+                    let name = f.name.to_ascii_lowercase();
+                    !name.ends_with(".rar")
+                        && !name.ends_with(".zip")
+                        && !name.ends_with(".7z")
+                        && !name.rsplit('.').next().is_some_and(|ext| {
+                            ext.len() == 3
+                                && (ext.bytes().all(|b| b.is_ascii_digit())
+                                    || (ext.starts_with('r')
+                                        && ext[1..].bytes().all(|b| b.is_ascii_digit())))
+                        })
+                })
+        });
+        let size = rolling.map(|budget| budget.min(size)).unwrap_or(size);
         if size > self.inner.config.max_bytes {
             return Err("Torrent exceeds cache budget".into());
         }
@@ -558,6 +587,10 @@ impl TorrentManager {
                     ),
                     disable_trackers: true,
                     native_selection,
+                    storage_factory: rolling.map(|_| {
+                        use librqbit::storage::StorageFactoryExt;
+                        librqbit::storage::rolling::RollingStorageFactory { capacity: size }.boxed()
+                    }),
                     only_files: native_selection.map(|n| vec![n.file_index as usize]),
                     overwrite: false,
                     initial_peers: Some(self.inner.config.initial_peers.clone()),

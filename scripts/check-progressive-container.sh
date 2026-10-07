@@ -21,7 +21,7 @@ parent="playback-progressive-parent:${digest#sha256:}"
 fixture="playback-progressive-fixture:${revision:0:12}-${digest:7:12}"
 docker image tag "$digest" "$parent"
 printf 'Source revision: %s\nGateway image: %s\nMode: %s\n' "$revision" "$digest" "$mode"
-git -C "$root" archive "$revision" Cargo.toml Cargo.lock engine control ffi scripts/runtime-fixture.Dockerfile \
+git -C "$root" archive "$revision" Cargo.toml Cargo.lock engine control ffi torrent-policy third_party/rqbit scripts/runtime-fixture.Dockerfile \
  | docker build --network "$build_network" --pull=false --build-arg "GATEWAY_IMAGE=$parent" -f scripts/runtime-fixture.Dockerfile -t "$fixture" -
 if [[ "$tls" == 1 ]]; then
   # The same fixture-only CA/leaf and TLS proxy as the subtitle HTTPS fixture.

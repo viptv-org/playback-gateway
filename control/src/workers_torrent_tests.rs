@@ -93,6 +93,16 @@ async fn disabled_torrent_request_has_no_media_or_peer_side_effects() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires real FFmpeg/ffprobe; deterministic local BitTorrent fixture"]
 async fn real_torrent_viewers_share_output_seek_and_reap_owned_input() {
+    real_torrent_media_fixture(None).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires real FFmpeg/ffprobe; deterministic local BitTorrent fixture"]
+async fn rolling_torrent_viewers_decode_seek_with_bounded_input() {
+    real_torrent_media_fixture(Some(64 * 1024)).await;
+}
+
+async fn real_torrent_media_fixture(piece_cache_bytes: Option<u64>) {
     let ffmpeg = std::env::var("PLAYBACK_TEST_FFMPEG").expect("FFmpeg fixture path");
     let ffprobe = std::env::var("PLAYBACK_TEST_FFPROBE").expect("ffprobe fixture path");
     let root = tempfile::tempdir().unwrap();
@@ -133,6 +143,9 @@ async fn real_torrent_viewers_share_output_seek_and_reap_owned_input() {
         generated.status.success(),
         "fixture media generation failed"
     );
+    if let Some(budget) = piece_cache_bytes {
+        assert!(std::fs::metadata(&movie).unwrap().len() > budget * 4);
+    }
     let metainfo = create_torrent(
         &movie,
         CreateTorrentOptions {
@@ -226,6 +239,7 @@ async fn real_torrent_viewers_share_output_seek_and_reap_owned_input() {
         NetworkPolicy::loopback_fixture(),
         playback_engine::TorrentConfig {
             enabled: true,
+            piece_cache_bytes,
             cache_dir: root.path().join("torrent-cache"),
             enable_dht: false,
             initial_peers: vec![format!("127.0.0.1:{peer_port}").parse().unwrap()],
@@ -288,6 +302,21 @@ async fn real_torrent_viewers_share_output_seek_and_reap_owned_input() {
         })
         .collect();
     assert!(!manifests.is_empty());
+    if let Some(budget) = piece_cache_bytes {
+        let caches: Vec<_> = std::fs::read_dir(root.path().join("torrent-cache"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.path().join("pieces.cache"))
+            .filter(|p| p.exists())
+            .collect();
+        assert_eq!(caches.len(), 1);
+        assert!(std::fs::metadata(&caches[0]).unwrap().len() <= budget);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert!(std::fs::metadata(&caches[0]).unwrap().blocks() * 512 <= budget);
+        }
+    }
     for viewer in [&first, &second, &late, &sought] {
         workers
             .sessions

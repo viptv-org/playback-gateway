@@ -1,3 +1,35 @@
+# Validation checkpoint — 2026-10-07
+
+## Rolling torrent input cache
+
+The standalone gateway enables a 256 MiB per-input rolling cache for larger
+non-archive torrents. Library embedding remains opt-in; strict native Android
+acquisition and archive extraction retain their existing full-payload contract.
+See `docs/ROLLING_TORRENT_CACHE.md` for scheduling, eviction and configuration.
+
+Validation uses controlled local TCP peers. Four engine fixtures cover byte
+identity, file-boundary pieces, full sequential reading, forward/backward seeks,
+concurrent readers, budget admission, missing-piece cancellation, partial-piece
+peer failure and joined cleanup. The largest fixture describes a valid 100 GiB
+virtual torrent with 2 MiB pieces, reads distant ranges through a 4 MiB cache,
+and verifies an evicted first piece is downloaded again. This is large-offset
+and bounded-storage proof, not sustained decoding of a 100 GiB movie.
+
+The final locked workspace suite passes: 191 passed, zero failed, 56 ignored.
+Formatting, diff whitespace and changed shell-script syntax checks pass.
+The maintained storage crate's two focused unit tests pass. The ignored actual
+FFmpeg HLS/seek fixture passes in 2.01 seconds with a 64 KiB input cache, shared
+viewers and a decoded seek-frame comparison. It runs in an isolated container
+using qualified FFmpeg/ffprobe 9.0.2 from runtime image
+`sha256:16b5cc233641cdf368f474d5a3e5fb05b39dc956057ccf32abd4b872fe9ecf6a`.
+Host ffprobe 6.1 does not support the existing required `request_size` option.
+
+The release Docker app-build stage succeeds from these sources. Packaging now
+includes the maintained rqbit and torrent-policy workspace dependencies and
+their upstream notices. Public/hostile swarm, sustained 4K, Android native
+adoption and production deployment are separate qualification work; none is
+claimed by these tests. No production service or mount was changed.
+
 # Validation checkpoint — 2026-10-02
 
 ## Joined Matroska progressive delivery (#11)

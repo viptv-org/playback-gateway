@@ -11,7 +11,7 @@ parent="playback-torrent-api-parent:${digest#sha256:}"
 fixture="playback-torrent-api-fixture:${revision:0:12}-${digest:7:12}"
 docker image tag "$digest" "$parent"
 printf 'Source revision: %s\nGateway image: %s\n' "$revision" "$digest"
-git -C "$root" archive "$revision" Cargo.toml Cargo.lock engine control ffi scripts/runtime-fixture.Dockerfile \
+git -C "$root" archive "$revision" Cargo.toml Cargo.lock engine control ffi torrent-policy third_party/rqbit scripts/runtime-fixture.Dockerfile \
   | docker build --network "${PLAYBACK_TEST_BUILD_NETWORK:-default}" --pull=false \
       --build-arg "GATEWAY_IMAGE=$parent" -f scripts/runtime-fixture.Dockerfile -t "$fixture" -
 id=''

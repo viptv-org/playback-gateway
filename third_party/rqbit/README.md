@@ -58,6 +58,16 @@ completion before deletion on release. This is containment evidence, not an
 unconditional two-second syscall guarantee. Native capability remains disabled
 until all applicable qualification gates pass.
 
+The maintained storage layer also provides an ephemeral rolling-piece backend.
+Fixed slots replace full payload files; the requester reserves slots under its
+state lock, resets evicted availability/chunk/file counters, and protects current
+stream positions, outstanding requests and checksum/IO guards. Stream read-ahead
+is divided across readers and only active stream windows drive rolling downloads.
+Evictable storage does not send bitfield/HAVE or serve uploads. Joined deletion
+closes the backing file across storage clones. Full-payload storage keeps its
+existing initialization/callback behavior. The gateway owns admission/configuration;
+see `../../docs/ROLLING_TORRENT_CACHE.md` for scope and qualification.
+
 Run the owning workspace checks, the patched core ownership tests and focused
 real dependency lifetime regressions (with the owner's worker limit):
 

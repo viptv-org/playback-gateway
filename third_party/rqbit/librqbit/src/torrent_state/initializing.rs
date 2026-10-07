@@ -192,7 +192,7 @@ impl TorrentStateInitializing {
             .context("session is dead")?
             .bitv_factory
             .clone();
-        let have_pieces = if self.previously_errored {
+        let have_pieces = if self.previously_errored || self.files.rolling_capacity().is_some() {
             if let Err(e) = bitv_factory.clear(id).await {
                 warn!(error=?e, "error clearing bitfield");
             }
@@ -214,6 +214,12 @@ impl TorrentStateInitializing {
             None => {
                 info!("Doing initial checksum validation, this might take a while...");
                 let have_pieces = self.shared.spawner.spawn_block_in_place(|| {
+                    if self.files.rolling_capacity().is_some() {
+                        return Ok(BF::from_boxed_slice(
+                            vec![0u8; self.metadata.lengths.piece_bitfield_bytes()]
+                                .into_boxed_slice(),
+                        ));
+                    }
                     FileOps::new(
                         &self.metadata.info,
                         &self.files,

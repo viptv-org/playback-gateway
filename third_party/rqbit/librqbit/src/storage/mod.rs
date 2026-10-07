@@ -1,4 +1,5 @@
 pub mod filesystem;
+pub mod rolling;
 
 #[cfg(feature = "storage_examples")]
 pub mod examples;
@@ -92,7 +93,30 @@ impl<U: StorageFactory + ?Sized> StorageFactory for Box<U> {
     }
 }
 
+pub enum PieceReservation {
+    Full,
+    Reserved { evicted: Option<ValidPieceIndex> },
+}
+
 pub trait TorrentStorage: Send + Sync {
+    /// Demand-driven storage does not retain the whole torrent or advertise pieces.
+    fn rolling_capacity(&self) -> Option<u64> {
+        None
+    }
+    fn resident_pieces(&self) -> Vec<ValidPieceIndex> {
+        Vec::new()
+    }
+
+    /// Reserve a slot before requesting blocks. None means all slots are pinned.
+    /// The returned piece, if any, must be invalidated under the torrent write lock.
+    fn reserve_piece(
+        &self,
+        _piece: ValidPieceIndex,
+        _protected: &[ValidPieceIndex],
+    ) -> anyhow::Result<PieceReservation> {
+        Ok(PieceReservation::Reserved { evicted: None })
+    }
+
     // Create/open files etc.
     fn init(
         &mut self,
@@ -128,6 +152,19 @@ pub trait TorrentStorage: Send + Sync {
 }
 
 impl<U: TorrentStorage + ?Sized> TorrentStorage for Box<U> {
+    fn rolling_capacity(&self) -> Option<u64> {
+        (**self).rolling_capacity()
+    }
+    fn resident_pieces(&self) -> Vec<ValidPieceIndex> {
+        (**self).resident_pieces()
+    }
+    fn reserve_piece(
+        &self,
+        piece: ValidPieceIndex,
+        protected: &[ValidPieceIndex],
+    ) -> anyhow::Result<PieceReservation> {
+        (**self).reserve_piece(piece, protected)
+    }
     fn pread_exact(&self, file_id: usize, offset: u64, buf: &mut [u8]) -> anyhow::Result<()> {
         (**self).pread_exact(file_id, offset, buf)
     }

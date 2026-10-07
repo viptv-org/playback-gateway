@@ -7,7 +7,9 @@ COPY Cargo.toml Cargo.lock ./
 COPY engine ./engine
 COPY control ./control
 COPY ffi ./ffi
-ENV CARGO_BUILD_JOBS=2
+COPY torrent-policy ./torrent-policy
+COPY third_party/rqbit ./third_party/rqbit
+ENV CARGO_BUILD_JOBS=1
 RUN cargo test --locked -p playback-gateway --tests --no-run \
     && mkdir /out \
     && for name in runtime service torrent_runtime torrent_crash torrent_cache_failure; do \

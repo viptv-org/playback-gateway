@@ -72,13 +72,30 @@ Safe filename/size metadata accompanies the viewer response. FFmpeg consumes a
 private, token-protected loopback Range endpoint; public delivery still uses
 the existing authenticated HLS/progressive viewer paths.
 
-`TORRENT_CACHE_MAX_BYTES` defaults to 2 GiB, minimum 256 MiB. Cache admission
-reserves the entire torrent payload and any compressed archive spool, so larger
-payloads require a larger configured budget. Only idle torrents are evicted.
+`TORRENT_CACHE_MAX_BYTES` defaults to 2 GiB, minimum 256 MiB, shared across
+active input reservations and compressed archive spools. The service defaults
+`TORRENT_PIECE_CACHE_BYTES` to 256 MiB per ordinary-video torrent input. Larger
+non-archive torrents use fixed disk slots instead of requiring the full payload
+to fit: active readers share the input, pieces near their positions are fetched,
+and old pieces are evicted and downloaded again when seeking back. Current
+reads, in-flight writes and checksum validation protect their slots. Rolling
+inputs do not advertise or upload pieces, since availability can be evicted.
+The cache must fit at least two complete torrent pieces. Set
+`TORRENT_PIECE_CACHE_BYTES=0` to use full-payload storage for every torrent.
+The engine library opts into rolling storage through `TorrentConfig`.
+
+Torrents containing archive files, small torrents that fit the per-input budget,
+and strict native exact acquisition retain full-payload reservation/storage.
+Compressed archive extraction also reserves its complete verified spool.
+Rolling input does not bound FFmpeg's output spool; media delivery has separate
+limits. See [rolling torrent cache](docs/ROLLING_TORRENT_CACHE.md).
+
 The cache directory is `DATA_DIR/torrent-cache`, private and exclusively locked.
-This is a logical payload/spool budget; filesystem block rounding and metadata
-need a separate operator filesystem limit. Compose supplies a separate cache
-tmpfs, configurable with `TORRENT_SPOOL_SIZE`, in addition to the media mount.
+This is a logical slot/payload/spool budget; filesystem block rounding and
+metadata need a separate operator filesystem limit. Compose supplies a separate
+cache tmpfs, configurable with `TORRENT_SPOOL_SIZE`, in addition to the media
+mount. For disk-backed deployment replace that cache tmpfs with a private,
+quota-limited disk mount; raising a tmpfs limit consumes memory.
 Optional `TORRENT_LISTEN_PORT` opens an inbound TCP peer listener for the first
 active namespace; later namespaces use outbound connections. No peer port is
 published by default.

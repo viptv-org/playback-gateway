@@ -41,9 +41,13 @@ impl StreamState {
         lengths.compute_current_piece(self.position, self.file_abs_offset)
     }
 
-    fn queue<'a>(&self, lengths: &'a Lengths) -> impl Iterator<Item = ValidPieceIndex> + 'a {
+    fn queue<'a>(
+        &self,
+        lengths: &'a Lengths,
+        lookahead: u64,
+    ) -> impl Iterator<Item = ValidPieceIndex> + 'a {
         let start = self.file_abs_offset + self.position;
-        let end = (start + PER_STREAM_BUF_DEFAULT).min(self.file_abs_offset + self.file_len);
+        let end = (start + lookahead).min(self.file_abs_offset + self.file_len);
         let dpl = lengths.default_piece_length();
         let start_id = (start / dpl as u64).try_into().unwrap();
         let end_id = end.div_ceil(dpl as u64).try_into().unwrap();
@@ -73,6 +77,7 @@ impl TorrentStreams {
     pub(crate) fn iter_next_pieces<'a>(
         &'a self,
         lengths: &'a Lengths,
+        capacity: Option<u64>,
     ) -> impl Iterator<Item = ValidPieceIndex> + 'a {
         struct Interleave<I> {
             all: VecDeque<I>,
@@ -92,7 +97,17 @@ impl TorrentStreams {
             }
         }
 
-        let mut all: Vec<_> = self.streams.iter().map(|s| s.queue(lengths)).collect();
+        let lookahead = capacity
+            .map(|c| {
+                (c / 2 / self.streams.len().max(1) as u64)
+                    .max(u64::from(lengths.default_piece_length()))
+            })
+            .unwrap_or(PER_STREAM_BUF_DEFAULT);
+        let mut all: Vec<_> = self
+            .streams
+            .iter()
+            .map(|s| s.queue(lengths, lookahead))
+            .collect();
 
         // Shuffle to decrease determinism and make queueing fairer.
         use rand::seq::SliceRandom;
@@ -123,6 +138,13 @@ impl TorrentStreams {
     fn drop_stream(&self, stream_id: StreamId) -> Option<StreamState> {
         trace!(stream_id, "dropping stream");
         self.streams.remove(&stream_id).map(|s| s.1)
+    }
+
+    pub(crate) fn current_pieces(&self, lengths: &Lengths) -> Vec<ValidPieceIndex> {
+        self.streams
+            .iter()
+            .filter_map(|s| s.current_piece(lengths).map(|p| p.id))
+            .collect()
     }
 
     pub(crate) fn streamed_file_ids(&self) -> impl Iterator<Item = usize> + '_ {
@@ -291,10 +313,18 @@ impl AsyncSeek for FileStream {
 impl Drop for FileStream {
     fn drop(&mut self) {
         self.streams.drop_stream(self.stream_id);
+        self.torrent.notify_stream_position();
     }
 }
 
 impl ManagedTorrent {
+    fn notify_stream_position(&self) {
+        self.with_state(|s| {
+            if let crate::ManagedTorrentState::Live(l) = s {
+                l.notify_stream_position();
+            }
+        });
+    }
     fn with_storage_and_file<F, R>(
         &self,
         file_id: usize,
@@ -390,6 +420,7 @@ impl ManagedTorrent {
             },
         );
 
+        s.torrent.notify_stream_position();
         debug!(stream_id = s.stream_id, file_id, "started stream");
 
         Ok(s)
@@ -413,6 +444,7 @@ impl FileStream {
             .unwrap()
             .value_mut()
             .position = new_pos;
+        self.torrent.notify_stream_position();
     }
 
     pub fn len(&self) -> u64 {

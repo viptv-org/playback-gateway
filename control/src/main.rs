@@ -29,6 +29,7 @@ struct Settings {
     vaapi: Option<PathBuf>,
     torrent_enabled: bool,
     torrent_max_bytes: u64,
+    torrent_piece_cache_bytes: Option<u64>,
     torrent_listen_port: Option<u16>,
 }
 impl Settings {
@@ -60,6 +61,15 @@ impl Settings {
                 .ok()
                 .filter(|bytes| *bytes >= playback_engine::torrent::MIN_CACHE_BYTES)
                 .ok_or("invalid TORRENT_CACHE_MAX_BYTES")?,
+            torrent_piece_cache_bytes: match std::env::var("TORRENT_PIECE_CACHE_BYTES") {
+                Ok(value) => match value.parse::<u64>() {
+                    Ok(0) => None,
+                    Ok(bytes) if bytes >= 32 * 1024 => Some(bytes),
+                    _ => return Err("invalid TORRENT_PIECE_CACHE_BYTES"),
+                },
+                Err(std::env::VarError::NotPresent) => Some(256 * 1024 * 1024),
+                Err(_) => return Err("invalid TORRENT_PIECE_CACHE_BYTES"),
+            },
             torrent_listen_port: optional_torrent_port(
                 std::env::var("TORRENT_LISTEN_PORT").ok().as_deref(),
             )?,
@@ -230,6 +240,7 @@ async fn run(settings: Settings) -> Result<(), &'static str> {
                 enabled: settings.torrent_enabled,
                 cache_dir: settings.data.join("torrent-cache"),
                 max_bytes: settings.torrent_max_bytes,
+                piece_cache_bytes: settings.torrent_piece_cache_bytes,
                 listen_port: settings.torrent_listen_port,
                 ..Default::default()
             },

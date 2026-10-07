@@ -774,8 +774,11 @@ impl TorrentStateLive {
     }
 
     fn on_piece_completed(&self, id: ValidPieceIndex) -> anyhow::Result<()> {
-        if let Err(e) = self.files.on_piece_completed(id) {
-            debug!(?id, "file storage errored in on_piece_completed(): {e:#}");
+        // Preserve the existing callback contract for full-payload storage.
+        if self.files.rolling_capacity().is_none() {
+            if let Err(e) = self.files.on_piece_completed(id) {
+                debug!(?id, "file storage errored in on_piece_completed(): {e:#}");
+            }
         }
         let mut g = self.lock_write("on_piece_completed");
         let locked = &mut **g;
@@ -791,6 +794,11 @@ impl TorrentStateLive {
             .take_while(|(_, fi)| fi.piece_range.contains(&id.get()))
         {
             let _remaining = chunks.update_file_have_on_piece_completed(id, idx, file_info);
+        }
+
+        // Publish storage completion under the same lock as eviction/accounting.
+        if self.files.rolling_capacity().is_some() {
+            self.files.on_piece_completed(id)?;
         }
 
         self.streams
@@ -833,6 +841,10 @@ impl TorrentStateLive {
                 }
             }
         }
+    }
+
+    pub(crate) fn notify_stream_position(&self) {
+        self.new_pieces_notify.notify_waiters();
     }
 
     pub(crate) fn reconnect_all_not_needed_peers(&self) {
@@ -1082,7 +1094,9 @@ impl PeerConnectionHandler for &PeerHandler {
     }
 
     fn should_send_bitfield(&self) -> bool {
-        if self.state.torrent().options.disable_upload() {
+        if self.state.torrent().options.disable_upload()
+            || self.state.files.rolling_capacity().is_some()
+        {
             return false;
         }
 
@@ -1090,7 +1104,9 @@ impl PeerConnectionHandler for &PeerHandler {
     }
 
     fn should_transmit_have(&self, id: ValidPieceIndex) -> bool {
-        if self.state.shared.options.disable_upload() {
+        if self.state.shared.options.disable_upload()
+            || self.state.files.rolling_capacity().is_some()
+        {
             return false;
         }
         let have = self
@@ -1140,6 +1156,13 @@ impl PeerHandler {
                         req.piece_index.get(),
                         req.chunk_index
                     );
+                    if self.state.files.rolling_capacity().is_some()
+                        && g.inflight_pieces
+                            .get(&req.piece_index)
+                            .is_some_and(|p| p.peer == handle)
+                    {
+                        g.inflight_pieces.remove(&req.piece_index);
+                    }
                     g.get_chunks_mut()?
                         .mark_piece_broken_if_not_have(req.piece_index);
                     self.state.new_pieces_notify.notify_waiters();
@@ -1248,14 +1271,18 @@ impl PeerHandler {
                     let priority_streamed_pieces = self
                         .state
                         .streams
-                        .iter_next_pieces(&self.state.lengths)
+                        .iter_next_pieces(&self.state.lengths, self.state.files.rolling_capacity())
                         .filter(|pid| {
                             !chunk_tracker.is_piece_have(*pid)
                                 && !g.inflight_pieces.contains_key(pid)
+                                && !self.state.per_piece_locks[pid.get_usize()].is_locked()
                         });
                     let natural_order_pieces = chunk_tracker
                         .iter_queued_pieces(&g.file_priorities, &self.state.metadata.file_infos);
-                    for n in priority_streamed_pieces.chain(natural_order_pieces) {
+                    for n in priority_streamed_pieces.chain(
+                        natural_order_pieces
+                            .filter(|_| self.state.files.rolling_capacity().is_none()),
+                    ) {
                         if bf.get(n.get() as usize).map(|v| *v) == Some(true) {
                             n_opt = Some(n);
                             break;
@@ -1267,6 +1294,34 @@ impl PeerHandler {
                         None => return Ok(None),
                     }
                 };
+                let mut protected = self.state.streams.current_pieces(&self.state.lengths);
+                protected.extend(g.inflight_pieces.keys().copied());
+                protected.extend(
+                    self.state
+                        .files
+                        .resident_pieces()
+                        .into_iter()
+                        .filter(|p| self.state.per_piece_locks[p.get_usize()].is_locked()),
+                );
+                match self.state.files.reserve_piece(n, &protected)? {
+                    crate::storage::PieceReservation::Full => return Ok(None),
+                    crate::storage::PieceReservation::Reserved {
+                        evicted: Some(evicted),
+                    } => {
+                        let len = if g.get_chunks()?.is_piece_have(evicted) {
+                            u64::from(self.state.lengths.piece_length(evicted))
+                        } else {
+                            0
+                        };
+                        g.get_chunks_mut()?
+                            .evict_piece(evicted, &self.state.metadata.file_infos);
+                        self.state
+                            .stats
+                            .have_bytes
+                            .fetch_sub(len, Ordering::Relaxed);
+                    }
+                    crate::storage::PieceReservation::Reserved { evicted: None } => {}
+                }
                 g.inflight_pieces.insert(
                     n,
                     InflightPiece {
@@ -1326,7 +1381,9 @@ impl PeerHandler {
     }
 
     fn on_download_request(&self, request: Request) -> anyhow::Result<()> {
-        if self.state.torrent().options.disable_upload() {
+        if self.state.torrent().options.disable_upload()
+            || self.state.files.rolling_capacity().is_some()
+        {
             anyhow::bail!("upload disabled, but peer requested a piece")
         }
 
@@ -1702,6 +1759,16 @@ impl PeerHandler {
 
             let full_piece_download_time = {
                 let mut g = state.lock_write("mark_chunk_downloaded");
+                // A disconnect can retire the request while its queued IO finishes.
+                // Such bytes must not restore chunk availability after cancellation.
+                if state.files.rolling_capacity().is_some()
+                    && !g
+                        .inflight_pieces
+                        .get(&chunk_info.piece_index)
+                        .is_some_and(|p| p.peer == addr)
+                {
+                    return Ok(());
+                }
                 let chunk_marking_result = g.get_chunks_mut()?.mark_chunk_downloaded(piece);
                 trace!(?piece, chunk_marking_result=?chunk_marking_result);
 
@@ -1730,9 +1797,9 @@ impl PeerHandler {
                 }
             };
 
-            // We don't care about per piece lock anymore, as it's removed from inflight pieces.
-            // It shouldn't impact perf anyway, but dropping just in case.
-            drop(ppl_guard);
+            // Keep the piece pinned through checksum and completion publication.
+            // Rolling storage may reuse an unreserved slot once this guard drops.
+            let _ppl_guard = ppl_guard;
 
             let full_piece_download_time = match full_piece_download_time {
                 Some(t) => t,

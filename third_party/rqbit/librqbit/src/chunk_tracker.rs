@@ -249,6 +249,28 @@ impl ChunkTracker {
         }
     }
 
+    /// Invalidate an evicted verified piece, including file and chunk accounting.
+    pub(crate) fn evict_piece(&mut self, index: ValidPieceIndex, files: &[FileInfo]) {
+        let id = index.get_usize();
+        if self.have.as_slice()[id] {
+            self.have.as_slice_mut().set(id, false);
+            let len = u64::from(self.lengths.piece_length(index));
+            self.hns.have_bytes -= len;
+            if self.selected[id] {
+                self.hns.needed_bytes += len;
+            }
+            for (i, file) in files.iter().enumerate() {
+                let size = self.lengths.size_of_piece_in_file(
+                    index.get(),
+                    file.offset_in_torrent,
+                    file.len,
+                );
+                self.per_file_bytes[i] -= size;
+            }
+        }
+        self.mark_piece_broken_if_not_have(index);
+    }
+
     pub fn mark_piece_downloaded(&mut self, idx: ValidPieceIndex) {
         let id = idx.get() as usize;
         if !self.have.as_slice()[id] {

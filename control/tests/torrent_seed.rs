@@ -17,8 +17,14 @@ async fn seeder_retries_an_accepted_but_unresponsive_handshake() {
         let mut h = [0u8; 68];
         early.read_exact(&mut h).await.unwrap();
         // Keep the first transport open: recovery must bound this attempt.
-        let (mut ready, _) = listener.accept().await.unwrap();
-        ready.read_exact(&mut h).await.unwrap();
+        let mut ready = loop {
+            let (mut candidate, _) = listener.accept().await.unwrap();
+            if candidate.read_exact(&mut h).await.is_ok() {
+                break candidate;
+            }
+            // Timed-out attempts may already be queued at accept; retain the
+            // ready listener until a live retry actually sends its handshake.
+        };
         ready.write_all(&h).await.unwrap();
         let mut input = [0u8; 11];
         ready.read_exact(&mut input).await.unwrap();
