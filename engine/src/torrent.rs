@@ -1257,8 +1257,7 @@ fn prepare_cache(path: &std::path::Path) -> Result<std::fs::File, String> {
     let lock = options
         .open(path.join(".gateway-lock"))
         .map_err(|_| "Torrent cache lock unavailable")?;
-    lock.try_lock()
-        .map_err(|_| "Torrent cache already in use")?;
+    lock_cache_file(&lock)?;
     // Only gateway-owned cache folders may be stale after a previous crash.
     for e in std::fs::read_dir(path).map_err(|_| "Torrent cache unavailable")? {
         let e = e.map_err(|_| "Torrent cache unavailable")?;
@@ -1271,6 +1270,65 @@ fn prepare_cache(path: &std::path::Path) -> Result<std::fs::File, String> {
         }
     }
     Ok(lock)
+}
+
+fn lock_cache_file(file: &std::fs::File) -> Result<(), String> {
+    // Android's std File::try_lock returns Unsupported. Keep its native
+    // nonblocking flock tied to this file descriptor's existing owner lifetime.
+    #[cfg(target_os = "android")]
+    let result = lock_android_cache_file(file).map_err(|_| ());
+    #[cfg(not(target_os = "android"))]
+    let result = file.try_lock().map_err(|_| ());
+    result.map_err(|_| "Torrent cache already in use".to_owned())
+}
+
+#[cfg(any(target_os = "android", all(test, unix)))]
+fn lock_android_cache_file(file: &std::fs::File) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd;
+    // SAFETY: file owns a valid descriptor for the entire call. flock neither
+    // consumes it nor accesses Rust memory; closing its last alias releases it.
+    let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(all(test, unix))]
+mod android_cache_lock_tests {
+    use super::lock_android_cache_file;
+    use std::fs::OpenOptions;
+
+    #[test]
+    fn android_cache_lock_is_exclusive_nonblocking_and_released_with_owner() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("cache-lock");
+        let owner = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .unwrap();
+        let competing = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .unwrap();
+        lock_android_cache_file(&owner).unwrap();
+        assert_eq!(
+            lock_android_cache_file(&competing).unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        let alias = owner.try_clone().unwrap();
+        drop(owner);
+        assert_eq!(
+            lock_android_cache_file(&competing).unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        drop(alias);
+        lock_android_cache_file(&competing).unwrap();
+    }
 }
 
 /// A bounded spool reservation in the same budget as torrent payloads.
