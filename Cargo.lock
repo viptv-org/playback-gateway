@@ -1684,8 +1684,6 @@ dependencies = [
 [[package]]
 name = "librqbit"
 version = "8.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dadca8f521242010a4c846ef5f224c217009c92e272709cdc08ba9cdabe62983"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1774,8 +1772,6 @@ dependencies = [
 [[package]]
 name = "librqbit-core"
 version = "5.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55a02cc6fce6743ad38661ccd6fafc6cf1ae5e0106a9922836b0524dbe752378"
 dependencies = [
  "anyhow",
  "assert_cfg",
@@ -1799,8 +1795,6 @@ dependencies = [
 [[package]]
 name = "librqbit-dht"
 version = "5.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7cc129194337771a86b0399956c4d9bf1cd97c5f24d14a50be38e170f76a54b"
 dependencies = [
  "anyhow",
  "backoff",
@@ -1857,8 +1851,6 @@ dependencies = [
 [[package]]
 name = "librqbit-tracker-comms"
 version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08204944c5be677a5de8e1230e0249fce5c14abef23048e26452c6fb03f1b260"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -2182,6 +2174,7 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 name = "playback-engine"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-stream",
  "axum",
  "futures",

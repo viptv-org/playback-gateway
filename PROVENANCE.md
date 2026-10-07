@@ -11,8 +11,31 @@ by itself change the deployed VIPTV backend or prove gateway cutover complete.
 
 ## In-process torrent/archive checkpoint
 
-The torrent transport pins `librqbit` 8.1.1 (Apache-2.0) and its lockfile-resolved
-companion crates. RAR reading pins `unrar-rs` 0.10.8 with its pure Rust crypto
+The torrent transport maintains canonical rqbit sources under
+`third_party/rqbit`, patched through the root Cargo manifest. `Cargo.lock`
+resolves librqbit 8.1.1, librqbit-core 5.0.0, librqbit-dht 5.3.1 and
+librqbit-tracker-comms 3.0.0 to those local sources; the owning gateway commit
+pins their complete contents. All four packages are Apache-2.0, with the
+original Igor Katson copyright notice retained in
+`third_party/rqbit/LICENSE` and the complete license in
+`third_party/rqbit/LICENSE-APACHE-2.0.txt`.
+
+librqbit and DHT originate from ikatson/rqbit commit
+`00b97485160ff5b5aa2b379ea0815d568ec665f0`; core and tracker-comms originate
+from `559fca8552f64099b39c9284c52fd4d3d9a9169f`. These deliberately distinct
+revisions match the four previously locked registry packages. Source and
+original manifest hashes, previous registry checksums and resolved upstream
+symlinks are recorded in `third_party/rqbit/UPSTREAM.json`. Original canonical
+manifests are retained under `third_party/rqbit/upstream-manifests`; working
+manifests adapt sibling paths to this four-package layout. This adopts the
+existing uncommitted source/ownership work and adds fenced joined completion,
+queued IO ownership, cooperative cancellation and failed-settlement accounting.
+See `third_party/rqbit/README.md` for interfaces and qualification limits.
+No Cargo registry cache or generated normalized manifest is a maintained source.
+The existing registry-resolved transitive package versions/checksums remain
+unchanged in the root lockfile.
+
+RAR reading pins `unrar-rs` 0.10.8 with its pure Rust crypto
 backend. The latter's license is GPL-3.0-or-later with an additional unRAR
 restriction; its full license, including the required restriction paragraph, is
 preserved in [THIRD_PARTY/unrar-rs-LICENSE.txt](THIRD_PARTY/unrar-rs-LICENSE.txt).

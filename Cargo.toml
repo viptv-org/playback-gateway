@@ -1,7 +1,14 @@
 [workspace]
 members = ["engine", "control", "ffi"]
 resolver = "2"
+exclude = ["third_party/rqbit"]
 
 [profile.release]
 lto = "thin"
 strip = true
+
+[patch.crates-io]
+librqbit = { path = "third_party/rqbit/librqbit" }
+librqbit-core = { path = "third_party/rqbit/librqbit_core" }
+librqbit-dht = { path = "third_party/rqbit/dht" }
+librqbit-tracker-comms = { path = "third_party/rqbit/tracker_comms" }

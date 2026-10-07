@@ -79,6 +79,7 @@ struct ManagerInner {
     config: TorrentConfig,
     cache_lock: OnceCell<Arc<std::fs::File>>,
     state: Mutex<ManagerState>,
+    settlement_failed: AtomicBool,
 }
 #[derive(Default)]
 struct ManagerState {
@@ -145,6 +146,7 @@ impl TorrentManager {
                 config,
                 cache_lock: OnceCell::new(),
                 state: Mutex::new(ManagerState::default()),
+                settlement_failed: AtomicBool::new(false),
             }),
         })
     }
@@ -279,6 +281,16 @@ impl TorrentManager {
         let scope = format!("{:x}", Sha256::digest(scope.as_bytes()));
         // Serialization also makes reservation, deletion and admission atomic.
         let mut state = self.inner.state.lock().await;
+        if state
+            .scopes
+            .values()
+            .any(|session| session.has_failed_settlement())
+        {
+            self.inner.settlement_failed.store(true, Ordering::Release);
+        }
+        if mode == LeaseMode::SelectedFile && self.inner.settlement_failed.load(Ordering::Acquire) {
+            return Err("Torrent settlement failed".into());
+        }
         let known_hash = match &input {
             AddTorrent::Url(raw) => librqbit::Magnet::parse(raw)
                 .ok()
@@ -496,12 +508,26 @@ impl TorrentManager {
         let mut idle: Vec<_> = state
             .entries
             .iter()
-            .filter(|(_, e)| e.is_idle())
+            .filter(|(_, e)| e.is_unused())
             .map(|(k, e)| (k.clone(), e.clone()))
             .collect();
         idle.sort_by_key(|(_, e)| *e.idle_since.lock().unwrap_or_else(|e| e.into_inner()));
         for (key, entry) in idle {
+            if entry.managed.has_failed_settlement() {
+                self.inner.settlement_failed.store(true, Ordering::Release);
+            }
             let _ = entry.session.pause(&entry.managed).await;
+            if entry.managed.is_paused() {
+                let _ = entry
+                    .managed
+                    .wait_for_paused_workers_until(
+                        tokio::time::Instant::now() + Duration::from_secs(2),
+                    )
+                    .await;
+            }
+            if !entry.is_idle() {
+                continue;
+            }
             let expired = entry
                 .idle_since
                 .lock()
@@ -533,8 +559,20 @@ impl TorrentManager {
         // Do not remove the new scope while making its first reservation.
         if needed.is_none() {
             for scope in scopes {
-                if let Some(session) = state.scopes.remove(&scope) {
-                    session.cancellation_token().cancel();
+                if let Some(session) = state.scopes.get(&scope) {
+                    if session.has_failed_settlement() {
+                        self.inner.settlement_failed.store(true, Ordering::Release);
+                    }
+                    if session
+                        .shutdown_and_wait_until(
+                            tokio::time::Instant::now() + Duration::from_secs(2),
+                        )
+                        .await
+                    {
+                        state.scopes.remove(&scope);
+                    } else {
+                        self.inner.settlement_failed.store(true, Ordering::Release);
+                    }
                 }
             }
         }
@@ -747,8 +785,11 @@ impl HandleState {
     }
 }
 impl Entry {
-    fn is_idle(&self) -> bool {
+    fn is_unused(&self) -> bool {
         self.users.load(Ordering::Acquire) == 0 && self.readers.load(Ordering::Acquire) == 0
+    }
+    fn is_idle(&self) -> bool {
+        self.is_unused() && !self.managed.has_pending_work()
     }
 }
 struct TorrentReadGuard {
@@ -767,7 +808,7 @@ impl Drop for TorrentReadGuard {
     }
 }
 fn mark_idle(entry: &Arc<Entry>, manager: &Arc<ManagerInner>) {
-    if !entry.is_idle() {
+    if !entry.is_unused() {
         return;
     }
     *entry
@@ -779,7 +820,7 @@ fn mark_idle(entry: &Arc<Entry>, manager: &Arc<ManagerInner>) {
         let manager = manager.clone();
         runtime.spawn(async move {
             let _guard = manager.state.lock().await;
-            if entry.is_idle() {
+            if entry.is_unused() {
                 let _ = entry.session.pause(&entry.managed).await;
             }
         });
@@ -1035,3 +1076,6 @@ impl Drop for ManagerInner {
         }
     }
 }
+
+#[cfg(test)]
+mod lifetime_tests;

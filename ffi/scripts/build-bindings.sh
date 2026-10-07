@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-export CARGO_BUILD_JOBS=2
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
 ./ffi/scripts/check-native-deps.sh
 cargo build --locked -p playback-gateway-ffi --no-default-features --features torrent --lib
 target_dir="$(cargo metadata --locked --no-deps --format-version 1 | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')"
