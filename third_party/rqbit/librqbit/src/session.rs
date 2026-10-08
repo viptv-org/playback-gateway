@@ -499,6 +499,9 @@ struct InternalAddResult {
 }
 
 impl Session {
+    pub(crate) fn is_native(&self) -> bool {
+        self.network_policy.is_native()
+    }
     /// Create a new session with default options.
     /// The passed in folder will be used as a default unless overriden per torrent.
     /// It will run a DHT server/client, a TCP listener and .

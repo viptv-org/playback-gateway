@@ -112,6 +112,47 @@ use super::{
     ManagedTorrentShared, TorrentMetadata,
 };
 
+fn piece_takeover_due(
+    elapsed: Duration,
+    average: Option<Duration>,
+    threshold: f64,
+    native_current: bool,
+) -> bool {
+    if native_current {
+        // The decoder must not wait for a speed sample from an idle/slow initial
+        // owner while faster peers download unrelated lookahead pieces.
+        return elapsed >= Duration::from_secs(2);
+    }
+    average.is_some_and(|average| elapsed.as_secs_f64() > average.as_secs_f64() * threshold)
+}
+
+#[cfg(test)]
+mod startup_piece_tests {
+    use super::*;
+    #[test]
+    fn decoder_current_piece_can_move_before_first_speed_sample() {
+        assert!(piece_takeover_due(Duration::from_secs(3), None, 10., true));
+        assert!(!piece_takeover_due(
+            Duration::from_millis(500),
+            None,
+            10.,
+            true
+        ));
+        assert!(!piece_takeover_due(
+            Duration::from_secs(3),
+            None,
+            10.,
+            false
+        ));
+        assert!(!piece_takeover_due(
+            Duration::from_secs(3),
+            Some(Duration::from_secs(1)),
+            10.,
+            false
+        ));
+    }
+}
+
 #[derive(Debug)]
 struct InflightPiece {
     peer: PeerHandle,
@@ -1341,7 +1382,22 @@ impl PeerHandler {
     ///
     /// If this returns, an existing in-flight piece was marked to be ours.
     fn try_steal_old_slow_piece(&self, threshold: f64) -> Option<ValidPieceIndex> {
-        let my_avg_time = self.counters.average_piece_download_time()?;
+        let my_avg_time = self.counters.average_piece_download_time();
+        let native = self
+            .state
+            .shared
+            .session
+            .upgrade()
+            .is_some_and(|session| session.is_native());
+        let current = if native {
+            self.state.streams.current_pieces(&self.state.lengths)
+        } else {
+            Vec::new()
+        };
+        let available = self
+            .state
+            .peers
+            .with_live_mut(self.addr, "takeover_bitfield", |peer| peer.bitfield.clone())?;
 
         let (stolen_idx, from_peer) = {
             let mut g = self.state.lock_write("try_steal_old_slow_piece");
@@ -1349,12 +1405,27 @@ impl PeerHandler {
                 .inflight_pieces
                 .iter_mut()
                 // don't steal from myself
-                .filter(|(_, r)| r.peer != self.addr)
+                .filter(|(id, r)| {
+                    r.peer != self.addr && available.get(id.get_usize()).is_some_and(|have| *have)
+                })
                 .map(|(p, r)| (p, r.started.elapsed(), r))
-                .max_by_key(|(_, e, _)| *e)?;
+                .filter(|(id, elapsed, _)| {
+                    piece_takeover_due(
+                        *elapsed,
+                        my_avg_time,
+                        threshold,
+                        native && current.contains(id),
+                    )
+                })
+                .max_by_key(|(id, elapsed, _)| (native && current.contains(id), *elapsed))?;
 
             // heuristic for "too slow peer"
-            if elapsed.as_secs_f64() > my_avg_time.as_secs_f64() * threshold {
+            if piece_takeover_due(
+                elapsed,
+                my_avg_time,
+                threshold,
+                native && current.contains(idx),
+            ) {
                 // If the piece is locked and someone is actively writing to disk, don't steal it.
                 if let Some(_g) = self.state.per_piece_locks[idx.get_usize()].try_write() {
                     debug!(

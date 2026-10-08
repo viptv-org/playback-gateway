@@ -362,14 +362,22 @@ async fn stopped_torrent_keeps_payload_budget_until_pending_range_read_is_cancel
         }
     });
     entering.await.unwrap();
-    handle.stop();
     manager.reap().await.unwrap();
     assert!(
         manager.reserve_cache(1).await.is_err(),
-        "stopping a lease must not unlink/refund an in-flight reader's payload"
+        "an active range reader must retain its payload reservation"
     );
-    read.abort();
-    let _ = read.await;
+    handle.stop();
+    // Stop actively cancels this asynchronous missing-piece read. It may have
+    // already joined before reap runs; asserting it stays pending races valid
+    // cancellation. Wait for the actual receipt before testing the refund.
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_secs(2), read)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_err()
+    );
     manager.reap().await.unwrap();
     assert!(
         manager.reserve_cache(1).await.is_ok(),

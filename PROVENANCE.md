@@ -105,3 +105,11 @@ deadline; the long-running gateway timers are unchanged. Deterministic tests
 cover a seeded peer six hops away and packet loss. Closed numeric transport
 diagnostics distinguish live/connecting/dead peers, fetched/verified bytes and
 terminal failure without exposing peer addresses or torrent identity.
+
+Native decoder-blocking pieces may be reassigned after two seconds even before
+the new peer has a completed-piece speed sample. Only a peer advertising the
+exact piece can take it; current reader pieces lead lookahead work. Existing
+per-piece disk locks, cancellation and hash verification remain authoritative.
+Non-current and ordinary gateway pieces retain measured-speed thresholds.
+This addresses emulator captures where over 100 MiB of lookahead downloaded
+while the decoder's current range timed out on its original slow peer.
