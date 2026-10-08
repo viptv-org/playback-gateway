@@ -785,6 +785,8 @@ internal open class UniffiVTableCallbackInterfaceTorrentProgressListener(
 
 
 
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -841,6 +843,8 @@ fun uniffi_playback_gateway_ffi_checksum_method_torrenthandle_stop(
 fun uniffi_playback_gateway_ffi_checksum_method_torrenthandle_stop_and_wait(
 ): Short
 fun uniffi_playback_gateway_ffi_checksum_method_torrenthandle_stream_url(
+): Short
+fun uniffi_playback_gateway_ffi_checksum_method_torrenthandle_transport_diagnostics(
 ): Short
 fun uniffi_playback_gateway_ffi_checksum_constructor_torrentclient_new(
 ): Short
@@ -953,6 +957,8 @@ fun uniffi_playback_gateway_ffi_fn_method_torrenthandle_stop(`ptr`: Pointer,unif
 fun uniffi_playback_gateway_ffi_fn_method_torrenthandle_stop_and_wait(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_playback_gateway_ffi_fn_method_torrenthandle_stream_url(`ptr`: Pointer,`index`: Int,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_playback_gateway_ffi_fn_method_torrenthandle_transport_diagnostics(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_playback_gateway_ffi_fn_init_callback_vtable_torrentprogresslistener(`vtable`: UniffiVTableCallbackInterfaceTorrentProgressListener,
 ): Unit
@@ -1145,6 +1151,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_playback_gateway_ffi_checksum_method_torrenthandle_stream_url() != 26915.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_playback_gateway_ffi_checksum_method_torrenthandle_transport_diagnostics() != 36220.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_playback_gateway_ffi_checksum_constructor_torrentclient_new() != 11434.toShort()) {
@@ -2310,6 +2319,8 @@ public interface TorrentHandleInterface {
      */
     fun `streamUrl`(`index`: kotlin.UInt): kotlin.String
 
+    fun `transportDiagnostics`(): TorrentTransportDiagnostics
+
     companion object
 }
 
@@ -2503,6 +2514,18 @@ open class TorrentHandle: Disposable, AutoCloseable, TorrentHandleInterface
     }
 
 
+    override fun `transportDiagnostics`(): TorrentTransportDiagnostics {
+            return FfiConverterTypeTorrentTransportDiagnostics.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_playback_gateway_ffi_fn_method_torrenthandle_transport_diagnostics(
+        it, _status)
+}
+    }
+    )
+    }
+
+
 
 
 
@@ -2655,6 +2678,66 @@ public object FfiConverterTypeTorrentProgress: FfiConverterRustBuffer<TorrentPro
             FfiConverterULong.write(value.`totalBytes`, buf)
             FfiConverterBoolean.write(value.`finished`, buf)
             FfiConverterBoolean.write(value.`stopped`, buf)
+    }
+}
+
+
+
+data class TorrentTransportDiagnostics (
+    var `active`: kotlin.Boolean,
+    var `failed`: kotlin.Boolean,
+    var `fetchedBytes`: kotlin.ULong,
+    var `checkedBytes`: kotlin.ULong,
+    var `livePeers`: kotlin.ULong,
+    var `connectingPeers`: kotlin.ULong,
+    var `queuedPeers`: kotlin.ULong,
+    var `deadPeers`: kotlin.ULong,
+    var `notNeededPeers`: kotlin.ULong
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTorrentTransportDiagnostics: FfiConverterRustBuffer<TorrentTransportDiagnostics> {
+    override fun read(buf: ByteBuffer): TorrentTransportDiagnostics {
+        return TorrentTransportDiagnostics(
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TorrentTransportDiagnostics) = (
+            FfiConverterBoolean.allocationSize(value.`active`) +
+            FfiConverterBoolean.allocationSize(value.`failed`) +
+            FfiConverterULong.allocationSize(value.`fetchedBytes`) +
+            FfiConverterULong.allocationSize(value.`checkedBytes`) +
+            FfiConverterULong.allocationSize(value.`livePeers`) +
+            FfiConverterULong.allocationSize(value.`connectingPeers`) +
+            FfiConverterULong.allocationSize(value.`queuedPeers`) +
+            FfiConverterULong.allocationSize(value.`deadPeers`) +
+            FfiConverterULong.allocationSize(value.`notNeededPeers`)
+    )
+
+    override fun write(value: TorrentTransportDiagnostics, buf: ByteBuffer) {
+            FfiConverterBoolean.write(value.`active`, buf)
+            FfiConverterBoolean.write(value.`failed`, buf)
+            FfiConverterULong.write(value.`fetchedBytes`, buf)
+            FfiConverterULong.write(value.`checkedBytes`, buf)
+            FfiConverterULong.write(value.`livePeers`, buf)
+            FfiConverterULong.write(value.`connectingPeers`, buf)
+            FfiConverterULong.write(value.`queuedPeers`, buf)
+            FfiConverterULong.write(value.`deadPeers`, buf)
+            FfiConverterULong.write(value.`notNeededPeers`, buf)
     }
 }
 
