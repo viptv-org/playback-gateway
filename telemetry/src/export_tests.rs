@@ -14,10 +14,11 @@ use tower::ServiceExt;
 
 #[derive(Clone)]
 struct Collector {
-    batches: Arc<Mutex<Vec<(String, Vec<u8>)>>>,
+    batches: Arc<Mutex<Vec<ExportBatch>>>,
     status: Arc<std::sync::atomic::AtomicU16>,
     delay_ms: Arc<AtomicU64>,
 }
+type ExportBatch = (String, Vec<u8>);
 async fn ingest(State(state): State<Collector>, request: Request) -> StatusCode {
     let path = request.uri().path().to_owned();
     assert_eq!(
