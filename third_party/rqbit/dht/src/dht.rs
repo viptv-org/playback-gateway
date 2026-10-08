@@ -47,6 +47,11 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, debug_span, error, error_span, info, trace, warn, Instrument};
 
+// Native acquisition has a thirty-second owner deadline. A missing datagram
+// must leave time to retry/traverse rather than inherit the long-running DHT timer.
+const NATIVE_QUERY_INTERVAL: Duration = Duration::from_secs(3);
+const NATIVE_LOOKUP_DEPTH: usize = 16;
+
 #[derive(Debug, Serialize)]
 pub struct DhtStats {
     #[serde(serialize_with = "crate::utils::serialize_id20")]
@@ -242,7 +247,11 @@ impl RequestPeersStream {
         let rp = Arc::new(RecursiveRequest {
             tasks: tasks.clone(),
             parent_owner: parent_owner.clone(),
-            max_depth: 4,
+            max_depth: if dht.network_policy.is_native() {
+                NATIVE_LOOKUP_DEPTH
+            } else {
+                4
+            },
             info_hash,
             useful_nodes_limit: 256,
             bootstrap_seeded: AtomicBool::new(false),
@@ -389,6 +398,7 @@ impl RecursiveRequest<RecursiveRequestCallbacksGetPeers> {
                         trace!("iteration {}", iteration);
                         let sleep = match this.get_peers_root() {
                             Ok(0) => Duration::from_secs(1),
+                            Ok(_) if this.dht.network_policy.is_native() => NATIVE_QUERY_INTERVAL,
                             Ok(n) if n < 8 => REQUERY_INTERVAL / 8 * (n as u32),
                             Ok(_) => REQUERY_INTERVAL,
                             Err(e) => {
@@ -583,7 +593,12 @@ impl<C: RecursiveRequestCallbacks> RecursiveRequest<C> {
 
         // If recently requested, ignore
         if let Some(existing) = closest_nodes.iter_mut().find(|n| n.id == node_id) {
-            if existing.last_request.elapsed() > Duration::from_secs(60) {
+            let interval = if self.dht.network_policy.is_native() {
+                NATIVE_QUERY_INTERVAL
+            } else {
+                REQUERY_INTERVAL
+            };
+            if existing.last_request.elapsed() >= interval {
                 existing.last_request = Instant::now();
                 return true;
             }
@@ -729,7 +744,12 @@ impl DhtState {
                 return Err(e.into());
             }
         };
-        match tokio::time::timeout(RESPONSE_TIMEOUT, rx).await {
+        let timeout = if self.network_policy.is_native() {
+            NATIVE_QUERY_INTERVAL
+        } else {
+            RESPONSE_TIMEOUT
+        };
+        match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(r)) => r.map(|r| {
                 trace!("received {r:?}");
                 r
@@ -741,7 +761,7 @@ impl DhtState {
             }
             Err(_) => {
                 self.inflight_by_transaction_id.remove(&key);
-                bail!("timeout ({RESPONSE_TIMEOUT:?})")
+                bail!("DHT response deadline reached")
             }
         }
     }
@@ -1598,6 +1618,99 @@ mod native_policy_tests {
             received.expect("the first valid peer response was discarded"),
             Some(peer)
         );
+    }
+
+    #[tokio::test]
+    async fn native_lookup_reaches_peers_beyond_four_routing_hops() {
+        let (sender, mut receiver) = unbounded_channel();
+        let state = isolated_state(sender);
+        state
+            .bootstrap_roots
+            .write()
+            .push("1.1.1.1:6000".parse().unwrap());
+        let driver = tokio::spawn({
+            let state = state.clone();
+            async move {
+                while let Some(packet) = receiver.recv().await {
+                    let hop = packet.addr.port() - 6000;
+                    let response = if hop == 6 {
+                        Response {
+                            id: Id20::new([7; 20]),
+                            values: Some(vec![bprotocol::CompactPeerInfo {
+                                addr: "1.0.0.1:7000".parse().unwrap(),
+                            }]),
+                            ..Default::default()
+                        }
+                    } else {
+                        Response {
+                            id: Id20::new([hop as u8 + 1; 20]),
+                            nodes: Some(CompactNodeInfo {
+                                nodes: vec![Node {
+                                    id: Id20::new([hop as u8 + 2; 20]),
+                                    addr: format!("1.1.1.1:{}", 6001 + hop).parse().unwrap(),
+                                }],
+                            }),
+                            ..Default::default()
+                        }
+                    };
+                    state
+                        .on_received_message(
+                            Message {
+                                transaction_id: packet.message.transaction_id.clone(),
+                                version: None,
+                                ip: None,
+                                kind: MessageKind::Response(response),
+                            },
+                            packet.addr,
+                        )
+                        .unwrap();
+                }
+            }
+        });
+        let mut peers = state.get_peers(Id20::new([255; 20]), None);
+        let result = tokio::time::timeout(Duration::from_millis(500), peers.next()).await;
+        drop(peers);
+        driver.abort();
+        let _ = driver.await;
+        assert!(
+            state
+                .shutdown_and_wait_until(tokio::time::Instant::now() + Duration::from_secs(1))
+                .await
+        );
+        assert_eq!(
+            result.expect("native lookup stopped before the reachable seeded peer"),
+            Some("1.0.0.1:7000".parse().unwrap())
+        );
+    }
+
+    #[tokio::test]
+    async fn native_packet_loss_cannot_outwait_the_entire_startup_budget() {
+        let (sender, mut receiver) = unbounded_channel();
+        let state = isolated_state(sender);
+        let task = tokio::spawn({
+            let state = state.clone();
+            async move {
+                state
+                    .request(
+                        Request::GetPeers(Id20::new([1; 20])),
+                        "1.1.1.1:6881".parse().unwrap(),
+                    )
+                    .await
+            }
+        });
+        let packet = receiver.recv().await.unwrap();
+        drop(packet);
+        let result = tokio::time::timeout(Duration::from_secs(4), task).await;
+        drop(receiver);
+        assert!(
+            state
+                .shutdown_and_wait_until(tokio::time::Instant::now() + Duration::from_secs(1))
+                .await
+        );
+        assert!(result
+            .expect("one lost native UDP packet waited longer than four seconds")
+            .unwrap()
+            .is_err());
     }
 
     #[tokio::test]

@@ -102,6 +102,18 @@ pub struct TorrentProgress {
     pub finished: bool,
     pub stopped: bool,
 }
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct TorrentTransportDiagnostics {
+    pub active: bool,
+    pub failed: bool,
+    pub fetched_bytes: u64,
+    pub checked_bytes: u64,
+    pub live_peers: u64,
+    pub connecting_peers: u64,
+    pub queued_peers: u64,
+    pub dead_peers: u64,
+    pub not_needed_peers: u64,
+}
 #[uniffi::export(callback_interface)]
 pub trait TorrentProgressListener: Send + Sync {
     fn on_status(&self, status: TorrentProgress);
@@ -434,6 +446,20 @@ impl TorrentHandle {
             total_bytes: status.total_bytes,
             finished: status.finished,
             stopped: status.stopped,
+        }
+    }
+    pub fn transport_diagnostics(&self) -> TorrentTransportDiagnostics {
+        let snapshot = self.handle.diagnostics();
+        TorrentTransportDiagnostics {
+            active: snapshot.active,
+            failed: snapshot.failed,
+            fetched_bytes: snapshot.fetched_bytes,
+            checked_bytes: snapshot.checked_bytes,
+            live_peers: snapshot.live_peers,
+            connecting_peers: snapshot.connecting_peers,
+            queued_peers: snapshot.queued_peers,
+            dead_peers: snapshot.dead_peers,
+            not_needed_peers: snapshot.not_needed_peers,
         }
     }
     /// Replaces any previous listener. Callbacks run on a native blocking

@@ -96,6 +96,20 @@ pub struct TorrentStatus {
     pub stopped: bool,
 }
 
+/// Closed numerical transport facts; no source identity, peers, paths or raw errors.
+#[derive(Clone, Debug)]
+pub struct TorrentDiagnostics {
+    pub active: bool,
+    pub failed: bool,
+    pub fetched_bytes: u64,
+    pub checked_bytes: u64,
+    pub live_peers: u64,
+    pub connecting_peers: u64,
+    pub queued_peers: u64,
+    pub dead_peers: u64,
+    pub not_needed_peers: u64,
+}
+
 #[derive(Clone)]
 pub struct TorrentManager {
     inner: Arc<ManagerInner>,
@@ -948,6 +962,23 @@ impl TorrentHandle {
             total_bytes: stats.total_bytes,
             finished: stats.finished,
             stopped: self.state.stopped.load(Ordering::Acquire),
+        }
+    }
+    pub fn diagnostics(&self) -> TorrentDiagnostics {
+        let stats = self.state.entry.managed.stats();
+        let active = stats.live.is_some();
+        let live = stats.live;
+        let snapshot = live.map(|live| live.snapshot).unwrap_or_default();
+        TorrentDiagnostics {
+            active,
+            failed: stats.error.is_some(),
+            fetched_bytes: snapshot.fetched_bytes,
+            checked_bytes: snapshot.downloaded_and_checked_bytes,
+            live_peers: snapshot.peer_stats.live as u64,
+            connecting_peers: snapshot.peer_stats.connecting as u64,
+            queued_peers: snapshot.peer_stats.queued as u64,
+            dead_peers: snapshot.peer_stats.dead as u64,
+            not_needed_peers: snapshot.peer_stats.not_needed as u64,
         }
     }
     /// Invalidates this lease and every explicit clone. Independent leases,

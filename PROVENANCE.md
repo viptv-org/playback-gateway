@@ -97,3 +97,11 @@ a fresh lookup. No source/operator peer hints, trackers, persistent DHT state or
 new network destinations are admitted. A real owned-seeder regression resolves
 metadata then reads payload without DHT, trackers or a second bootstrap list; it
 fails before peer continuity and passes afterwards.
+
+Native acquisition now traverses up to sixteen DHT hops instead of stopping
+after four. Lost native datagrams time out in three seconds and native root
+queries recur within three seconds, inside the existing thirty-second acquisition
+deadline; the long-running gateway timers are unchanged. Deterministic tests
+cover a seeded peer six hops away and packet loss. Closed numeric transport
+diagnostics distinguish live/connecting/dead peers, fetched/verified bytes and
+terminal failure without exposing peer addresses or torrent identity.
