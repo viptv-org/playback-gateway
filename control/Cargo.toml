@@ -18,6 +18,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 futures = "0.3"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing = "0.1"
+service-telemetry = { path = "../telemetry" }
 
 [dev-dependencies]
 librqbit = { version = "=8.1.1", default-features = false, features = ["rust-tls"] }

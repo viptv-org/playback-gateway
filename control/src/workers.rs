@@ -160,6 +160,28 @@ impl Workers {
         idempotency: &str,
         now: u64,
     ) -> Result<Viewer, &'static str> {
+        let observation = service_telemetry::observe(service_telemetry::Operation::GatewayPrepare);
+        let context = observation.context();
+        let outcome = service_telemetry::in_context(
+            context,
+            self.create_inner(principal, request, idempotency, now),
+        )
+        .await;
+        observation.finish(match &outcome {
+            Ok(_) => service_telemetry::Outcome::Success,
+            Err(code) => {
+                service_telemetry::Outcome::Failed(service_telemetry::Failure::from_code(code))
+            }
+        });
+        outcome
+    }
+    async fn create_inner(
+        &self,
+        principal: &Principal,
+        request: &CreateSession,
+        idempotency: &str,
+        now: u64,
+    ) -> Result<Viewer, &'static str> {
         request.validate()?;
         principal.require(&request.namespace, Scope::Create)?;
         self.require_active(principal, now).await?;
@@ -346,7 +368,17 @@ impl Workers {
             complete: false,
         };
         let remaining = deadline.saturating_sub(started.elapsed());
+        let operation = service_telemetry::observe(service_telemetry::Operation::EngineStart);
         let outcome = tokio::time::timeout(remaining, prepared.start()).await;
+        match &outcome {
+            Ok(Ok(response)) => {
+                operation.processing(&response.video_mode, &response.audio_mode);
+                operation.finish(service_telemetry::Outcome::Success);
+            }
+            _ => operation.finish(service_telemetry::Outcome::Failed(
+                service_telemetry::Failure::Decode,
+            )),
+        }
         let response = match outcome {
             Ok(Ok(response)) => response,
             _ => return Err("processing_failed"),
