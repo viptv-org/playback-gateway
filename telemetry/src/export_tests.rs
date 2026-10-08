@@ -140,6 +140,30 @@ async fn actual_otlp_exports_failed_requests_and_metrics_without_sensitive_field
     let batches = collector.batches.lock().unwrap().clone();
     assert!(batches.iter().any(|(path, _)| path == "/v1/metrics"));
     assert!(batches.iter().any(|(path, _)| path == "/v1/logs"));
+    let metrics: Vec<_> = batches
+        .iter()
+        .filter(|(path, _)| path == "/v1/metrics")
+        .flat_map(|(_, bytes)| {
+            opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest::decode(
+                bytes.as_slice(),
+            )
+            .unwrap()
+            .resource_metrics
+        })
+        .flat_map(|resource| resource.scope_metrics)
+        .flat_map(|scope| scope.metrics)
+        .collect();
+    let duration = metrics
+        .iter()
+        .find(|metric| metric.name == "service.operation.duration")
+        .unwrap();
+    match duration.data.as_ref().unwrap() {
+        opentelemetry_proto::tonic::metrics::v1::metric::Data::ExponentialHistogram(histogram) => {
+            assert_eq!(histogram.aggregation_temporality, 1);
+            assert_eq!(histogram.data_points[0].count, 1);
+        }
+        _ => panic!("duration metrics must support vendor percentiles"),
+    }
     for (_, bytes) in batches {
         let text = String::from_utf8_lossy(&bytes);
         for secret in [

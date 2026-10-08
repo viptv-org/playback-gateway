@@ -28,7 +28,10 @@ network deadlines, no redirects, no proxies and no retries. Playback handlers
 never perform collector HTTP or ledger I/O. Successful spans are sampled by
 trace ID; failures are retained even with an unsampled incoming parent, subject
 to queue and byte limits. Metrics include every measured operation, duration,
-in-flight operations, process CPU/RSS and exporter counters. Cancellation is
+in-flight operations, process CPU/RSS and exporter counters. Metrics are
+exported with delta counters and exponential duration histograms for vendor
+percentile queries. Process CPU/RSS refer to the service, not child FFmpeg
+processes or GPU utilization. Cancellation is
 recorded when an operation or streaming body is dropped. Media frames and
 trailers pass through without buffering. Shutdown has a bounded flush window.
 

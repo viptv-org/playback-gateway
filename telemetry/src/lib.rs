@@ -118,6 +118,7 @@ impl Telemetry {
             .with_span_processor(processor)
             .build();
         let metric_export = opentelemetry_otlp::MetricExporter::builder()
+            .with_temporality(opentelemetry_sdk::metrics::Temporality::Delta)
             .with_http()
             .with_endpoint(format!("{}/v1/metrics", settings.endpoint))
             .with_protocol(opentelemetry_otlp::Protocol::HttpBinary)
@@ -133,11 +134,21 @@ impl Telemetry {
         let metrics = SdkMeterProvider::builder()
             .with_resource(resource.clone())
             .with_reader(reader)
-            .with_view(|_| {
-                opentelemetry_sdk::metrics::Stream::builder()
-                    .with_cardinality_limit(256)
-                    .build()
-                    .ok()
+            .with_view(|instrument: &opentelemetry_sdk::metrics::Instrument| {
+                let stream =
+                    opentelemetry_sdk::metrics::Stream::builder().with_cardinality_limit(256);
+                let stream = if instrument.name() == "service.operation.duration" {
+                    stream.with_aggregation(
+                        opentelemetry_sdk::metrics::Aggregation::Base2ExponentialHistogram {
+                            max_size: 160,
+                            max_scale: 20,
+                            record_min_max: true,
+                        },
+                    )
+                } else {
+                    stream
+                };
+                stream.build().ok()
             })
             .build();
         let log_export = opentelemetry_otlp::LogExporter::builder()
@@ -171,9 +182,6 @@ impl Telemetry {
         let durations = meter
             .f64_histogram("service.operation.duration")
             .with_unit("s")
-            .with_boundaries(vec![
-                0.005, 0.025, 0.1, 0.5, 1.0, 3.0, 5.0, 10.0, 30.0, 60.0, 180.0, 600.0,
-            ])
             .build();
         let active = Arc::new(AtomicU64::new(0));
         let active_count = active.clone();
