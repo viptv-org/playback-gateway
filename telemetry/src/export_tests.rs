@@ -436,3 +436,23 @@ async fn collector_http_failure_is_not_retried_and_consumes_persisted_budget() {
     second.shutdown().await;
     server.abort();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn background_engine_failure_exports_without_an_http_request() {
+    let (endpoint, collector, server) = collector().await;
+    let dir = tempfile::tempdir().unwrap();
+    let telemetry = telemetry(endpoint, dir.path().join("quota"), 0.0, 1024 * 1024).await;
+    tokio::spawn(in_context(telemetry.background_context(), async {
+        observe(Operation::EngineHealth).finish(Outcome::Failed(Failure::Decode));
+    }))
+    .await
+    .unwrap();
+    flush(&telemetry).await;
+    let spans = trace_spans(&collector);
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].name, "engine.health");
+    assert_eq!(spans[0].status.as_ref().unwrap().message, "decode");
+    assert_eq!(spans[0].parent_span_id, Vec::<u8>::new());
+    telemetry.shutdown().await;
+    server.abort();
+}
