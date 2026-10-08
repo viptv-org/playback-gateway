@@ -279,6 +279,12 @@ impl Telemetry {
     pub fn enabled(&self) -> bool {
         self.inner.is_some()
     }
+    pub fn background_context(&self) -> RequestContext {
+        RequestContext {
+            telemetry: self.clone(),
+            context: Context::new(),
+        }
+    }
     pub(crate) fn start(
         &self,
         operation: Operation,

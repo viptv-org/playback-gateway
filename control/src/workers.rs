@@ -452,7 +452,14 @@ impl Workers {
             .map(|(job, response)| (job.clone(), response.id.clone()))
             .collect();
         for (job, id) in active {
-            if !self.engine.heartbeat(&id).await {
+            let health = service_telemetry::observe(service_telemetry::Operation::EngineHealth);
+            let alive = self.engine.heartbeat(&id).await;
+            health.finish(if alive {
+                service_telemetry::Outcome::Success
+            } else {
+                service_telemetry::Outcome::Failed(service_telemetry::Failure::Decode)
+            });
+            if !alive {
                 tracing::warn!(job_tag = %crate::diagnostics::tag(&job), engine_tag = %crate::diagnostics::tag(&id), "Output engine heartbeat lost; failing viewers");
                 self.sessions
                     .lock()

@@ -279,18 +279,22 @@ async fn run(settings: Settings) -> Result<(), &'static str> {
     let reaper = {
         let workers = workers.clone();
         let ready = ready.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(1));
-            loop {
-                tokio::select! {
-                    _ = stopped.changed() => break,
-                    _ = interval.tick() => {
-                        let Some(now) = SystemTime::now().duration_since(UNIX_EPOCH).ok().map(|elapsed| elapsed.as_secs()) else { ready.store(false, Ordering::Release); continue; };
-                        ready.store(workers.reap(now).await.is_ok(), Ordering::Release);
+        let background_context = telemetry.background_context();
+        tokio::spawn(service_telemetry::in_context(
+            background_context,
+            async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(1));
+                loop {
+                    tokio::select! {
+                        _ = stopped.changed() => break,
+                        _ = interval.tick() => {
+                            let Some(now) = SystemTime::now().duration_since(UNIX_EPOCH).ok().map(|elapsed| elapsed.as_secs()) else { ready.store(false, Ordering::Release); continue; };
+                            ready.store(workers.reap(now).await.is_ok(), Ordering::Release);
+                        }
                     }
                 }
-            }
-        })
+            },
+        ))
     };
     let shutdown_ready = ready.clone();
     let (shutdown_started, mut shutdown_requested) = tokio::sync::watch::channel(false);
