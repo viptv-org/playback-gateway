@@ -118,6 +118,8 @@ pub struct Session {
     reqwest_client: reqwest::Client,
     udp_tracker_client: Option<UdpTrackerClient>,
     network_policy: NetworkPolicy,
+    // Session-private discovery continuity; never source/operator input or persisted state.
+    native_metadata_peers: RwLock<HashMap<Id20, Vec<SocketAddr>>>,
 
     // Lifecycle management
     cancellation_token: CancellationToken,
@@ -714,6 +716,7 @@ impl Session {
                 )),
                 udp_tracker_client,
                 network_policy: opts.network_policy,
+                native_metadata_peers: RwLock::new(HashMap::new()),
                 ratelimits: Limits::new(opts.ratelimits),
                 trackers: opts.trackers,
                 #[cfg(feature = "disable-upload")]
@@ -1201,13 +1204,23 @@ impl Session {
         } else {
             trackers
         };
+        let discovered = if self.network_policy.is_native() && !opts.list_only {
+            self.native_metadata_peers
+                .write()
+                .remove(&info_hash)
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let make_peer_rx = || {
+            let mut peers = discovered.clone();
+            peers.extend(opts.initial_peers.clone().unwrap_or_default());
             self.make_peer_rx(
                 info_hash,
                 trackers.clone(),
                 !opts.paused && !opts.list_only,
                 opts.force_tracker_interval,
-                opts.initial_peers.clone().unwrap_or_default(),
+                peers,
                 private,
                 payload_tasks.clone(),
             )
@@ -1275,6 +1288,21 @@ impl Session {
         };
 
         if opts.list_only {
+            if self.network_policy.is_native() && !seen_peers.is_empty() {
+                let peers = seen_peers
+                    .iter()
+                    .copied()
+                    .filter(|peer| self.network_policy.allows(*peer))
+                    .take(128)
+                    .collect();
+                let mut retained = self.native_metadata_peers.write();
+                if retained.len() >= 8 && !retained.contains_key(&info_hash) {
+                    if let Some(evicted) = retained.keys().next().copied() {
+                        retained.remove(&evicted);
+                    }
+                }
+                retained.insert(info_hash, peers);
+            }
             return Ok(AddTorrentResponse::ListOnly(ListOnlyResponse {
                 info_hash,
                 info: metadata.info,
@@ -1621,6 +1649,7 @@ impl Session {
         .await
         {
             ReadMetainfoResult::Found {
+                peer,
                 info,
                 info_bytes,
                 rx,
@@ -1643,7 +1672,10 @@ impl Session {
                     )?,
                     peer_rx: rx,
                     seen_peers: {
-                        let seen = seen.into_iter().collect_vec();
+                        // The peer which actually supplied hash-verified metadata
+                        // leads payload discovery, ahead of unresponsive attempts.
+                        let mut seen = seen.into_iter().filter(|addr| *addr != peer).collect_vec();
+                        seen.insert(0, peer);
                         for peer in &seen {
                             trace!(?peer, "seen")
                         }

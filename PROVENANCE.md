@@ -84,3 +84,16 @@ lookup, and retain the existing owned query/datagram cancellation path. No
 tracker, source peer hint, new bootstrap inventory or persistent DHT state is
 introduced. A deterministic cold-table regression verifies the targeted roots
 are queued before routing nodes exist and are not repeatedly queried.
+
+## Native metadata and payload continuity
+
+DHT recursive lookup processes the first response rather than issuing a duplicate
+request and discarding the first result. A queued-datagram regression proves one
+valid peer response completes lookup without a second packet. Native metadata
+preparation also retains its actual metadata-serving peer first, plus a bounded
+set of already-discovered peers, within the same session and exact info hash.
+Payload admission consumes this transient discovery continuity before starting
+a fresh lookup. No source/operator peer hints, trackers, persistent DHT state or
+new network destinations are admitted. A real owned-seeder regression resolves
+metadata then reads payload without DHT, trackers or a second bootstrap list; it
+fails before peer continuity and passes afterwards.

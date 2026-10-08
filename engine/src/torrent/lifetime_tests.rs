@@ -445,3 +445,125 @@ async fn cancelling_live_payload_keeps_another_real_filesystem_payload_readable(
         librqbit::Settlement::Settled
     );
 }
+
+#[cfg(feature = "test-network-policy")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_metadata_peer_is_retained_for_payload_without_second_discovery() {
+    let seed = tempfile::tempdir().unwrap();
+    let bytes: Vec<u8> = (0..65536).map(|n| (n % 251) as u8).collect();
+    let source = seed.path().join("video.mkv");
+    std::fs::write(&source, &bytes).unwrap();
+    let metainfo = librqbit::create_torrent(&source, Default::default())
+        .await
+        .unwrap()
+        .as_bytes()
+        .unwrap()
+        .to_vec();
+    let metadata = vet_native_metainfo(&metainfo, None, 0, Some(bytes.len() as u64)).unwrap();
+    let hash = metadata.info_hash_hex();
+    let selection =
+        librqbit::native_metainfo::NativeSelection::from_hex(&hash, 0, bytes.len() as u64).unwrap();
+    let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = socket.local_addr().unwrap().port();
+    drop(socket);
+    let seeder = Session::new_with_opts(
+        seed.path().to_owned(),
+        SessionOptions {
+            disable_dht: true,
+            disable_dht_persistence: true,
+            disable_trackers: true,
+            enable_upnp_port_forwarding: false,
+            listen_port_range: Some(port..port + 1),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    seeder
+        .add_torrent(
+            AddTorrent::from_bytes(metainfo),
+            Some(AddTorrentOptions {
+                output_folder: Some(seed.path().to_str().unwrap().into()),
+                overwrite: true,
+                disable_trackers: true,
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap()
+        .into_handle()
+        .unwrap()
+        .wait_until_initialized()
+        .await
+        .unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let peer: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+    let consumer = Session::new_with_opts(
+        cache.path().to_owned(),
+        SessionOptions {
+            network_policy: NetworkPolicy::OwnedPrivateTcp(vec![peer]),
+            disable_dht: true,
+            disable_dht_persistence: true,
+            disable_trackers: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let listed = consumer
+        .add_torrent(
+            AddTorrent::from_url(format!("magnet:?xt=urn:btih:{hash}")),
+            Some(AddTorrentOptions {
+                list_only: true,
+                native_selection: Some(selection),
+                only_files: Some(vec![0]),
+                initial_peers: Some(vec![peer]),
+                disable_trackers: true,
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+    let librqbit::AddTorrentResponse::ListOnly(listed) = listed else {
+        panic!("metadata-only preparation required")
+    };
+    assert!(listed.seen_peers.contains(&peer));
+    // Payload receives no new bootstrap peers, DHT or trackers. It must retain
+    // only the metadata-stage peer proven by this session for this exact hash.
+    let handle = consumer
+        .add_torrent(
+            AddTorrent::from_bytes(listed.torrent_bytes),
+            Some(AddTorrentOptions {
+                native_selection: Some(selection),
+                only_files: Some(vec![0]),
+                disable_trackers: true,
+                initial_peers: Some(vec![]),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap()
+        .into_handle()
+        .unwrap();
+    handle.wait_until_initialized().await.unwrap();
+    let mut reader = handle.clone().stream(0).unwrap();
+    let mut first = vec![0; 128];
+    let result = timeout(Duration::from_secs(2), reader.read_exact(&mut first)).await;
+    drop(reader);
+    assert_eq!(
+        consumer
+            .shutdown_and_settle_until(tokio::time::Instant::now() + Duration::from_secs(2))
+            .await,
+        librqbit::Settlement::Settled
+    );
+    assert_eq!(
+        seeder
+            .shutdown_and_settle_until(tokio::time::Instant::now() + Duration::from_secs(2))
+            .await,
+        librqbit::Settlement::Settled
+    );
+    result
+        .expect("payload discarded the working metadata peer and waited for rediscovery")
+        .unwrap();
+    assert_eq!(first, bytes[..128]);
+}

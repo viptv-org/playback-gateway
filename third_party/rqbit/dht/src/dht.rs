@@ -501,16 +501,7 @@ impl<C: RecursiveRequestCallbacks> RecursiveRequest<C> {
             self.callbacks.on_request_end(self, id, addr, &response);
         }
 
-        let response = match self
-            .dht
-            .request_owned(
-                &self.tasks,
-                self.parent_owner.as_ref(),
-                self.request.clone(),
-                addr,
-            )
-            .await
-        {
+        let response = match response {
             Ok(ResponseOrError::Response(r)) => r,
             Ok(ResponseOrError::Error(e)) => bail!("error response: {:?}", e),
             Err(e) => {
@@ -1545,6 +1536,68 @@ mod native_policy_tests {
             "Pinned roots must not be polled repeatedly"
         );
         state.tasks.cancel();
+    }
+
+    #[tokio::test]
+    async fn successful_peer_response_is_used_without_a_second_datagram() {
+        let (sender, mut receiver) = unbounded_channel();
+        let state = isolated_state(sender);
+        let destination: SocketAddr = "1.1.1.1:6881".parse().unwrap();
+        let peer: SocketAddr = "1.0.0.1:6001".parse().unwrap();
+        let (peer_tx, mut peer_rx) = unbounded_channel();
+        let request = Arc::new(RecursiveRequest {
+            tasks: state.tasks.clone(),
+            parent_owner: None,
+            max_depth: 4,
+            info_hash: Id20::new([1; 20]),
+            request: Request::GetPeers(Id20::new([1; 20])),
+            dht: state.clone(),
+            useful_nodes_limit: 256,
+            bootstrap_seeded: AtomicBool::new(false),
+            useful_nodes: RwLock::new(Vec::new()),
+            peer_tx,
+            node_tx: unbounded_channel().0,
+            callbacks: RecursiveRequestCallbacksGetPeers {
+                min_distance_to_announce: Id20::new([0; 20]),
+                announce_port: None,
+            },
+        });
+        let task = tokio::spawn(async move { request.request_one(None, destination, 0).await });
+        let outgoing = receiver.recv().await.unwrap();
+        state
+            .on_received_message(
+                Message {
+                    transaction_id: outgoing.message.transaction_id.clone(),
+                    version: None,
+                    ip: None,
+                    kind: MessageKind::Response(Response {
+                        id: Id20::new([2; 20]),
+                        values: Some(vec![bprotocol::CompactPeerInfo {
+                            addr: match peer {
+                                SocketAddr::V4(v4) => v4,
+                                _ => unreachable!(),
+                            },
+                        }]),
+                        ..Default::default()
+                    }),
+                },
+                destination,
+            )
+            .unwrap();
+        drop(outgoing);
+        let received = tokio::time::timeout(Duration::from_millis(200), peer_rx.recv()).await;
+        task.abort();
+        drop(receiver);
+        let _ = task.await;
+        assert!(
+            state
+                .shutdown_and_wait_until(tokio::time::Instant::now() + Duration::from_secs(1))
+                .await
+        );
+        assert_eq!(
+            received.expect("the first valid peer response was discarded"),
+            Some(peer)
+        );
     }
 
     #[tokio::test]

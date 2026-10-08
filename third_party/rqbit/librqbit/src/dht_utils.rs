@@ -16,6 +16,7 @@ use librqbit_core::hash_id::Id20;
 #[allow(clippy::large_enum_variant)]
 pub enum ReadMetainfoResult<Rx> {
     Found {
+        peer: SocketAddr,
         info: TorrentMetaV1Info<ByteBufOwned>,
         info_bytes: ByteBufOwned,
         rx: Rx,
@@ -57,7 +58,7 @@ pub async fn read_metainfo_from_peer_receiver<A: Stream<Item = SocketAddr> + Unp
             .await
             .with_context(|| format!("error reading metainfo from {addr}"));
             drop(token);
-            ret
+            ret.map(|(info, info_bytes)| (addr, info, info_bytes))
         }
     };
 
@@ -78,7 +79,7 @@ pub async fn read_metainfo_from_peer_receiver<A: Stream<Item = SocketAddr> + Unp
         tokio::select! {
             done = unordered.next(), if !unordered.is_empty() => {
                 match done {
-                    Some(Ok((info, info_bytes))) => return ReadMetainfoResult::Found { info, info_bytes, seen, rx: addrs },
+                    Some(Ok((peer, info, info_bytes))) => return ReadMetainfoResult::Found { peer, info, info_bytes, seen, rx: addrs },
                     Some(Err(e)) => {
                         debug!("{:#}", e);
                     },
