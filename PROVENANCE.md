@@ -113,3 +113,9 @@ per-piece disk locks, cancellation and hash verification remain authoritative.
 Non-current and ordinary gateway pieces retain measured-speed thresholds.
 This addresses emulator captures where over 100 MiB of lookahead downloaded
 while the decoder's current range timed out on its original slow peer.
+
+Trusted bootstrap DNS completion now wakes native hash lookup immediately,
+rather than waiting for the one-second empty-routing-table polling interval.
+Each newly resolved pinned root is admitted once per query, including a second
+root resolving after the first. Destination validation precedes publication,
+and the existing query/datagram ownership still fences cancellation.

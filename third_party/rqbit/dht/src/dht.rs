@@ -1,10 +1,11 @@
 // Maintained playback-gateway changes: owned cancellation and joined settlement.
 use std::{
     cmp::Reverse,
+    collections::HashSet,
     net::SocketAddr,
     str::FromStr,
     sync::{
-        atomic::{AtomicBool, AtomicU16, Ordering},
+        atomic::{AtomicU16, Ordering},
         Arc,
     },
     task::Poll,
@@ -213,7 +214,7 @@ impl RecursiveRequestCallbacks for RecursiveRequestCallbacksFindNodes {
 struct RecursiveRequest<C: RecursiveRequestCallbacks> {
     max_depth: usize,
     useful_nodes_limit: usize,
-    bootstrap_seeded: AtomicBool,
+    bootstrap_seeded: RwLock<HashSet<SocketAddr>>,
     info_hash: Id20,
     request: Request,
     dht: Arc<DhtState>,
@@ -254,7 +255,7 @@ impl RequestPeersStream {
             },
             info_hash,
             useful_nodes_limit: 256,
-            bootstrap_seeded: AtomicBool::new(false),
+            bootstrap_seeded: RwLock::new(HashSet::new()),
             request: Request::GetPeers(info_hash),
             dht,
             useful_nodes: RwLock::new(Vec::new()),
@@ -313,7 +314,7 @@ impl RecursiveRequest<RecursiveRequestCallbacksFindNodes> {
             request: Request::FindNode(target),
             dht,
             useful_nodes_limit: 32,
-            bootstrap_seeded: AtomicBool::new(false),
+            bootstrap_seeded: RwLock::new(HashSet::new()),
             useful_nodes: RwLock::new(Vec::new()),
             peer_tx: unbounded_channel().0,
             node_tx,
@@ -396,6 +397,9 @@ impl RecursiveRequest<RecursiveRequestCallbacksGetPeers> {
                     let mut iteration = 0;
                     loop {
                         trace!("iteration {}", iteration);
+                        let roots_changed = this.dht.bootstrap_changed.notified();
+                        tokio::pin!(roots_changed);
+                        roots_changed.as_mut().enable();
                         let sleep = match this.get_peers_root() {
                             Ok(0) => Duration::from_secs(1),
                             Ok(_) if this.dht.network_policy.is_native() => NATIVE_QUERY_INTERVAL,
@@ -406,7 +410,10 @@ impl RecursiveRequest<RecursiveRequestCallbacksGetPeers> {
                                 return Err::<(), anyhow::Error>(e);
                             }
                         };
-                        tokio::time::sleep(sleep).await;
+                        tokio::select! {
+                            _ = tokio::time::sleep(sleep) => {},
+                            _ = &mut roots_changed => {},
+                        }
                         iteration += 1;
                     }
                 }
@@ -461,11 +468,13 @@ impl RecursiveRequest<RecursiveRequestCallbacksGetPeers> {
         // leave this bounded lookup traversing unrelated nodes first. These roots
         // come only from the already-vetted pinned bootstrap resolution.
         let roots = self.dht.bootstrap_roots.read();
-        if !roots.is_empty() && !self.bootstrap_seeded.swap(true, Ordering::AcqRel) {
-            for addr in roots.iter() {
+        let mut seeded = self.bootstrap_seeded.write();
+        for addr in roots.iter() {
+            if seeded.insert(*addr) {
                 self.node_tx.send((None, *addr, 0))?;
             }
         }
+        drop(seeded);
         drop(roots);
         let mut count = 0;
         for (id, addr) in self
@@ -650,6 +659,7 @@ pub struct DhtState {
     routing_table: RwLock<RoutingTable>,
     // Transient, policy-vetted pinned DNS answers; never persisted or source-supplied.
     bootstrap_roots: RwLock<Vec<SocketAddr>>,
+    bootstrap_changed: tokio::sync::Notify,
     listen_addr: SocketAddr,
 
     // Sending requests to the worker.
@@ -681,6 +691,7 @@ impl DhtState {
             inflight_by_transaction_id: Default::default(),
             routing_table: RwLock::new(routing_table),
             bootstrap_roots: RwLock::new(Vec::new()),
+            bootstrap_changed: Default::default(),
             worker_sender: sender,
             listen_addr,
             rate_limiter: make_rate_limiter(),
@@ -689,6 +700,25 @@ impl DhtState {
             tasks,
             network_policy,
         }
+    }
+
+    fn remember_bootstrap_roots(&self, addrs: &[SocketAddr]) -> anyhow::Result<()> {
+        self.network_policy.validate_resolution(addrs)?;
+        if self.network_policy.is_native() {
+            let mut roots = self.bootstrap_roots.write();
+            let mut changed = false;
+            for addr in addrs {
+                if !roots.contains(addr) {
+                    roots.push(*addr);
+                    changed = true;
+                }
+            }
+            drop(roots);
+            if changed {
+                self.bootstrap_changed.notify_waiters();
+            }
+        }
+        Ok(())
     }
 
     async fn request(&self, request: Request, addr: SocketAddr) -> anyhow::Result<ResponseOrError> {
@@ -1040,15 +1070,7 @@ impl DhtWorker {
             .await
             .context("Bootstrap resolution failed")?
             .collect();
-        self.dht.network_policy.validate_resolution(&addrs)?;
-        if self.dht.network_policy.is_native() {
-            let mut roots = self.dht.bootstrap_roots.write();
-            for addr in &addrs {
-                if !roots.contains(addr) {
-                    roots.push(*addr);
-                }
-            }
-        }
+        self.dht.remember_bootstrap_roots(&addrs)?;
         RecursiveRequest::find_node_for_routing_table(
             self.dht.clone(),
             self.dht.id,
@@ -1510,7 +1532,7 @@ mod native_policy_tests {
             request: Request::FindNode(state.id),
             dht: state.clone(),
             useful_nodes_limit: 32,
-            bootstrap_seeded: AtomicBool::new(false),
+            bootstrap_seeded: RwLock::new(HashSet::new()),
             useful_nodes: RwLock::new(Vec::new()),
             peer_tx: unbounded_channel().0,
             node_tx: unbounded_channel().0,
@@ -1539,7 +1561,7 @@ mod native_policy_tests {
             request: Request::GetPeers(Id20::new([1; 20])),
             dht: state.clone(),
             useful_nodes_limit: 256,
-            bootstrap_seeded: AtomicBool::new(false),
+            bootstrap_seeded: RwLock::new(HashSet::new()),
             useful_nodes: RwLock::new(Vec::new()),
             peer_tx: unbounded_channel().0,
             node_tx,
@@ -1554,6 +1576,14 @@ mod native_policy_tests {
         assert!(
             node_rx.try_recv().is_err(),
             "Pinned roots must not be polled repeatedly"
+        );
+        let later: SocketAddr = "1.0.0.1:6881".parse().unwrap();
+        state.remember_bootstrap_roots(&[later]).unwrap();
+        request.get_peers_root().unwrap();
+        assert_eq!(
+            node_rx.try_recv().unwrap(),
+            (None, later, 0),
+            "A later trusted DNS answer must seed this active lookup"
         );
         state.tasks.cancel();
     }
@@ -1573,7 +1603,7 @@ mod native_policy_tests {
             request: Request::GetPeers(Id20::new([1; 20])),
             dht: state.clone(),
             useful_nodes_limit: 256,
-            bootstrap_seeded: AtomicBool::new(false),
+            bootstrap_seeded: RwLock::new(HashSet::new()),
             useful_nodes: RwLock::new(Vec::new()),
             peer_tx,
             node_tx: unbounded_channel().0,
@@ -1711,6 +1741,37 @@ mod native_policy_tests {
             .expect("one lost native UDP packet waited longer than four seconds")
             .unwrap()
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn native_bootstrap_resolution_wakes_hash_lookup_without_one_second_poll_delay() {
+        let (sender, mut receiver) = unbounded_channel();
+        let state = isolated_state(sender);
+        let peers = state.get_peers(Id20::new([1; 20]), None);
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        state
+            .remember_bootstrap_roots(&["1.1.1.1:6881".parse().unwrap()])
+            .unwrap();
+        let packet = tokio::time::timeout(Duration::from_millis(250), receiver.recv()).await;
+        let ready = packet.as_ref().is_ok_and(|packet| packet.is_some());
+        drop(peers);
+        if let Ok(Some(packet)) = &packet {
+            assert_eq!(packet.addr, "1.1.1.1:6881".parse().unwrap());
+        }
+        drop(receiver);
+        drop(packet);
+        assert!(
+            state
+                .shutdown_and_wait_until(tokio::time::Instant::now() + Duration::from_secs(1))
+                .await
+        );
+        assert!(state.get_stats().outstanding_requests == 0);
+        // A real lookup packet must be queued immediately after the trusted DNS
+        // roots become available, rather than waiting for the old one-second poll.
+        assert!(
+            ready,
+            "trusted bootstrap DNS completion waited for the polling timer"
+        );
     }
 
     #[tokio::test]
