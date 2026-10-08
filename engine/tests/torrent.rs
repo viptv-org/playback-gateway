@@ -410,17 +410,17 @@ async fn last_external_handle_drop_closes_pending_http_reader_and_reclaims_budge
     let read = tokio::spawn({
         let url = url.clone();
         async move {
-            reqwest::Client::builder()
+            // Retirement can close the socket before headers or during the body.
+            // Either refusal proves the pending reader lost its byte authority.
+            let response = reqwest::Client::builder()
                 .no_proxy()
                 .build()
                 .unwrap()
                 .get(url)
                 .header("Range", "bytes=0-7")
                 .send()
-                .await
-                .unwrap()
-                .bytes()
-                .await
+                .await?;
+            response.bytes().await
         }
     });
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
@@ -786,7 +786,17 @@ async fn selected_file_stop_retires_clones_not_an_independent_same_file_lease() 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn selected_file_nonzero_index_and_last_owner_drop_preserve_other_authority() {
     let f = selected_fixture().await;
-    assert_ne!(f.other, 0, "fixture must exercise a nonzero metadata index");
+    // Directory traversal order is not metadata identity. Exercise the file that
+    // actually has a nonzero index, whichever owned filename appears first.
+    let (selected, unselected, expected) = if f.other != 0 {
+        (f.other, f.selected, vec![7; 90_000])
+    } else {
+        (f.selected, f.other, f.data.clone())
+    };
+    assert_ne!(
+        selected, 0,
+        "fixture must exercise a nonzero metadata index"
+    );
     let hash = librqbit::torrent_from_bytes::<librqbit::ByteBufOwned>(&f.metainfo)
         .unwrap()
         .info_hash
@@ -796,22 +806,25 @@ async fn selected_file_nonzero_index_and_last_owner_drop_preserve_other_authorit
         .start_selected_magnet(
             "selected-fixture",
             &format!("magnet:?xt=urn:btih:{hash}"),
-            f.other,
+            selected,
         )
         .await
         .unwrap();
     let second = f
         .manager
-        .start_selected_metainfo("selected-fixture", f.metainfo.clone(), f.other)
+        .start_selected_metainfo("selected-fixture", f.metainfo.clone(), selected)
         .await
         .unwrap();
     let alias = first.clone();
     assert_eq!(first.files().len(), 1);
-    assert_eq!(first.files()[0].index, f.other);
-    assert_eq!(first.selected_file().index, f.other);
-    assert!(first.stream_url(f.selected).is_err());
-    assert!(first.read_range(f.selected, 0, 16).await.is_err());
-    assert_eq!(first.read_range(f.other, 0, 16).await.unwrap(), vec![7; 16]);
+    assert_eq!(first.files()[0].index, selected);
+    assert_eq!(first.selected_file().index, selected);
+    assert!(first.stream_url(unselected).is_err());
+    assert!(first.read_range(unselected, 0, 16).await.is_err());
+    assert_eq!(
+        first.read_range(selected, 0, 16).await.unwrap(),
+        expected[..16]
+    );
     assert!(
         !first.close_if_last_owner(),
         "explicit clones still alias one lease"
@@ -822,8 +835,8 @@ async fn selected_file_nonzero_index_and_last_owner_drop_preserve_other_authorit
     f.manager.reap().await.unwrap();
     assert!(!second.status().stopped);
     assert_eq!(
-        second.read_range(f.other, 80_000, 32).await.unwrap(),
-        vec![7; 32]
+        second.read_range(selected, 80_000, 32).await.unwrap(),
+        expected[80_000..80_032]
     );
     assert!(f
         .manager

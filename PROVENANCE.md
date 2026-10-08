@@ -74,3 +74,13 @@ archive license findings.
 
 The generic native network/metadata boundary and versioned bootstrap inventory
 are documented in [native network policy](docs/NATIVE_NETWORK_POLICY.md).
+
+## Native cold DHT peer lookup
+
+Native lookups seed the selected hash directly from the existing policy-vetted
+pinned bootstrap resolutions. Routing-table bootstrapping around the client's
+random node ID continues separately. The roots are transient, are used once per
+lookup, and retain the existing owned query/datagram cancellation path. No
+tracker, source peer hint, new bootstrap inventory or persistent DHT state is
+introduced. A deterministic cold-table regression verifies the targeted roots
+are queued before routing nodes exist and are not repeatedly queried.

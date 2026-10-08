@@ -4,7 +4,7 @@ use std::{
     net::SocketAddr,
     str::FromStr,
     sync::{
-        atomic::{AtomicU16, Ordering},
+        atomic::{AtomicBool, AtomicU16, Ordering},
         Arc,
     },
     task::Poll,
@@ -208,6 +208,7 @@ impl RecursiveRequestCallbacks for RecursiveRequestCallbacksFindNodes {
 struct RecursiveRequest<C: RecursiveRequestCallbacks> {
     max_depth: usize,
     useful_nodes_limit: usize,
+    bootstrap_seeded: AtomicBool,
     info_hash: Id20,
     request: Request,
     dht: Arc<DhtState>,
@@ -244,6 +245,7 @@ impl RequestPeersStream {
             max_depth: 4,
             info_hash,
             useful_nodes_limit: 256,
+            bootstrap_seeded: AtomicBool::new(false),
             request: Request::GetPeers(info_hash),
             dht,
             useful_nodes: RwLock::new(Vec::new()),
@@ -302,6 +304,7 @@ impl RecursiveRequest<RecursiveRequestCallbacksFindNodes> {
             request: Request::FindNode(target),
             dht,
             useful_nodes_limit: 32,
+            bootstrap_seeded: AtomicBool::new(false),
             useful_nodes: RwLock::new(Vec::new()),
             peer_tx: unbounded_channel().0,
             node_tx,
@@ -443,6 +446,17 @@ impl RecursiveRequest<RecursiveRequestCallbacksGetPeers> {
     }
 
     fn get_peers_root(&self) -> anyhow::Result<usize> {
+        // Target the requested hash directly on cold native startup. Bootstrapping
+        // the routing table around our random node ID is separate work and can
+        // leave this bounded lookup traversing unrelated nodes first. These roots
+        // come only from the already-vetted pinned bootstrap resolution.
+        let roots = self.dht.bootstrap_roots.read();
+        if !roots.is_empty() && !self.bootstrap_seeded.swap(true, Ordering::AcqRel) {
+            for addr in roots.iter() {
+                self.node_tx.send((None, *addr, 0))?;
+            }
+        }
+        drop(roots);
         let mut count = 0;
         for (id, addr) in self
             .dht
@@ -628,6 +642,8 @@ pub struct DhtState {
     inflight_by_transaction_id: DashMap<(u16, SocketAddr), OutstandingRequest>,
 
     routing_table: RwLock<RoutingTable>,
+    // Transient, policy-vetted pinned DNS answers; never persisted or source-supplied.
+    bootstrap_roots: RwLock<Vec<SocketAddr>>,
     listen_addr: SocketAddr,
 
     // Sending requests to the worker.
@@ -658,6 +674,7 @@ impl DhtState {
             next_transaction_id: AtomicU16::new(0),
             inflight_by_transaction_id: Default::default(),
             routing_table: RwLock::new(routing_table),
+            bootstrap_roots: RwLock::new(Vec::new()),
             worker_sender: sender,
             listen_addr,
             rate_limiter: make_rate_limiter(),
@@ -1013,6 +1030,14 @@ impl DhtWorker {
             .context("Bootstrap resolution failed")?
             .collect();
         self.dht.network_policy.validate_resolution(&addrs)?;
+        if self.dht.network_policy.is_native() {
+            let mut roots = self.dht.bootstrap_roots.write();
+            for addr in &addrs {
+                if !roots.contains(addr) {
+                    roots.push(*addr);
+                }
+            }
+        }
         RecursiveRequest::find_node_for_routing_table(
             self.dht.clone(),
             self.dht.id,
@@ -1474,6 +1499,7 @@ mod native_policy_tests {
             request: Request::FindNode(state.id),
             dht: state.clone(),
             useful_nodes_limit: 32,
+            bootstrap_seeded: AtomicBool::new(false),
             useful_nodes: RwLock::new(Vec::new()),
             peer_tx: unbounded_channel().0,
             node_tx: unbounded_channel().0,
@@ -1483,6 +1509,44 @@ mod native_policy_tests {
         assert!(request.useful_nodes.read().is_empty());
         state.tasks.cancel();
     }
+    #[test]
+    fn cold_native_peer_lookup_uses_vetted_bootstrap_before_routing_table() {
+        let (sender, _) = unbounded_channel();
+        let state = isolated_state(sender);
+        let bootstrap: SocketAddr = "1.1.1.1:6881".parse().unwrap();
+        state
+            .network_policy
+            .validate_resolution(&[bootstrap])
+            .unwrap();
+        state.bootstrap_roots.write().push(bootstrap);
+        let (node_tx, mut node_rx) = unbounded_channel();
+        let request = RecursiveRequest {
+            tasks: state.tasks.clone(),
+            parent_owner: None,
+            max_depth: 4,
+            info_hash: Id20::new([1; 20]),
+            request: Request::GetPeers(Id20::new([1; 20])),
+            dht: state.clone(),
+            useful_nodes_limit: 256,
+            bootstrap_seeded: AtomicBool::new(false),
+            useful_nodes: RwLock::new(Vec::new()),
+            peer_tx: unbounded_channel().0,
+            node_tx,
+            callbacks: RecursiveRequestCallbacksGetPeers {
+                min_distance_to_announce: Id20::new([0; 20]),
+                announce_port: None,
+            },
+        };
+        assert_eq!(request.get_peers_root().unwrap(), 0);
+        assert_eq!(node_rx.try_recv().unwrap(), (None, bootstrap, 0));
+        request.get_peers_root().unwrap();
+        assert!(
+            node_rx.try_recv().is_err(),
+            "Pinned roots must not be polled repeatedly"
+        );
+        state.tasks.cancel();
+    }
+
     #[tokio::test]
     async fn native_final_datagram_boundary_denies_bypass_contact() {
         let target = UdpSocket::bind("127.0.0.1:0").await.unwrap();
