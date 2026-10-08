@@ -545,6 +545,7 @@ impl Sessions {
         if viewer.view.expires_at <= now
             || !matches!(viewer.view.status, Status::Starting | Status::Ready)
         {
+            tracing::warn!(session_tag = %crate::diagnostics::tag(id), expires_at = viewer.view.expires_at, now, "Viewer renewal refused: expired or terminal");
             return Err("session_expired");
         }
         if let Some(token) = &viewer.media_token {
@@ -609,6 +610,7 @@ impl Sessions {
             return false;
         }
         job.state = JobState::Stopping;
+        tracing::warn!(job_tag = %crate::diagnostics::tag(id), error_code = failure.code(), viewers = job.viewers.len(), "Output job failed");
         for id in &job.viewers {
             if let Some(viewer) = self.viewers.get_mut(id) {
                 if matches!(viewer.view.status, Status::Starting | Status::Ready) {
@@ -670,6 +672,7 @@ impl Sessions {
             return;
         }
         viewer.view.status = status;
+        tracing::info!(session_tag = %crate::diagnostics::tag(id), status = ?status, expires_at = viewer.view.expires_at, now, "Viewer detached");
         viewer.media_token = None;
         viewer.media_hash = None;
         viewer.view.expires_at = now;

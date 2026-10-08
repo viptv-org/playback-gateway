@@ -421,6 +421,7 @@ impl Workers {
             .collect();
         for (job, id) in active {
             if !self.engine.heartbeat(&id).await {
+                tracing::warn!(job_tag = %crate::diagnostics::tag(&job), engine_tag = %crate::diagnostics::tag(&id), "Output engine heartbeat lost; failing viewers");
                 self.sessions
                     .lock()
                     .map_err(|_| "session_store_unavailable")?

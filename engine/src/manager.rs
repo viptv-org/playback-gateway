@@ -331,7 +331,7 @@ impl PlaybackManager {
                         }
                         if !status.success() {
                             // Never log raw stderr, arguments, URLs, or provider headers.
-                            tracing::warn!(exit_code = ?status.code(), "Playback engine failed");
+                            tracing::warn!(engine_id = %id, exit_code = ?status.code(), "Playback engine failed");
                         }
                         (false, !status.success())
                     }
@@ -351,6 +351,7 @@ impl PlaybackManager {
                         && !session.dir.as_os_str().is_empty()
                         && !cache_safe(&session.dir, require_progress).await)
                 {
+                    tracing::warn!(engine_id = %id, ttl_expired = session.touched.elapsed() >= self.config.ttl, process_failed = failed, require_progress, idle_ms = session.touched.elapsed().as_millis() as u64, "Playback engine reaped");
                     ids.push(id.clone());
                 }
             }

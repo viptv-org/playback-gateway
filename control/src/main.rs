@@ -117,7 +117,7 @@ fn main() {
     // Engine warnings contain closed categories, not source URLs or headers.
     // Exclude dependency transport events and arbitrary environment filters.
     tracing_subscriber::fmt()
-        .with_env_filter("off,playback_engine=warn")
+        .with_env_filter("off,playback_engine=info,playback_gateway=info")
         .with_ansi(false)
         .init();
     let result = Settings::read().and_then(|settings| {

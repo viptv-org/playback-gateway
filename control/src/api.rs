@@ -65,6 +65,7 @@ pub fn router(state: Api) -> Router {
         .with_state(state)
         .merge(keys)
         .layer(middleware::map_response(key_api::private_response))
+        .layer(middleware::from_fn(crate::diagnostics::observe))
 }
 fn now() -> Result<u64, ApiError> {
     Ok(key_api::now()? as u64)
@@ -107,6 +108,7 @@ fn reply(
     viewer: Viewer,
     timestamp: u64,
 ) -> Result<SessionResponse, ApiError> {
+    tracing::info!(session_tag = %crate::diagnostics::tag(&viewer.id), job_tag = %crate::diagnostics::tag(&viewer.job_id), status = ?viewer.status, expires_at = viewer.expires_at, now = timestamp, error_code = viewer.error_code.as_deref().unwrap_or("none"), "Viewer lease state");
     let playback = state
         .workers
         .delivery(principal, &viewer, timestamp)
