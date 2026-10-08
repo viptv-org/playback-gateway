@@ -92,6 +92,40 @@ impl Budget {
 mod tests {
     use super::*;
     #[test]
+    fn separate_process_handles_cannot_bypass_quota_or_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("quota");
+        let first = Budget::open(&path, 100).unwrap();
+        let second = Budget::open(&path, 100).unwrap();
+        assert!(first.reserve(7, 70));
+        assert!(!second.reserve(7, 31));
+        let file = first.file.lock().unwrap();
+        file.lock_exclusive().unwrap();
+        assert!(!second.reserve(7, 1));
+        FileExt::unlock(&*file).unwrap();
+        drop(file);
+        assert!(second.reserve(7, 30));
+        assert!(!first.reserve(7, 1));
+    }
+    #[cfg(unix)]
+    #[test]
+    fn ledger_rejects_symlinks_and_creates_private_files() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target");
+        std::fs::write(&target, "unrelated").unwrap();
+        let path = dir.path().join("quota");
+        symlink(&target, &path).unwrap();
+        assert!(Budget::open(&path, 100).is_err());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "unrelated");
+        let private = dir.path().join("private");
+        Budget::open(&private, 100).unwrap();
+        assert_eq!(
+            std::fs::metadata(private).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+    #[test]
     fn persistent_quota_counts_attempts_and_denies_clock_rollback() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("quota");

@@ -231,6 +231,10 @@ async fn run(settings: Settings) -> Result<(), &'static str> {
             service_telemetry::Telemetry::default()
         }
     };
+    tracing::info!(
+        observability_enabled = telemetry.enabled(),
+        "Optional observability configured"
+    );
     let engine = PlaybackManager::new_with_hardware_and_replay_budget(
         Config {
             ffmpeg: settings.ffmpeg,

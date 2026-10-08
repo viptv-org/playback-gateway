@@ -306,3 +306,108 @@ async fn enabled_streaming_tracks_completion_and_drop_without_buffering_content(
     telemetry.shutdown().await;
     server.abort();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn streaming_preserves_trailers_and_propagates_body_errors() {
+    let (endpoint, collector, server) = collector().await;
+    let dir = tempfile::tempdir().unwrap();
+    let telemetry = telemetry(endpoint, dir.path().join("quota"), 1.0, 1024 * 1024).await;
+    let app = Router::new()
+        .route(
+            "/media/trailers",
+            axum::routing::get(|| async {
+                let mut trailers = http::HeaderMap::new();
+                trailers.insert(
+                    "x-checksum",
+                    http::HeaderValue::from_static("fixture-checksum"),
+                );
+                let frames = futures::stream::iter(vec![
+                    Ok::<_, std::io::Error>(http_body::Frame::data(Bytes::from_static(
+                        b"unchanged",
+                    ))),
+                    Ok(http_body::Frame::trailers(trailers)),
+                ]);
+                axum::body::Body::new(http_body_util::StreamBody::new(frames))
+            }),
+        )
+        .route(
+            "/media/error",
+            axum::routing::get(|| async {
+                let frames = futures::stream::iter(vec![
+                    Ok(http_body::Frame::data(Bytes::from_static(b"first-frame"))),
+                    Err(std::io::Error::other("private-body-failure")),
+                ]);
+                axum::body::Body::new(http_body_util::StreamBody::new(frames))
+            }),
+        )
+        .layer(axum_middleware::from_fn_with_state(
+            telemetry.clone(),
+            middleware::observe,
+        ));
+    let request = |path: &str| {
+        Request::builder()
+            .uri(path)
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    let response = app
+        .clone()
+        .oneshot(request("/media/trailers"))
+        .await
+        .unwrap();
+    let collected = response.into_body().collect().await.unwrap();
+    assert_eq!(
+        collected.trailers().unwrap()["x-checksum"],
+        "fixture-checksum"
+    );
+    assert_eq!(collected.to_bytes(), "unchanged");
+    let response = app.oneshot(request("/media/error")).await.unwrap();
+    assert!(response.into_body().collect().await.is_err());
+    flush(&telemetry).await;
+    assert!(trace_spans(&collector).iter().any(|span| span
+        .status
+        .as_ref()
+        .is_some_and(|status| status.message == "network")));
+    for (_, bytes) in collector.batches.lock().unwrap().iter() {
+        assert!(!String::from_utf8_lossy(bytes).contains("private-body-failure"));
+        assert!(!String::from_utf8_lossy(bytes).contains("fixture-checksum"));
+    }
+    telemetry.shutdown().await;
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn collector_http_failure_is_not_retried_and_consumes_persisted_budget() {
+    let (endpoint, collector, server) = collector().await;
+    collector.status.store(503, Ordering::Relaxed);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("quota");
+    let first = telemetry(endpoint.clone(), path.clone(), 1.0, 1024 * 1024).await;
+    first
+        .start(Operation::Api, Context::new(), SpanKind::Server)
+        .finish(Outcome::Success);
+    let provider = first.inner.clone().unwrap();
+    tokio::task::spawn_blocking(move || {
+        let _ = provider.traces.force_flush();
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        collector
+            .batches
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(path, _)| path == "/v1/traces")
+            .count(),
+        1
+    );
+    first.shutdown().await;
+    let before: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert!(before["bytes"].as_u64().unwrap() > 0);
+    let second = telemetry(endpoint, path.clone(), 1.0, 1024 * 1024).await;
+    let after: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    assert_eq!(before, after);
+    second.shutdown().await;
+    server.abort();
+}
