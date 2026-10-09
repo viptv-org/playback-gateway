@@ -98,3 +98,16 @@ cold/warm/seek trials and actual authenticated web/Roku delivery qualification.
 The Linux check also caught and fixed a Rust host startup-protocol defect:
 the production worker's readiness banner must be consumed before the first
 control reply. Shared-host regression and gateway fixtures now include it.
+
+## Gateway/browser integration observations, 2026-10-09
+
+A production-worker gateway run reached HLS output in 21.9 seconds cold. Retained
+verified cache gave later starts about 0.4-second output preparation. The output
+copied H.264 video and converted audio to AAC. Chrome decoded it over trusted
+HTTPS, both through native HLS/MSE and the production Mediabunny adapter. A
+successful 120-second seek replacement took 27.1 seconds including gateway
+preparation and destination frames. An earlier seek creation failed; consistent
+reliability remains unproven. No matched speed comparison follows from these
+single observations. See `GATEWAY_TORRENT_RUNTIME.md` for scope and revocation
+proof. Full backend account/source-screen and physical Roku playback remain
+separate acceptance work.

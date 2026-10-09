@@ -257,3 +257,29 @@ Magnet/metainfo and add-on tracker hints can overlap. Runtime admission now
 validates and deduplicates those hints before applying the 32-destination bound;
 invalid repeated hints still fail validation. Platform artifacts must be rebuilt
 from this checkpoint before consumers adopt that change.
+
+## Authenticated HTTPS browser delivery, 2026-10-09
+
+A fresh local gateway process used the production pinned worker, a disposable
+integration key and an HTTPS media endpoint. The privately recorded original
+failing H.264 source was selected with its explicit file index. The gateway
+copied video and converted audio to AAC; it did not extract/download the whole
+selected file. The initial playlist's media sequence was zero.
+
+Chrome's native HLS/MSE path decoded 1920×800 frames. The production
+`Html5FallbackAdapter` also opened the same delivery through Mediabunny/WebCodecs,
+with actual canvas presentation and advancing time from zero. A replacement
+output at 120 seconds was then opened by that production adapter; it presented
+three destination frames with absolute player time 120.114 seconds. The complete
+seek request/player replacement took 27.1 seconds in this successful run. An
+earlier seek creation failed before diagnostic capture; it is not counted as a
+successful trial and consistent seek reliability is not established.
+
+Releasing the viewer returned 204 and immediately changed its media URL to 401.
+All credentials, media URLs, source identities and screenshots remain private.
+The owned gateway/HTTPS/browser processes were stopped. Warm preparation was
+about 0.4 seconds after retained verified cache; the first cold gateway output
+observation was 21.9 seconds. These are individual integration observations,
+not matched latency comparisons. Browser startup used a test page around the
+production player adapter; full backend account/source-screen admission was
+not part of this probe. Physical Roku delivery remains separate.
