@@ -32,8 +32,17 @@ if args.platform == 'host':
 elif args.platform == 'windows':
     win = dict(env, GOOS='windows', GOARCH='amd64',
                CC=os.environ.get('WINDOWS_CC', 'x86_64-w64-mingw32-gcc'),
-               CXX=os.environ.get('WINDOWS_CXX', 'x86_64-w64-mingw32-g++'))
+               CXX=os.environ.get('WINDOWS_CXX', 'x86_64-w64-mingw32-g++'),
+               CGO_LDFLAGS='-static -static-libgcc -static-libstdc++')
     run(common + ['-ldflags=-s -w', '-o', str(out / 'torrent-worker.exe'), './cmd/torrent-worker'], win)
+    imports = subprocess.check_output([
+        os.environ.get('WINDOWS_OBJDUMP', 'x86_64-w64-mingw32-objdump'),
+        '-p', str(out / 'torrent-worker.exe')], text=True)
+    system = {'kernel32.dll', 'ws2_32.dll', 'advapi32.dll', 'bcrypt.dll',
+              'ntdll.dll', 'userenv.dll', 'secur32.dll', 'msvcrt.dll', 'ucrtbase.dll'}
+    for name in re.findall(r'DLL Name:\s*(\S+)', imports):
+        if name.lower() not in system and not name.lower().startswith(('api-ms-win-', 'ext-ms-win-')):
+            raise SystemExit('Unpackaged Windows dependency: ' + name)
 else:
     ndk = os.environ.get('ANDROID_NDK_HOME')
     if not ndk:

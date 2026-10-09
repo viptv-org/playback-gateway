@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Package torrentruntime is the qualification candidate for a shared byte
-// transport. Production consumers must not activate it before QUALIFICATION.md
-// records the comparative and platform gates as passed.
+// transport. Client integration is authorized; measured performance follow-up
+// and platform qualification are recorded separately from production rollout.
 package torrentruntime
 
 import (
@@ -26,17 +26,19 @@ import (
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/iplist"
 	"github.com/anacrolix/torrent/metainfo"
+	"golang.org/x/time/rate"
 )
 
 type Config struct {
-	CacheDir       string `json:"cache_dir"`
-	CacheBytes     int64  `json:"cache_bytes"`
-	ReadaheadBytes int64  `json:"readahead_bytes"`
-	MaxInputs      int    `json:"max_inputs,omitempty"`
-	MaxHandles     int    `json:"max_handles,omitempty"`
-	clientTuning   func(*torrent.ClientConfig)
-	primeHeaders   bool
-	utpDialDelay   time.Duration
+	CacheDir         string `json:"cache_dir"`
+	CacheBytes       int64  `json:"cache_bytes"`
+	ReadaheadBytes   int64  `json:"readahead_bytes"`
+	MaxInputs        int    `json:"max_inputs,omitempty"`
+	MaxHandles       int    `json:"max_handles,omitempty"`
+	clientTuning     func(*torrent.ClientConfig)
+	primeHeaders     bool
+	utpDialDelay     time.Duration
+	upstreamDefaults bool
 }
 type Source struct {
 	Magnet       string   `json:"magnet,omitempty"`
@@ -72,6 +74,7 @@ type Runtime struct {
 	demands          map[*demandReader]pieceWindow
 	priorities       map[*torrent.Torrent]map[int]torrent.PiecePriority
 	readAhead        int64
+	startupReadAhead int64
 	closed           bool
 	privateFixture   bool
 	metadataProgress sync.Map
@@ -133,6 +136,7 @@ func newRuntime(cfg Config, privateFixture bool) (*Runtime, error) {
 	readAhead = min(readAhead, c.limit/4)
 	r := &Runtime{cache: c, handles: map[string]*Handle{}, retiring: map[*Handle]chan struct{}{}, shutdownDone: make(chan struct{}), refs: map[*torrent.Torrent]int{}, demands: map[*demandReader]pieceWindow{}, priorities: map[*torrent.Torrent]map[int]torrent.PiecePriority{}, readAhead: readAhead, privateFixture: privateFixture}
 	r.primeHeaders = cfg.primeHeaders
+	r.startupReadAhead = min(int64(4<<20), readAhead)
 	r.maxInputs = cfg.MaxInputs
 	r.maxHandles = cfg.MaxHandles
 	cc := torrent.NewDefaultClientConfig()
@@ -160,6 +164,15 @@ func newRuntime(cfg Config, privateFixture bool) (*Runtime, error) {
 	cc.Callbacks.DeletedRequest = []func(torrent.PeerRequestEvent){r.requests.deleted}
 	cc.Callbacks.ReceivedUsefulData = []func(torrent.PeerMessageEvent){r.requests.received}
 	cc.Callbacks.PeerClosed = []func(*torrent.Peer){r.requests.closed}
+	if !privateFixture && !cfg.upstreamDefaults {
+		// Candidate streaming defaults, using upstream configuration seams.
+		// Preserve both TCP/uTP and the engine's encryption fallback policy.
+		cc.DialRateLimiter = rate.NewLimiter(50, 50)
+		cc.HalfOpenConnsPerTorrent = 50
+		cc.NominalDialTimeout = 4 * time.Second
+		cc.MinDialTimeout = time.Second
+		r.primeHeaders = true
+	}
 	if privateFixture {
 		cc.NoDHT = true
 		cc.ListenHost = func(string) string { return "127.0.0.1" }

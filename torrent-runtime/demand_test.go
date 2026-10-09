@@ -5,8 +5,12 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/anacrolix/torrent"
 )
 
 func TestSeekReclaimsAbandonedPartialSlotsWithoutClosingTorrent(t *testing.T) {
@@ -129,5 +133,44 @@ func TestHeadAdmissionCannotExceedSharedEngineWindow(t *testing.T) {
 		if i == allowed && !errors.Is(err, ErrCapacity) {
 			t.Fatal("head admitted beyond the engine request window")
 		}
+	}
+}
+
+func TestStartupDemandExpandsOnlyAfterFirstFrameAcknowledgement(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "large-owned-fixture.bin")
+	data := bytes.Repeat([]byte("owned streaming window\n"), (8<<20)/23+1)
+	data = data[:8<<20]
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	seed, raw := seedPath(t, path, false)
+	r, err := newRuntime(Config{CacheDir: t.TempDir(), CacheBytes: 64 << 20}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	h := readyHandle(t, r, raw)
+	connectSeed(h, seed)
+	reader := &demandReader{h: h, ctx: h.ctx, file: h.file}
+	defer reader.Close()
+	b := make([]byte, 4096)
+	if n, err := reader.Read(b); err != nil || n != len(b) {
+		t.Fatal("owned first range failed")
+	}
+	// The probe is beyond the 4 MiB startup window but inside the configured
+	// steady-playback window. Inspect real upstream demand, not a copied formula.
+	index := (6 << 20) / int(h.t.Info().PieceLength)
+	if h.t.Piece(index).State().Priority != torrent.PiecePriorityNone {
+		t.Fatal("startup requested distant lookahead")
+	}
+	if err := h.ReportFirstFrame(); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := reader.Read(b); err != nil || n != len(b) {
+		t.Fatal("owned next range failed")
+	}
+	state := h.t.Piece(index).State()
+	if state.Priority == torrent.PiecePriorityNone && !state.Complete && !state.Checking && !state.Marking {
+		t.Fatal("steady playback did not expand readahead")
 	}
 }

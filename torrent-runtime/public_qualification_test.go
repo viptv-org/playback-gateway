@@ -63,7 +63,10 @@ func TestPublicSwarmQualification(t *testing.T) {
 	config := Config{CacheDir: cache, ReadaheadBytes: 4 << 20}
 	profile := os.Getenv("TORRENT_REAL_PROFILE")
 	result["connection_profile"] = profile
+	config.upstreamDefaults = profile != "candidate-default"
 	switch profile {
+	case "candidate-default":
+		config.ReadaheadBytes = 0
 	case "", "stock":
 	case "plaintext":
 		config.clientTuning = func(c *torrent.ClientConfig) { c.HeaderObfuscationPolicy.Preferred = false }

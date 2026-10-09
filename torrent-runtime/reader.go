@@ -40,6 +40,11 @@ func (r *demandReader) Read(b []byte) (int, error) {
 	info := r.h.t.Info()
 	absolute := r.file.Offset() + r.position
 	readAhead := r.h.r.readAhead
+	r.h.mu.Lock()
+	if !r.h.firstFrame {
+		readAhead = r.h.r.startupReadAhead
+	}
+	r.h.mu.Unlock()
 	if r.readAheadOverride > 0 {
 		readAhead = r.readAheadOverride
 	}

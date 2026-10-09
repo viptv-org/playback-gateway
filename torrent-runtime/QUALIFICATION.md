@@ -1,8 +1,10 @@
 # Qualification ledger
 
-Status on 2026-10-09: **comparative gate not passed; consumer integration pending**.
+Status on 2026-10-09: **client integration authorized; performance parity deferred**.
 The approved replacement is specified in design's
-`specs/behavior/torrent-runtime-v2.md` at `0ca2d14`. The existing rqbit transport
+`specs/behavior/torrent-runtime-v2.md` at `16277ca`. The owner accepted current
+performance for integration; remaining work is recorded in
+[performance follow-up](../docs/TORRENT_PERFORMANCE_FOLLOWUP.md). The existing rqbit transport
 remains in production paths and available for comparison/rollback. Header
 animation branches are unrelated and preserved.
 
@@ -186,7 +188,8 @@ The existing Rust gateway workspace tests and design validation passed.
 1. Finish matched current/upstream rqbit, candidate, libtorrent/Nuvio and
    Stremio comparisons, including randomized cold/warm repeats on the failure
    corpus. Record steady playback, seeks, memory, disk and cancellation; revise
-   the candidate until reliability and latency gates pass.
+   the candidate's reliability and latency. These performance comparisons are
+   follow-up work and no longer block owner-authorized client integration.
 2. Extend discovery/hostile-wire fixtures to the full network matrix, and stress
    eviction with files larger than device storage, simultaneous active
    viewers and repeated crash/restart.

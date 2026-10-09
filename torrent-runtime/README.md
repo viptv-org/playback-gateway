@@ -2,8 +2,9 @@
 
 This Go module is the shared transport prototype for Android, Android TV,
 Linux/Windows desktop and gateway ingestion. It is **not activated in any
-production consumer**. [Qualification](QUALIFICATION.md) records the outstanding
-comparative gate; a build is not evidence of playback reliability.
+production consumer**. Client integration is owner-authorized; performance
+improvements remain [follow-up work](../docs/TORRENT_PERFORMANCE_FOLLOWUP.md).
+[Qualification](QUALIFICATION.md) records evidence and remaining checks.
 
 The engine is `anacrolix/torrent v1.61.1-0.20260927071845-d913b30f520e`; stored RAR parsing is
 `github.com/nwaples/rardecode/v2 v2.4.1`. `go.sum` locks dependency content.
@@ -48,6 +49,13 @@ Public peer and tracker destinations are checked, automatic router mapping is
 disabled, and discovery enables trackers, DHT, PEX, TCP and uTP. Bench-only
 connection, TCP head-start and header-priming experiments are unexported configuration hooks;
 their results must not be mistaken for production defaults.
+
+The integration candidate configures an upstream dial burst/rate of 50, fifty
+half-open attempts per torrent, a 4 s nominal/1 s minimum connection budget, and
+verified head/index priming. Reader demand starts with at most 4 MiB and expands
+to the configured bounded window after first-frame acknowledgement. Reference
+probes can explicitly retain upstream defaults. These settings leave protocol,
+DNS, handshake, request scheduling and hash verification in their libraries.
 
 ## Local checks and packaging
 
