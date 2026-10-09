@@ -111,3 +111,17 @@ reliability remains unproven. No matched speed comparison follows from these
 single observations. See `GATEWAY_TORRENT_RUNTIME.md` for scope and revocation
 proof. Full backend account/source-screen and physical Roku playback remain
 separate acceptance work.
+
+## Android phone and full-authority observations, 2026-10-09
+
+A fresh API 36 phone emulator used the same real source as the TV qualification.
+Its cold endpoint took 65.5 s and actual first frame 68.2 s. This slow observation
+remains unresolved performance evidence. Retained cache reduced first frame to
+1.61 s; a forward seek with fresh texture-frame confirmation took 9.83 s.
+The immediate 1 ms position/discontinuity timer is excluded.
+
+A separate full backend/core/app-cache-manager/Go/Media3 run rendered in 25.9 s
+and joined retirement. It caught a production integration defect first: app
+ownership markers must sit outside Go's strict piece/index directory. The fixed
+boundary has actual-worker coverage. Network/cache paths differ, so these values
+cannot be treated as matched cold/warm comparisons or Stremio speed claims.

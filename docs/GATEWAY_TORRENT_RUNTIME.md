@@ -109,3 +109,8 @@ API/controller run was stopped during the measured peer/metadata stage; the
 Go preparation settled and restored all two input/output slots. No ready media
 was exposed. Older gateways still receive late-viewer release reconciliation.
 Controlled scope and cancellation-before-admission tests accompany this path.
+
+The resolved file/archive tuple is retained in the shared cache independently of
+live authority. Piece, metainfo, routing and selection records share one bounded
+accounting/validation model; selection records do not count as downloaded payload
+progress. Native artifacts and this gateway worker adopt the same source revision.
