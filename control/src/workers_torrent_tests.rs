@@ -81,8 +81,29 @@ async fn pending_torrent_admission_blocks_concurrent_inputs_and_cancellation_rec
         Some("input_capacity")
     );
     assert_eq!(workers.available(&principal, 0).unwrap().inputs, 0);
-    first.abort();
-    let _ = first.await;
+    assert_eq!(
+        workers.cancel_preparation(&other, "first").err(),
+        Some("session_not_found")
+    );
+    let mut no_release = principal.clone();
+    no_release
+        .key
+        .spec
+        .scopes
+        .retain(|scope| *scope != Scope::Release);
+    assert_eq!(
+        workers.cancel_preparation(&no_release, "first").err(),
+        Some("forbidden")
+    );
+    workers.cancel_preparation(&principal, "first").unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(2), first)
+            .await
+            .unwrap()
+            .unwrap()
+            .err(),
+        Some("source_preparation_cancelled")
+    );
     tokio::time::timeout(Duration::from_secs(3), async {
         while workers.available(&principal, 0).unwrap().inputs == 0 {
             tokio::task::yield_now().await;
@@ -95,6 +116,21 @@ async fn pending_torrent_admission_blocks_concurrent_inputs_and_cancellation_rec
         workers.preparation_stage(&principal, "first").await.err(),
         Some("session_not_found")
     );
+    workers
+        .cancel_preparation_in_namespace(
+            &principal,
+            "cancel-before-admission",
+            Some(&request.namespace),
+        )
+        .unwrap();
+    assert_eq!(
+        workers
+            .create(&principal, &request, "cancel-before-admission", 0)
+            .await
+            .err(),
+        Some("source_preparation_cancelled")
+    );
+    assert_eq!(workers.available(&principal, 0).unwrap().inputs, 1);
     server.abort();
 }
 

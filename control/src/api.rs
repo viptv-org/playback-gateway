@@ -41,7 +41,10 @@ pub fn router(state: Api) -> Router {
     let control = Router::new()
         .route("/v1/capabilities", get(capabilities))
         .route("/v1/sessions", post(create))
-        .route("/v1/preparations/:id", get(preparation_stage))
+        .route(
+            "/v1/preparations/:id",
+            get(preparation_stage).delete(cancel_preparation),
+        )
         .route("/v1/sessions/:id", get(session).delete(release))
         .route("/v1/sessions/:id/renew", post(renew))
         .layer(DefaultBodyLimit::max(256 * 1024))
@@ -191,6 +194,27 @@ async fn release(
         .lock()
         .map_err(|_| ApiError("session_store_unavailable"))?
         .release(&principal, &id, now()?)
+        .map_err(ApiError)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CancelPreparation {
+    namespace: String,
+}
+async fn cancel_preparation(
+    State(state): State<Api>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+    body: Option<Json<CancelPreparation>>,
+) -> Result<StatusCode, ApiError> {
+    state
+        .workers
+        .cancel_preparation_in_namespace(
+            &principal,
+            &id,
+            body.as_ref().map(|Json(value)| value.namespace.as_str()),
+        )
         .map_err(ApiError)?;
     Ok(StatusCode::NO_CONTENT)
 }

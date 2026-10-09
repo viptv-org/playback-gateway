@@ -100,3 +100,12 @@ opening took 18.37 seconds in that one cold observation. Stopping through the
 production controller/backend immediately made its media URL return 401. No
 production data or physical device was involved. The test page wrapped production
 API/controller code; ordinary account login/catalog screens were not exercised.
+
+Pending acquisition cancellation is now explicit. Backend Stop, request-ID
+cancellation and its authority reaper cancel the owned gateway preparation,
+including before its viewer ID exists. A scoped tombstone covers a cancellation
+that races the create request's arrival. An actual HTTPS production
+API/controller run was stopped during the measured peer/metadata stage; the
+Go preparation settled and restored all two input/output slots. No ready media
+was exposed. Older gateways still receive late-viewer release reconciliation.
+Controlled scope and cancellation-before-admission tests accompany this path.

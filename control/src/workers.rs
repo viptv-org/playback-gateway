@@ -40,6 +40,8 @@ pub struct Workers {
     input_sources: Mutex<BTreeMap<String, Arc<ResolvedSource>>>,
     input_routes: Mutex<BTreeMap<String, Arc<TrustedRange>>>,
     preparation_progress: ProgressRecords,
+    preparation_cancelled: tokio::sync::Notify,
+    cancelled_preparations: Mutex<HashMap<(String, String), (String, Instant)>>,
 }
 impl Workers {
     pub fn media_storage_available(&self) -> bool {
@@ -152,6 +154,8 @@ impl Workers {
             input_sources: Mutex::new(BTreeMap::new()),
             input_routes: Mutex::new(BTreeMap::new()),
             preparation_progress: Arc::new(Mutex::new(HashMap::new())),
+            preparation_cancelled: tokio::sync::Notify::new(),
+            cancelled_preparations: Mutex::new(HashMap::new()),
         })
     }
 
@@ -176,7 +180,11 @@ impl Workers {
         let outcome = loop {
             tokio::select! {
                 outcome = &mut operation => break outcome,
+                _ = self.preparation_cancelled.notified() => {
+                    if self.preparation_was_cancelled(principal,idempotency) || self.cancelled_preparation_id(principal,idempotency,&request.namespace) {break Err("source_preparation_cancelled");}
+                }
                 _ = authorization.tick() => {
+                    if self.preparation_was_cancelled(principal,idempotency) || self.cancelled_preparation_id(principal,idempotency,&request.namespace) {break Err("source_preparation_cancelled");}
                     if let Err(code) = self.require_active(principal, now.saturating_add(started.elapsed().as_secs())).await { break Err(code); }
                 }
             }
@@ -207,6 +215,11 @@ impl Workers {
         {
             return Ok(viewer);
         }
+        if request.input.torrent()
+            && self.cancelled_preparation_id(principal, idempotency, &request.namespace)
+        {
+            return Err("source_preparation_cancelled");
+        }
         let observation = if request.input.torrent() {
             let key = (principal.key.id.clone(), idempotency.to_owned());
             let mut pending = self
@@ -222,7 +235,11 @@ impl Workers {
             } else {
                 pending.insert(
                     key.clone(),
-                    (request.namespace.clone(), request.input.clone()),
+                    PreparationRecord {
+                        namespace: request.namespace.clone(),
+                        input: request.input.clone(),
+                        cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    },
                 );
                 Some(PreparationProgress {
                     records: self.preparation_progress.clone(),
@@ -488,8 +505,78 @@ impl Workers {
             .get(&(principal.key.id.clone(), id.to_owned()))
             .cloned()
             .ok_or("session_not_found")?;
-        principal.require(&record.0, Scope::Read)?;
-        Ok(self.sources.stage(&record.0, &record.1).await)
+        principal.require(&record.namespace, Scope::Read)?;
+        Ok(self.sources.stage(&record.namespace, &record.input).await)
+    }
+    fn cancelled_preparation_id(&self, principal: &Principal, id: &str, namespace: &str) -> bool {
+        let Ok(mut records) = self.cancelled_preparations.lock() else {
+            return true;
+        };
+        records.retain(|_, (_, deadline)| *deadline > Instant::now());
+        records
+            .get(&(principal.key.id.clone(), id.to_owned()))
+            .is_some_and(|(owner, _)| owner == namespace)
+    }
+    fn preparation_was_cancelled(&self, principal: &Principal, id: &str) -> bool {
+        self.preparation_progress
+            .lock()
+            .ok()
+            .and_then(|records| {
+                records
+                    .get(&(principal.key.id.clone(), id.to_owned()))
+                    .cloned()
+            })
+            .is_some_and(|record| record.cancelled.load(std::sync::atomic::Ordering::Acquire))
+    }
+    pub fn cancel_preparation(&self, principal: &Principal, id: &str) -> Result<(), &'static str> {
+        self.cancel_preparation_in_namespace(principal, id, None)
+    }
+    pub fn cancel_preparation_in_namespace(
+        &self,
+        principal: &Principal,
+        id: &str,
+        namespace: Option<&str>,
+    ) -> Result<(), &'static str> {
+        if id.is_empty() || id.len() > 128 {
+            return Err("session_not_found");
+        }
+        let key = (principal.key.id.clone(), id.to_owned());
+        let records = self
+            .preparation_progress
+            .lock()
+            .map_err(|_| "session_store_unavailable")?;
+        let active = records.get(&key);
+        let namespace = match (active, namespace) {
+            (Some(record), Some(namespace)) if record.namespace != namespace => {
+                return Err("session_not_found")
+            }
+            (Some(record), _) => record.namespace.as_str(),
+            (None, Some(namespace)) => namespace,
+            (None, None) => return Err("session_not_found"),
+        };
+        principal.require(namespace, Scope::Release)?;
+        let mut cancelled = self
+            .cancelled_preparations
+            .lock()
+            .map_err(|_| "session_store_unavailable")?;
+        cancelled.retain(|_, (_, deadline)| *deadline > Instant::now());
+        if cancelled.len() >= 4096 && !cancelled.contains_key(&key) {
+            return Err("input_capacity");
+        }
+        cancelled.insert(
+            key,
+            (
+                namespace.to_owned(),
+                Instant::now() + Duration::from_secs(180),
+            ),
+        );
+        if let Some(record) = active {
+            record
+                .cancelled
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+        self.preparation_cancelled.notify_waiters();
+        Ok(())
     }
     async fn key_active(&self, id: &str, now: u64) -> Result<bool, &'static str> {
         let now = i64::try_from(now).map_err(|_| "unauthorized")?;
@@ -697,7 +784,13 @@ impl Workers {
     }
 }
 
-type ProgressRecords = Arc<Mutex<HashMap<(String, String), (String, crate::protocol::Input)>>>;
+#[derive(Clone)]
+struct PreparationRecord {
+    namespace: String,
+    input: crate::protocol::Input,
+    cancelled: Arc<std::sync::atomic::AtomicBool>,
+}
+type ProgressRecords = Arc<Mutex<HashMap<(String, String), PreparationRecord>>>;
 struct PreparationProgress {
     records: ProgressRecords,
     key: (String, String),

@@ -89,7 +89,7 @@ impl IntoResponse for ApiError {
             "forbidden" => StatusCode::FORBIDDEN,
             "session_not_found" | "media_not_found" | "not_found" => StatusCode::NOT_FOUND,
             "method_not_allowed" => StatusCode::METHOD_NOT_ALLOWED,
-            "session_expired" => StatusCode::GONE,
+            "session_expired" | "source_preparation_cancelled" => StatusCode::GONE,
             "idempotency_conflict" | "input_cleanup_pending" => StatusCode::CONFLICT,
             "invalid_key_configuration"
             | "invalid_request"

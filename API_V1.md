@@ -277,3 +277,13 @@ and namespace with read scope can observe it. Stages are `finding_peers`,
 capability, byte count or authority is returned. Missing/retired requests return
 404. Observing progress never renews a viewer or private runtime lease.
 Existing session responses and protocol negotiation remain unchanged.
+
+`DELETE /v1/preparations/:idempotency_key` cancels an owned torrent preparation
+using release scope. With JSON `{ "namespace": "..." }`, it also records a
+bounded 180-second cancellation tombstone so cancellation can precede admission.
+The integration key and namespace must match; another key cannot cancel that
+input. Active create waits unwind, and admission stays charged until real owned
+IO/worker cleanup settles. A cancelled create returns
+`source_preparation_cancelled`. Completed viewer release remains the session
+DELETE route. Legacy gateways without preparation cancellation retain their
+late-viewer reconciliation behavior in compatible backend consumers.
