@@ -652,6 +652,11 @@ impl PendingPayload {
                 listen_port_range: None,
                 enable_upnp_port_forwarding: false,
                 concurrent_init_limit: Some(2),
+                peer_opts: Some(librqbit::PeerConnectionOptions {
+                    connect_timeout: Some(Duration::from_secs(2)),
+                    read_write_timeout: Some(Duration::from_secs(5)),
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
         )

@@ -119,3 +119,11 @@ rather than waiting for the one-second empty-routing-table polling interval.
 Each newly resolved pinned root is admitted once per query, including a second
 root resolving after the first. Destination validation precedes publication,
 and the existing query/datagram ownership still fences cancellation.
+
+Native sessions use a two-second TCP-connect budget and five-second per-message
+read/write budget instead of the long-running client's ten-second defaults.
+Closed diagnostics showed more than 120 connecting peers occupying the 128-peer
+window while only a few transferred data. These native-only budgets let
+unresponsive candidates release slots promptly. They do not change the
+three-second DHT query budget, thirty-second acquisition deadline, ordinary
+gateway defaults, read authority or source selection.
