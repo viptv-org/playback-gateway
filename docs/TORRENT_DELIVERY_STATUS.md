@@ -21,7 +21,9 @@ owner; production rollout and physical-device qualification remain separate.
 Fresh installer jobs are
 [desktop 38003799432](https://github.com/viptv-org/desktop/actions/runs/38003799432)
 and [Android 38004862330](https://github.com/viptv-org/android/actions/runs/38004862330).
-Their final results must be inspected; a dispatched job is not a passing build.
+The desktop run passed on both platforms; Windows passed seven release tests
+with one LAN fixture ignored, including actual pinned worker control/settlement.
+Android's final result must still be inspected; a dispatched job is not a passing build.
 The first Android hosted attempt exposed a loopback fixture shutdown race. Its
 released latch wait could still be interrupted; a smaller regression reproduced
 it. Graceful fixture joining fixes it without changing native cancellation or
