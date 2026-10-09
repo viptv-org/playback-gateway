@@ -6,6 +6,12 @@ this repository. See PROVENANCE.md for the original tested engine source.
 
 ## Implementation status
 
+The shared Go torrent replacement is a separate, inactive
+[qualification candidate](torrent-runtime/README.md). Its
+[ledger](torrent-runtime/QUALIFICATION.md) records measured startup, correctness
+findings and the gates still required before consumer integration. Existing
+transport behavior described below remains the current production path.
+
 The standalone service, scoped control/media API and Docker image are implemented
 and locally tested. Do not deploy it publicly until the remaining acceptance
 work in VALIDATION.md is complete. Existing VIPTV deployments still use their

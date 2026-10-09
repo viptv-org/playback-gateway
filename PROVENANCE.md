@@ -1,5 +1,28 @@
 # Extraction provenance
 
+## Shared torrent runtime candidate
+
+`torrent-runtime/` is new generic GPL-2.0-only transport code, not a copy of a
+Stremio application. Its Go manifest pins anacrolix/torrent to upstream revision
+`d913b30f520e10e85a94c7dc4b7b3e828b22c4b2` through
+`v1.61.1-0.20260927071845-d913b30f520e`, and rardecode/v2 to `v2.4.1`.
+`go.sum` records module checksums. The initial `v1.61.0` prototype exposed a
+deterministically reproduced missed writer wake-up already fixed in that newer
+upstream revision. The candidate has no local engine patch. A custom demand
+reader retains verified bytes and cancellation because a separate upstream
+capped-reader cancellation issue remains.
+
+anacrolix/torrent is MPL-2.0 and rardecode is BSD-2-Clause. No Stremio server
+bundle, Nuvio binary, private torrent metadata or downloaded media is committed
+or included in the platform build script. Source inspection and measurements
+are documented in `docs/TORRENT_RUNTIME_RESEARCH.md`,
+`docs/STREMIO_GO_REFERENCE.md` and `torrent-runtime/QUALIFICATION.md`.
+Local generated artifacts are dirty-tree qualification builds. Release-time
+dependency notices and immutable multi-platform artifact inventory remain
+required before distribution; current builds do not establish release readiness.
+
+## Original engine
+
 The engine was extracted from `viptv-org/backend`, commit
 `5db5000eefa6833d5ed1ab47780cb8aba1919438`, directory
 `server/playback-engine`. Original source and qualification tests are retained.

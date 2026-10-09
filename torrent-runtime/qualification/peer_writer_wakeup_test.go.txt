@@ -1,0 +1,33 @@
+// SPDX-License-Identifier: GPL-2.0-only
+package torrent
+
+import (
+ "testing"
+ "time"
+ "github.com/anacrolix/chansync"
+)
+
+type wakeupSink chan struct{}
+func (s wakeupSink) Write(b []byte) (int,error) { select {case s<-struct{}{}:default:}; return len(b),nil }
+
+func TestMessageWriterDoesNotLoseRequestWakeupBetweenFillAndWait(t *testing.T) {
+ var closed chansync.SetOnce
+ sink:=make(wakeupSink,1)
+ writer:=peerConnMsgWriter{closed:&closed,w:sink,writeBuffer:new(peerConnMsgWriterBuffer)}
+ ready,written:=false,false
+ writer.fillWriteBuffer=func(){
+  if ready && !written { writer.mu.Lock(); writer.writeBuffer.WriteByte(1); writer.mu.Unlock(); written=true }
+ }
+ writer.keepAlive=func()bool{
+  // A request arrives after fill saw no work but before the writer waits.
+  if !ready { ready=true; writer.writeCond.Broadcast() }
+  return false
+ }
+ done:=make(chan struct{})
+ go func(){defer close(done);writer.run(time.Hour)}()
+ defer func(){closed.Set();<-done}()
+ select {
+ case <-sink:
+ case <-time.After(200*time.Millisecond):t.Fatal("request wakeup lost between filling and waiting")
+ }
+}
