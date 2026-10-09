@@ -109,3 +109,39 @@ func TestMetadataAndBytesResumeFromMagnetWithoutPeers(t *testing.T) {
 		t.Fatal("cached magnet payload mismatch")
 	}
 }
+
+func TestExpectedSourceSizeIsBoundBeforeServingOrArchiveParsing(t *testing.T) {
+	_, raw, data := seedFixture(t, false)
+	r, err := newRuntime(Config{CacheDir: t.TempDir(), CacheBytes: 64 << 10, ReadaheadBytes: 4096}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	index := 0
+	for _, delta := range []int64{1, 0} {
+		size := int64(len(data)) + delta
+		h, err := r.Prepare(context.Background(), Source{Metainfo: raw, FileIndex: &index, ExpectedFileSize: &size}, time.Now().Add(time.Minute))
+		if err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-h.done:
+		case <-time.After(time.Second):
+			t.Fatal("metadata selection deadline")
+		}
+		p := h.Observe()
+		if delta != 0 {
+			if p.Ready || p.Error != "file_index_unavailable" || h.authorized() {
+				t.Fatal("mismatched descriptor exposed media")
+			}
+		} else if !p.Ready || p.Length != size {
+			t.Fatal("exact source length refused")
+		}
+		h.Close()
+	}
+	invalid := int64(0)
+	if h, err := r.Prepare(context.Background(), Source{Metainfo: raw, FileIndex: &index, ExpectedFileSize: &invalid}, time.Now().Add(time.Minute)); err == nil {
+		h.Close()
+		t.Fatal("invalid source length admitted")
+	}
+}

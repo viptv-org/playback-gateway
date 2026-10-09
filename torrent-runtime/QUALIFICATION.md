@@ -217,3 +217,15 @@ The production client leaves that optional peer store unset; the defect belongs
 to the test-root setup and does not require a runtime peer-store replacement.
 See [library ownership audit](../docs/TORRENT_LIBRARY_BOUNDARY.md).
 [Pinned store source](https://github.com/anacrolix/dht/blob/ec3a9bd99456/peer-store/in-memory.go).
+
+## Exact outer-file descriptor during client integration — 2026-10-09
+
+The private source may carry `expected_file_size` with an explicit file index.
+The runtime validates this against hashed metadata before serving bytes or
+opening a RAR. A mismatch retires the handle with the existing exact-selection
+failure. Invalid/unsafe sizes are refused at admission; asynchronous preparation
+copies the size rather than retaining the caller's mutable pointer.
+
+The complete Go race suite passes (9.879 s), including exact and mismatched
+source-size fixtures. The Rust gateway workspace suite passes. This change
+binds file identity and does not establish client/device latency or rollout.

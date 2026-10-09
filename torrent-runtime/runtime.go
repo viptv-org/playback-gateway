@@ -41,11 +41,12 @@ type Config struct {
 	upstreamDefaults bool
 }
 type Source struct {
-	Magnet       string   `json:"magnet,omitempty"`
-	Metainfo     []byte   `json:"metainfo,omitempty"`
-	FileIndex    *int     `json:"file_index,omitempty"`
-	Trackers     []string `json:"trackers,omitempty"`
-	ArchiveIndex *int     `json:"archive_index,omitempty"`
+	ExpectedFileSize *int64   `json:"expected_file_size,omitempty"`
+	Magnet           string   `json:"magnet,omitempty"`
+	Metainfo         []byte   `json:"metainfo,omitempty"`
+	FileIndex        *int     `json:"file_index,omitempty"`
+	Trackers         []string `json:"trackers,omitempty"`
+	ArchiveIndex     *int     `json:"archive_index,omitempty"`
 }
 
 func (Source) String() string   { return "[private torrent source]" }
@@ -331,6 +332,9 @@ func (r *Runtime) Prepare(parent context.Context, source Source, expires time.Ti
 	if source.FileIndex != nil && (*source.FileIndex < 0 || *source.FileIndex > 65535) {
 		return nil, errors.New("invalid file index")
 	}
+	if source.ExpectedFileSize != nil && (source.FileIndex == nil || *source.ExpectedFileSize <= 0 || *source.ExpectedFileSize > 9007199254740991) {
+		return nil, errors.New("invalid expected file size")
+	}
 	trackerCount := 0
 	for _, tier := range spec.Trackers {
 		trackerCount += len(tier)
@@ -391,12 +395,17 @@ func (r *Runtime) Prepare(parent context.Context, source Source, expires time.Ti
 		v := *source.ArchiveIndex
 		archiveIndex = &v
 	}
-	go h.prepare(index, archiveIndex)
+	var expectedSize *int64
+	if source.ExpectedFileSize != nil {
+		v := *source.ExpectedFileSize
+		expectedSize = &v
+	}
+	go h.prepare(index, archiveIndex, expectedSize)
 	go h.watch()
 	return h, nil
 }
 
-func (h *Handle) prepare(index, archiveIndex *int) {
+func (h *Handle) prepare(index, archiveIndex *int, expectedSize *int64) {
 	defer close(h.done)
 	select {
 	case <-h.ctx.Done():
@@ -432,6 +441,10 @@ func (h *Handle) prepare(index, archiveIndex *int) {
 		}
 	}
 	f := files[selected]
+	if expectedSize != nil && f.Length() != *expectedSize {
+		h.fail("file_index_unavailable")
+		return
+	}
 	if f.Length() <= 0 {
 		h.fail("empty_file")
 		return

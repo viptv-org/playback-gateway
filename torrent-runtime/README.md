@@ -30,7 +30,8 @@ integration. A `terminate` response requires the parent to kill its owned worker
 the executable exits with status 3 when settlement exceeds two seconds.
 
 `prepare` takes a magnet or metainfo, optional tracker hints and file index,
-and `authority_ms`. Absent file selection means the largest torrent file, with
+and `authority_ms`. An optional exact `expected_file_size` binds the selected
+outer torrent file before serving or opening an archive. Absent file selection means the largest torrent file, with
 the first index winning ties. Resolved stored archive selection is reported in progress as `archive_index`
 and can be supplied on a subsequent preparation. Observation returns its own
 copy so callers cannot mutate live selection. Compressed, solid or encrypted archives are refused.
