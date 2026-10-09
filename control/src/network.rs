@@ -147,19 +147,17 @@ impl EgressProxy {
             || url.password().is_some()
             || url.query().is_some()
             || url.fragment().is_some()
-            || parts.len() != 4
-            || !parts[0].is_empty()
-            || parts[1].len() != 64
-            || !parts[1].bytes().all(|b| b.is_ascii_hexdigit())
-            || parts[2]
-                .parse::<u32>()
-                .ok()
-                .is_none_or(|index| index >= 4096)
-            || parts[3].strip_prefix("stream.").is_none_or(|extension| {
-                extension.is_empty()
-                    || extension.len() > 8
-                    || !extension.bytes().all(|b| b.is_ascii_alphanumeric())
-            })
+            || !(crate::runtime_sources::valid_media_url(raw)
+                || (parts.len() == 4
+                    && parts[0].is_empty()
+                    && parts[1].len() == 64
+                    && parts[1].bytes().all(|b| b.is_ascii_hexdigit())
+                    && parts[2].parse::<u32>().is_ok_and(|index| index < 4096)
+                    && parts[3].strip_prefix("stream.").is_some_and(|extension| {
+                        !extension.is_empty()
+                            && extension.len() <= 8
+                            && extension.bytes().all(|b| b.is_ascii_alphanumeric())
+                    })))
         {
             return Err("invalid_owned_range");
         }

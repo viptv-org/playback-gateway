@@ -112,7 +112,10 @@ The response contains `id` (viewer ID), `job_id`, `status`, `expires_at`,
 `error_code`, `renew_after_seconds`, and `playback` when ready. Playback contains
 the viewer-scoped relative media URL and format/track metadata, never an upstream
 URL, engine capability or integration key. A ready response is `201`; joining an
-already-starting worker can return `202`. A normal start waits up to 30 seconds.
+already-starting worker can return `202`. HTTP starts retain a 30-second preparation budget. Torrent starts have a
+120-second budget and renew their viewer lease while the authenticated create
+request remains active. The private runtime separately enforces 60 seconds
+without meaningful startup progress.
 Repeating an identical idempotency key reuses the viewer and its media URL;
 changing the body under that key returns `409`.
 
@@ -254,3 +257,15 @@ specific upstream failure classification remains an acceptance item.
 `/health` and `/ready` expose no source, credential or job information. HTTPS
 ingress, pending-inspection admission hardening and multi-output input sharing
 are deployment acceptance requirements, not implied by a successful health check.
+
+## Shared torrent input fields
+
+Torrent VOD inputs accept `file_index` (otherwise largest file), `archive_index`
+(stored-RAR member; otherwise largest member), `expected_file_size` (positive
+outer torrent-file length, requiring explicit `file_index`) and up to 32 public
+UDP/HTTP(S) `trackers`. Existing input bodies remain valid. File/member indices
+are bounded to 65535; exact sizes are bounded to JavaScript's safe integer range.
+These fields participate in source identity; they cannot merge incompatible
+selection constraints. Native v1 negotiation is a separate backend contract.
+Compressed/encrypted/missing archive errors and startup phase failures remain
+closed codes; no source URL, private runtime token or decoder stderr is returned.

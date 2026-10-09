@@ -2,7 +2,7 @@
 use crate::{
     credentials::{Credentials, Principal, Scope},
     network::{EgressProxy, NetworkPolicy, TrustedRange},
-    protocol::{CreateSession, OutputProtocol, STARTUP_DEADLINE_SECONDS},
+    protocol::{CreateSession, OutputProtocol},
     sessions::{Failure, Sessions, Status, Viewer},
     sources::{ResolvedSource, Sources},
 };
@@ -106,6 +106,7 @@ impl Workers {
             sources.clear();
         }
         let _ = self.sources.reap().await;
+        let _ = self.sources.shutdown().await;
         if let Ok(mut routes) = self.input_routes.lock() {
             routes.clear();
         }
@@ -137,6 +138,7 @@ impl Workers {
             .await
             .map_err(|_| "egress_unavailable")?;
         let sources = Arc::new(Sources::new(config, &proxy.url())?);
+        sources.initialize().await?;
         Ok(Self {
             sessions: Arc::new(Mutex::new(Sessions::default())),
             credentials,
@@ -162,11 +164,21 @@ impl Workers {
     ) -> Result<Viewer, &'static str> {
         let observation = service_telemetry::observe(service_telemetry::Operation::GatewayPrepare);
         let context = observation.context();
-        let outcome = service_telemetry::in_context(
+        let started = Instant::now();
+        let operation = service_telemetry::in_context(
             context,
             self.create_inner(principal, request, idempotency, now),
-        )
-        .await;
+        );
+        tokio::pin!(operation);
+        let mut authorization = tokio::time::interval(Duration::from_secs(1));
+        let outcome = loop {
+            tokio::select! {
+                outcome = &mut operation => break outcome,
+                _ = authorization.tick() => {
+                    if let Err(code) = self.require_active(principal, now.saturating_add(started.elapsed().as_secs())).await { break Err(code); }
+                }
+            }
+        };
         observation.finish(match &outcome {
             Ok(_) => service_telemetry::Outcome::Success,
             Err(code) => {
@@ -194,7 +206,7 @@ impl Workers {
             return Ok(viewer);
         }
         let started = Instant::now();
-        let deadline = Duration::from_secs(STARTUP_DEADLINE_SECONDS);
+        let deadline = Duration::from_secs(request.input.startup_seconds());
         let pending = if request.input.torrent() || request.input.archive() {
             if !self.sources.enabled() {
                 return Err("unsupported_output");
@@ -369,7 +381,20 @@ impl Workers {
         };
         let remaining = deadline.saturating_sub(started.elapsed());
         let operation = service_telemetry::observe(service_telemetry::Operation::EngineStart);
-        let outcome = tokio::time::timeout(remaining, prepared.start()).await;
+        let opening = tokio::time::timeout(remaining, prepared.start());
+        tokio::pin!(opening);
+        let mut renewal = tokio::time::interval(Duration::from_secs(20));
+        renewal.tick().await;
+        let outcome = loop {
+            tokio::select! {
+                outcome = &mut opening => break outcome,
+                _ = renewal.tick() => {
+                    let timestamp = now.saturating_add(started.elapsed().as_secs());
+                    self.require_active(principal, timestamp).await?;
+                    self.sessions.lock().map_err(|_| "session_store_unavailable")?.renew(principal, &reservation.viewer.id, timestamp)?;
+                }
+            }
+        };
         match &outcome {
             Ok(Ok(response)) => {
                 operation.processing(&response.video_mode, &response.audio_mode);
@@ -384,12 +409,20 @@ impl Workers {
             _ => return Err("processing_failed"),
         };
         let timestamp = now.saturating_add(started.elapsed().as_secs());
-        // Record the engine ID before another await so cancellation cleanup can
-        // always find an engine session that has successfully started.
+        // Retain the engine ID before any await, including runtime acknowledgement.
         self.active
             .lock()
             .map_err(|_| "session_store_unavailable")?
             .insert(job.clone(), response);
+        let source = self
+            .input_sources
+            .lock()
+            .map_err(|_| "session_store_unavailable")?
+            .get(&job)
+            .cloned();
+        if let Some(source) = source {
+            self.sources.output_ready(&source).await?;
+        }
         if self.require_active(principal, timestamp).await.is_err() {
             return Err("unauthorized");
         }
@@ -406,9 +439,10 @@ impl Workers {
             .lock()
             .map_err(|_| "session_store_unavailable")?
             .remove(&job);
-        let mut viewer = reservation.viewer;
-        viewer.status = Status::Ready;
-        Ok(viewer)
+        self.sessions
+            .lock()
+            .map_err(|_| "session_store_unavailable")?
+            .get(principal, &reservation.viewer.id, timestamp)
     }
 
     async fn key_active(&self, id: &str, now: u64) -> Result<bool, &'static str> {
@@ -2526,6 +2560,9 @@ printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","wi
                 headers: BTreeMap::new(),
                 live: true,
                 file_index: None,
+                archive_index: None,
+                expected_file_size: None,
+                trackers: Vec::new(),
             },
             output: Output {
                 conversion: crate::protocol::Conversion::Auto,

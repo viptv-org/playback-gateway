@@ -3,9 +3,6 @@ use crate::{
     credentials::{KeySpec, Quotas},
     protocol::CreateSession,
 };
-use librqbit::{
-    create_torrent, AddTorrent, AddTorrentOptions, CreateTorrentOptions, Session, SessionOptions,
-};
 use std::{path::Path, time::Duration};
 
 #[tokio::test]
@@ -99,7 +96,7 @@ async fn real_torrent_viewers_share_output_seek_and_reap_owned_input() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires real FFmpeg/ffprobe; deterministic local BitTorrent fixture"]
 async fn rolling_torrent_viewers_decode_seek_with_bounded_input() {
-    real_torrent_media_fixture(Some(64 * 1024)).await;
+    real_torrent_media_fixture(Some(256 * 1024)).await;
 }
 
 async fn real_torrent_media_fixture(piece_cache_bytes: Option<u64>) {
@@ -123,7 +120,7 @@ async fn real_torrent_media_fixture(piece_cache_bytes: Option<u64>) {
             "-i",
             "sine=frequency=440:sample_rate=48000",
             "-t",
-            "12",
+            "24",
             "-c:v",
             "libx264",
             "-threads",
@@ -146,53 +143,60 @@ async fn real_torrent_media_fixture(piece_cache_bytes: Option<u64>) {
     if let Some(budget) = piece_cache_bytes {
         assert!(std::fs::metadata(&movie).unwrap().len() > budget * 4);
     }
-    let metainfo = create_torrent(
-        &movie,
-        CreateTorrentOptions {
-            piece_length: Some(16 * 1024),
-            ..Default::default()
-        },
+    use tokio::io::AsyncBufReadExt;
+    let mut seed = tokio::process::Command::new(
+        std::env::var("TORRENT_TEST_SEEDER").expect("owned upstream Go seeder"),
+    )
+    .env("TORRENT_OWNED_SEED_FILE", &movie)
+    .env("GOMAXPROCS", "2")
+    .stdin(std::process::Stdio::piped())
+    .stdout(std::process::Stdio::piped())
+    .stderr(std::process::Stdio::null())
+    .kill_on_drop(true)
+    .spawn()
+    .unwrap();
+    let mut line = String::new();
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio::io::BufReader::new(seed.stdout.take().unwrap()).read_line(&mut line),
     )
     .await
     .unwrap()
-    .as_bytes()
     .unwrap();
-    let peer_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let peer_port = peer_listener.local_addr().unwrap().port();
-    drop(peer_listener);
-    let seed = Session::new_with_opts(
-        seed_dir.clone(),
-        SessionOptions {
-            disable_dht: true,
-            disable_dht_persistence: true,
-            listen_port_range: Some(peer_port..peer_port + 1),
-            ..Default::default()
-        },
+    let description: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let peer_port = u16::try_from(description["peer_port"].as_u64().unwrap()).unwrap();
+    let mut metainfo = base64::Engine::decode(
+        &base64::engine::general_purpose::STANDARD,
+        description["metainfo"].as_str().unwrap(),
     )
-    .await
     .unwrap();
-    let seeded = seed
-        .add_torrent(
-            AddTorrent::from_bytes(metainfo.clone()),
-            Some(AddTorrentOptions {
-                output_folder: Some(seed_dir.to_str().unwrap().into()),
-                overwrite: true,
-                ..Default::default()
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let tracker = format!("http://{}/announce", listener.local_addr().unwrap());
+    let mut announced = format!("d8:announce{}:{}", tracker.len(), tracker).into_bytes();
+    announced.extend_from_slice(&metainfo[1..]);
+    metainfo = announced;
+    let mut tracker_reply = b"d8:intervali30e5:peers6:".to_vec();
+    tracker_reply.extend_from_slice(&[127, 0, 0, 1]);
+    tracker_reply.extend_from_slice(&peer_port.to_be_bytes());
+    tracker_reply.push(b'e');
+    let queries = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = queries.clone();
+    let route = axum::Router::new()
+        .route(
+            "/announce",
+            axum::routing::get(move || {
+                counted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let reply = tracker_reply.clone();
+                async move { reply }
             }),
         )
-        .await
-        .unwrap()
-        .into_handle()
-        .unwrap();
-    seeded.wait_until_initialized().await.unwrap();
-    let route = axum::Router::new().route(
-        "/clip.torrent",
-        axum::routing::get(move || {
-            let bytes = metainfo.clone();
-            async move { bytes }
-        }),
-    );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        .route(
+            "/clip.torrent",
+            axum::routing::get(move || {
+                let bytes = metainfo.clone();
+                async move { bytes }
+            }),
+        );
     let source_url = format!("http://{}/clip.torrent", listener.local_addr().unwrap());
     let http = tokio::spawn(async move { axum::serve(listener, route).await.unwrap() });
     let engine = PlaybackManager::new(playback_engine::Config {
@@ -233,7 +237,7 @@ async fn real_torrent_media_fixture(piece_cache_bytes: Option<u64>) {
         )
         .unwrap();
     let principal = credentials.authenticate(&key.secret, 0).unwrap();
-    let workers = Workers::new_with_torrent(
+    let mut workers = Workers::new_with_torrent(
         engine,
         credentials,
         NetworkPolicy::loopback_fixture(),
@@ -249,7 +253,58 @@ async fn real_torrent_media_fixture(piece_cache_bytes: Option<u64>) {
     )
     .await
     .unwrap();
+    if let Some(budget) = piece_cache_bytes {
+        workers.sources = Arc::new(
+            Sources::new(
+                playback_engine::TorrentConfig {
+                    enabled: true,
+                    cache_dir: root.path().join("runtime-cache"),
+                    ..Default::default()
+                },
+                &workers.proxy.url(),
+            )
+            .unwrap(),
+        );
+        Arc::get_mut(&mut workers.sources)
+            .unwrap()
+            .owned_runtime_budget(root.path().join("rolling-runtime-cache"), budget);
+    }
     let mut request: CreateSession = serde_json::from_value(serde_json::json!({"namespace":"fixture","input":{"url":source_url,"live":false},"output":{"protocol":"hls","conversion":"video","video_codecs":["h264"],"audio_codecs":["aac"],"max_width":640,"max_height":360}})).unwrap();
+    let workers = Arc::new(workers);
+    let unrelated = tokio::spawn({
+        let workers = workers.clone();
+        async move {
+            let input = serde_json::from_value(serde_json::json!({"url":"magnet:?xt=urn:btih:1111111111111111111111111111111111111111", "live":false})).unwrap();
+            workers.sources.resolve("other", &input, None).await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let held_source = workers
+        .sources
+        .resolve("fixture", &request.input, None)
+        .await
+        .unwrap();
+    let result = tokio::time::timeout(
+        Duration::from_secs(8),
+        reqwest::Client::new()
+            .get(&held_source.url)
+            .header("Range", "bytes=0-65535")
+            .send(),
+    )
+    .await;
+    assert!(
+        result.is_ok(),
+        "verified Range stalled; tracker_queries={} runtime={}",
+        queries.load(std::sync::atomic::Ordering::Relaxed),
+        held_source.fixture_stats().await
+    );
+    let response = result.unwrap().unwrap();
+    assert_eq!(response.status(), 206);
+    let bytes = tokio::time::timeout(Duration::from_secs(3), response.bytes())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(bytes.as_ref(), &std::fs::read(&movie).unwrap()[..65536]);
     let first = workers
         .create(&principal, &request, "first", 0)
         .await
@@ -265,7 +320,7 @@ async fn real_torrent_media_fixture(piece_cache_bytes: Option<u64>) {
     assert_eq!(first.job_id, second.job_id);
     assert_eq!(first.job_id, late.job_id);
     assert_eq!(workers.available(&principal, 4).unwrap().inputs, 3);
-    assert_eq!(workers.input_file(&first).unwrap().name, "clip.mkv");
+    assert_eq!(workers.input_file(&first).unwrap().name, "media");
     let token = workers
         .sessions
         .lock()
@@ -303,19 +358,29 @@ async fn real_torrent_media_fixture(piece_cache_bytes: Option<u64>) {
         .collect();
     assert!(!manifests.is_empty());
     if let Some(budget) = piece_cache_bytes {
-        let caches: Vec<_> = std::fs::read_dir(root.path().join("torrent-cache"))
-            .unwrap()
-            .filter_map(Result::ok)
-            .map(|e| e.path().join("pieces.cache"))
-            .filter(|p| p.exists())
-            .collect();
-        assert_eq!(caches.len(), 1);
-        assert!(std::fs::metadata(&caches[0]).unwrap().len() <= budget);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt;
-            assert!(std::fs::metadata(&caches[0]).unwrap().blocks() * 512 <= budget);
+        fn allocated(path: &Path) -> u64 {
+            std::fs::read_dir(path)
+                .unwrap()
+                .filter_map(Result::ok)
+                .map(|entry| {
+                    let meta = entry.metadata().unwrap();
+                    if meta.is_dir() {
+                        allocated(&entry.path())
+                    } else {
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::MetadataExt;
+                            meta.blocks() * 512
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            meta.len()
+                        }
+                    }
+                })
+                .sum()
         }
+        assert!(allocated(&root.path().join("rolling-runtime-cache")) <= budget);
     }
     for viewer in [&first, &second, &late, &sought] {
         workers
@@ -325,13 +390,21 @@ async fn real_torrent_media_fixture(piece_cache_bytes: Option<u64>) {
             .release(&principal, &viewer.id, 6)
             .unwrap();
     }
+    drop(held_source);
+    unrelated.abort();
+    let _ = unrelated.await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
     workers.reap(40).await.unwrap();
     assert_eq!(workers.available(&principal, 40).unwrap().inputs, 4);
     assert_eq!(workers.engine.available_output_slots(), 4);
     assert!(workers.input_sources.lock().unwrap().is_empty());
     workers.shutdown().await;
     http.abort();
-    seed.cancellation_token().cancel();
+    drop(seed.stdin.take());
+    tokio::time::timeout(Duration::from_secs(2), seed.wait())
+        .await
+        .unwrap()
+        .unwrap();
 }
 
 async fn assert_seek_frame(ffmpeg: &str, media: &Path, movie: &Path, root: &Path) {

@@ -2357,6 +2357,7 @@ name = "playback-gateway"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "futures",
  "libc",
  "librqbit",
@@ -2370,6 +2371,7 @@ dependencies = [
  "sha2 0.10.9",
  "tempfile",
  "tokio",
+ "torrent-runtime-host",
  "tower",
  "tracing",
  "tracing-subscriber",
@@ -3589,6 +3591,13 @@ dependencies = [
  "sha1",
  "unicode-normalization",
  "url",
+]
+
+[[package]]
+name = "torrent-runtime-host"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]

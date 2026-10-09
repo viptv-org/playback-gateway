@@ -3,8 +3,8 @@
 use crate::protocol::Input;
 use playback_engine::{
     rar::{RarMedia, RarVolume},
-    LoopbackStream, TorrentCacheReservation, TorrentConfig, TorrentFile, TorrentHandle,
-    TorrentManager, TorrentRangeSource, TorrentReadSettler,
+    LoopbackStream, TorrentCacheReservation, TorrentConfig, TorrentFile, TorrentManager,
+    TorrentRangeSource,
 };
 use reqwest::{
     header::{HeaderMap, HeaderName, HeaderValue},
@@ -24,21 +24,28 @@ use tokio::sync::{Mutex, Notify};
 
 pub struct Sources {
     enabled: bool,
+    runtime: Arc<crate::runtime_sources::RuntimeSources>,
     manager: TorrentManager,
     client: Client,
     resolved: Mutex<HashMap<[u8; 32], CachedSource>>,
+    acquiring: Mutex<HashMap<[u8; 32], Weak<Mutex<()>>>>,
 }
 struct CachedSource {
     source: Weak<ResolvedSource>,
     reads: Arc<ArchiveReads>,
-    raw_reads: Option<TorrentReadSettler>,
 }
 pub struct ResolvedSource {
     pub url: String,
     pub file: TorrentFile,
-    _torrent: Option<TorrentHandle>,
     _archive: Option<LoopbackStream>,
     reads: Arc<ArchiveReads>,
+    runtime: Option<Arc<crate::runtime_sources::RuntimeSource>>,
+}
+impl ResolvedSource {
+    #[cfg(test)]
+    pub(crate) async fn fixture_stats(&self) -> serde_json::Value {
+        self.runtime.as_ref().unwrap().fixture_stats().await
+    }
 }
 impl Sources {
     pub fn new(mut config: TorrentConfig, proxy: &str) -> Result<Self, &'static str> {
@@ -46,6 +53,13 @@ impl Sources {
         // Server inputs retain their handle through actual output cleanup.
         // Once idle, remove them promptly rather than continuing peer downloads.
         config.idle_timeout = Duration::ZERO;
+        let runtime = Arc::new(crate::runtime_sources::RuntimeSources::new(
+            std::env::var_os("TORRENT_WORKER")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::path::PathBuf::from("torrent-worker")),
+            config.cache_dir.join("shared-runtime-v2"),
+            config.max_bytes,
+        ));
         let manager = TorrentManager::new(config).map_err(|_| "invalid_torrent_configuration")?;
         let client = Client::builder()
             .no_proxy()
@@ -56,10 +70,37 @@ impl Sources {
             .map_err(|_| "egress_unavailable")?;
         Ok(Self {
             enabled,
+            runtime,
             manager,
             client,
             resolved: Mutex::new(HashMap::new()),
+            acquiring: Mutex::new(HashMap::new()),
         })
+    }
+    pub async fn initialize(&self) -> Result<(), &'static str> {
+        if self.enabled {
+            self.runtime.initialize().await?;
+        }
+        Ok(())
+    }
+    pub async fn shutdown(&self) -> Result<(), &'static str> {
+        self.runtime.shutdown().await
+    }
+    pub async fn output_ready(&self, source: &Arc<ResolvedSource>) -> Result<(), &'static str> {
+        if let Some(runtime) = &source.runtime {
+            runtime.output_ready().await?;
+        }
+        Ok(())
+    }
+    #[cfg(test)]
+    pub(crate) fn owned_runtime_budget(&mut self, cache: std::path::PathBuf, budget: u64) {
+        self.runtime = Arc::new(crate::runtime_sources::RuntimeSources::new(
+            std::env::var_os("TORRENT_WORKER")
+                .expect("owned Go fixture worker")
+                .into(),
+            cache,
+            budget,
+        ));
     }
     pub fn enabled(&self) -> bool {
         self.enabled
@@ -75,12 +116,10 @@ impl Sources {
         {
             cached.reads.close();
             cached.reads.wait().await;
-            if let Some(reads) = &cached.raw_reads {
-                reads.settle_closed_reads().await;
-            }
         }
         resolved.retain(|_, cached| cached.source.strong_count() > 0);
         drop(resolved);
+        self.runtime.reap().await?;
         self.manager
             .reap()
             .await
@@ -96,15 +135,11 @@ impl Sources {
             return Ok(());
         }
         source.reads.close();
+        if let Some(runtime) = &source.runtime {
+            runtime.close().await?;
+        }
         if let Some(stream) = &source._archive {
             stream.stop();
-        }
-        if source._archive.is_none() {
-            if let Some(torrent) = &source._torrent {
-                if torrent.close_if_last_owner() {
-                    torrent.settle_closed_reads().await;
-                }
-            }
         }
         source.reads.wait().await;
         resolved.retain(|_, cached| !cached.source.ptr_eq(&Arc::downgrade(source)));
@@ -121,6 +156,81 @@ impl Sources {
         }
         let identity = serde_json::to_vec(&(namespace, input)).map_err(|_| "invalid_input")?;
         let key: [u8; 32] = Sha256::digest(identity).into();
+        if input.torrent() {
+            let lock = {
+                let mut acquiring = self.acquiring.lock().await;
+                acquiring.retain(|_, lock| lock.strong_count() > 0);
+                if let Some(lock) = acquiring.get(&key).and_then(Weak::upgrade) {
+                    lock
+                } else {
+                    if acquiring.len() >= 1024 {
+                        return Err("input_capacity");
+                    }
+                    let lock = Arc::new(Mutex::new(()));
+                    acquiring.insert(key, Arc::downgrade(&lock));
+                    lock
+                }
+            };
+            let _acquiring = lock.lock().await;
+            // Only this identity is serialized. Other torrents can discover concurrently.
+            if let Some(cached) = self
+                .resolved
+                .lock()
+                .await
+                .get(&key)
+                .and_then(|cached| cached.source.upgrade())
+            {
+                if cached.reads.closed.load(Ordering::Acquire) {
+                    return Err("input_cleanup_pending");
+                }
+                return Ok(cached);
+            }
+            {
+                let mut resolved = self.resolved.lock().await;
+                resolved.retain(|_, cached| {
+                    cached.source.strong_count() > 0
+                        || cached.reads.active.load(Ordering::Acquire) > 0
+                });
+                if resolved.len() >= 1024 {
+                    return Err("input_capacity");
+                }
+            }
+            let metainfo = if input.url.starts_with("magnet:") {
+                None
+            } else {
+                let response = fetch(
+                    &self.client,
+                    &input.url,
+                    Method::GET,
+                    &input_headers(input)?,
+                )
+                .await?;
+                if !response.status().is_success() {
+                    return Err("source_preparation_failed");
+                }
+                Some(bounded_body(response, 4 * 1024 * 1024).await?)
+            };
+            let runtime = self.runtime.resolve(input, metainfo, pending).await?;
+            let source = Arc::new(ResolvedSource {
+                url: runtime.url.clone(),
+                file: TorrentFile {
+                    index: runtime.file_index,
+                    name: "media".into(),
+                    size: runtime.size,
+                },
+                _archive: None,
+                reads: Arc::new(ArchiveReads::default()),
+                runtime: Some(runtime),
+            });
+            self.resolved.lock().await.insert(
+                key,
+                CachedSource {
+                    source: Arc::downgrade(&source),
+                    reads: source.reads.clone(),
+                },
+            );
+            return Ok(source);
+        }
         // One preparation per source identity. Concurrent viewers receive the
         // same capability URL, so existing normalized output sharing still works.
         let mut resolved = self.resolved.lock().await;
@@ -131,108 +241,56 @@ impl Sources {
                 }
                 return Ok(source);
             }
-            if cached.reads.active.load(Ordering::Acquire) > 0
-                || cached
-                    .raw_reads
-                    .as_ref()
-                    .is_some_and(TorrentReadSettler::closed_reads_pending)
-            {
+            if cached.reads.active.load(Ordering::Acquire) > 0 {
                 return Err("input_cleanup_pending");
             }
         }
         if resolved.len() >= 1024 {
             resolved.retain(|_, cached| {
-                cached.source.strong_count() > 0
-                    || cached.reads.active.load(Ordering::Acquire) > 0
-                    || cached
-                        .raw_reads
-                        .as_ref()
-                        .is_some_and(TorrentReadSettler::closed_reads_pending)
+                cached.source.strong_count() > 0 || cached.reads.active.load(Ordering::Acquire) > 0
             });
         }
         if resolved.len() >= 1024 {
             return Err("input_capacity");
         }
         let headers = input_headers(input)?;
-        let torrent = if input.torrent() {
-            let result = if input.url.starts_with("magnet:") {
-                self.manager
-                    .start_magnet(namespace, &input.url, input.file_index)
-                    .await
-            } else {
-                let response = fetch(&self.client, &input.url, Method::GET, &headers).await?;
-                if !response.status().is_success() {
-                    return Err("source_preparation_failed");
-                }
-                let bytes = bounded_body(response, 4 * 1024 * 1024).await?;
-                self.manager
-                    .start_metainfo(namespace, bytes, input.file_index)
-                    .await
-            };
-            Some(result.map_err(torrent_error)?)
-        } else {
-            None
+        let volumes: Vec<Arc<dyn RarVolume>> = vec![Arc::new(
+            HttpVolume::new(self.client.clone(), input.url.clone(), headers).await?,
+        )];
+        let inspected = tokio::task::spawn_blocking({
+            let volumes = volumes.clone();
+            let pending = pending.clone();
+            move || {
+                let _pending = pending;
+                RarMedia::inspect(&volumes)
+            }
+        })
+        .await
+        .map_err(|_| "source_preparation_failed")??;
+        if !inspected.stored {
+            return Err("compressed_archive_unsupported");
+        }
+        let reservation = self.manager.reserve_cache(0).await.map_err(torrent_error)?;
+        let (media, reservation) = extract_owned(volumes, reservation, pending).await?;
+        let file = TorrentFile {
+            index: 0,
+            name: media.file().name.clone(),
+            size: media.file().size,
         };
-        let source = if let Some(torrent) = torrent
-            .as_ref()
-            .filter(|handle| !archive_name(&handle.selected_file().name))
-        {
-            ResolvedSource {
-                url: torrent
-                    .stream_url(torrent.selected_file().index)
-                    .map_err(torrent_error)?,
-                file: safe_metadata(torrent.selected_file()),
-                _torrent: Some(torrent.clone()),
-                _archive: None,
-                reads: Arc::new(ArchiveReads::default()),
-            }
-        } else {
-            let volumes: Vec<Arc<dyn RarVolume>> = match &torrent {
-                Some(torrent) => archive_volumes(torrent)?,
-                None => vec![Arc::new(
-                    HttpVolume::new(self.client.clone(), input.url.clone(), headers).await?,
-                )],
-            };
-            let inspected = tokio::task::spawn_blocking({
-                let volumes = volumes.clone();
-                let pending = pending.clone();
-                move || {
-                    let _pending = pending;
-                    RarMedia::inspect(&volumes)
-                }
-            })
-            .await
-            .map_err(|_| "source_preparation_failed")??;
-            if torrent.is_none() && !inspected.stored {
-                return Err("unsupported_output");
-            }
-            let reservation = self
-                .manager
-                .reserve_cache(if inspected.stored { 0 } else { inspected.size })
-                .await
-                .map_err(torrent_error)?;
-            let (media, reservation) = extract_owned(volumes, reservation, pending).await?;
-            let file = TorrentFile {
-                index: 0,
-                name: media.file().name.clone(),
-                size: media.file().size,
-            };
-            let reads = Arc::new(ArchiveReads::default());
-            let stream = LoopbackStream::from_source(Arc::new(ArchiveSource {
-                media,
-                _reservation: Arc::new(reservation),
-                _torrent: torrent.clone(),
-                reads: reads.clone(),
-            }))
-            .await
-            .map_err(torrent_error)?;
-            ResolvedSource {
-                url: stream.url(0),
-                file,
-                _torrent: torrent,
-                _archive: Some(stream),
-                reads,
-            }
+        let reads = Arc::new(ArchiveReads::default());
+        let stream = LoopbackStream::from_source(Arc::new(ArchiveSource {
+            media,
+            _reservation: Arc::new(reservation),
+            reads: reads.clone(),
+        }))
+        .await
+        .map_err(torrent_error)?;
+        let source = ResolvedSource {
+            url: stream.url(0),
+            file,
+            _archive: Some(stream),
+            runtime: None,
+            reads,
         };
         let source = Arc::new(source);
         resolved.insert(
@@ -240,11 +298,6 @@ impl Sources {
             CachedSource {
                 source: Arc::downgrade(&source),
                 reads: source.reads.clone(),
-                raw_reads: source
-                    ._torrent
-                    .as_ref()
-                    .filter(|_| source._archive.is_none())
-                    .map(TorrentHandle::read_settler),
             },
         );
         Ok(source)
@@ -266,18 +319,6 @@ async fn extract_owned(
     })
     .await
     .map_err(|_| "source_preparation_failed")?
-}
-fn safe_metadata(file: &TorrentFile) -> TorrentFile {
-    TorrentFile {
-        index: file.index,
-        name: file
-            .name
-            .rsplit(['/', '\\'])
-            .next()
-            .unwrap_or("media")
-            .to_owned(),
-        size: file.size,
-    }
 }
 fn torrent_error(error: String) -> &'static str {
     match error.as_str() {
@@ -423,7 +464,6 @@ impl Drop for ArchiveReadGuard {
 struct ArchiveSource {
     media: RarMedia,
     _reservation: Arc<TorrentCacheReservation>,
-    _torrent: Option<TorrentHandle>,
     reads: Arc<ArchiveReads>,
 }
 impl TorrentRangeSource for ArchiveSource {
@@ -451,7 +491,6 @@ impl TorrentRangeSource for ArchiveSource {
         let guard = self.reads.begin();
         let media = self.media.clone();
         let reservation = self._reservation.clone();
-        let torrent = self._torrent.clone();
         Box::pin(async move {
             let guard = guard?;
             tokio::task::spawn_blocking(move || {
@@ -459,7 +498,6 @@ impl TorrentRangeSource for ArchiveSource {
                 // the async response never cancels this blocking reader.
                 let _guard = guard;
                 let _reservation = reservation;
-                let _torrent = torrent;
                 let media = media;
                 media.read_range(offset, length)
             })
@@ -468,91 +506,6 @@ impl TorrentRangeSource for ArchiveSource {
             .map_err(str::to_owned)
         })
     }
-}
-struct TorrentVolume {
-    handle: TorrentHandle,
-    index: u32,
-    size: u64,
-}
-impl RarVolume for TorrentVolume {
-    fn size(&self) -> u64 {
-        self.size
-    }
-    fn open(&self) -> Result<Box<dyn playback_engine::rar::ReadSeek>, &'static str> {
-        let handle = self.handle.clone();
-        let index = self.index;
-        let runtime = tokio::runtime::Handle::current();
-        Ok(Box::new(RangeReader {
-            position: 0,
-            size: self.size,
-            read: Box::new(move |offset, length| {
-                runtime
-                    .block_on(handle.read_range(index, offset, length))
-                    .map_err(|_| std::io::Error::other("Archive source unavailable"))
-            }),
-        }))
-    }
-}
-fn archive_name(name: &str) -> bool {
-    let lower = name.to_ascii_lowercase();
-    lower.ends_with(".rar")
-        || lower.rsplit_once('.').is_some_and(|(_, ext)| {
-            ext.len() == 3 && ext.starts_with('r') && ext[1..].bytes().all(|b| b.is_ascii_digit())
-        })
-}
-fn archive_volumes(handle: &TorrentHandle) -> Result<Vec<Arc<dyn RarVolume>>, &'static str> {
-    let selected = &handle.selected_file().name;
-    let lower = selected.to_ascii_lowercase();
-    let stem = if let Some((stem, part)) = lower.rsplit_once(".part") {
-        if part.ends_with(".rar") {
-            stem.to_owned()
-        } else {
-            lower.trim_end_matches(".rar").to_owned()
-        }
-    } else {
-        lower
-            .rsplit_once('.')
-            .map(|(stem, _)| stem.to_owned())
-            .ok_or("unsupported_output")?
-    };
-    let mut files: Vec<_> = handle
-        .files()
-        .iter()
-        .filter_map(|file| {
-            let name = file.name.to_ascii_lowercase();
-            let number = if let Some(part) = name
-                .strip_prefix(&format!("{stem}.part"))
-                .and_then(|value| value.strip_suffix(".rar"))
-            {
-                part.parse::<u32>().ok()?
-            } else if name == format!("{stem}.rar") {
-                0
-            } else {
-                name.strip_prefix(&format!("{stem}.r"))?
-                    .parse::<u32>()
-                    .ok()?
-                    .checked_add(1)?
-            };
-            Some((number, file))
-        })
-        .collect();
-    files.sort_by_key(|(number, _)| *number);
-    if files.is_empty()
-        || files.len() > 1024
-        || files.windows(2).any(|pair| pair[1].0 != pair[0].0 + 1)
-    {
-        return Err("unsupported_output");
-    }
-    Ok(files
-        .into_iter()
-        .map(|(_, file)| {
-            Arc::new(TorrentVolume {
-                handle: handle.clone(),
-                index: file.index,
-                size: file.size,
-            }) as Arc<dyn RarVolume>
-        })
-        .collect())
 }
 #[derive(Clone)]
 struct HttpVolume {
@@ -833,7 +786,6 @@ mod tests {
         let stream = LoopbackStream::from_source(Arc::new(ArchiveSource {
             media,
             _reservation: Arc::new(reservation),
-            _torrent: None,
             reads: reads.clone(),
         }))
         .await
@@ -846,8 +798,8 @@ mod tests {
                 name: "clip.mp4".into(),
                 size: 100,
             },
-            _torrent: None,
             _archive: Some(stream),
+            runtime: None,
             reads: reads.clone(),
         });
         sources.resolved.lock().await.insert(
@@ -855,7 +807,6 @@ mod tests {
             CachedSource {
                 source: Arc::downgrade(&source),
                 reads,
-                raw_reads: None,
             },
         );
         armed.store(true, Ordering::Release);

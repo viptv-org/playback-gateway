@@ -3,8 +3,10 @@ package torrentruntime
 
 import (
 	"context"
+	"fmt"
 	"github.com/anacrolix/torrent/metainfo"
 	"net"
+	"net/url"
 	"testing"
 	"time"
 )
@@ -126,5 +128,29 @@ func TestStartupBudgetIncludesReadyEndpointUntilFirstFrame(t *testing.T) {
 		if h.Observe().Error != test.code {
 			t.Fatalf("ready endpoint hid startup timeout: %+v", h.Observe())
 		}
+	}
+}
+
+func TestRepeatedDiscoveryHintsKeepUniqueTrackersAndTierOrder(t *testing.T) {
+	trackers := make([]string, 20)
+	magnet := "magnet:?xt=urn:btih:1111111111111111111111111111111111111111"
+	for i := range trackers {
+		trackers[i] = fmt.Sprintf("https://tracker%d.example/announce", i)
+		magnet += "&tr=" + url.QueryEscape(trackers[i])
+	}
+	spec, err := parseSource(Source{Magnet: magnet, Trackers: trackers})
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, tier := range spec.Trackers {
+		count += len(tier)
+	}
+	if count != 20 {
+		t.Fatal("duplicated add-on and magnet hints changed discovery destinations")
+	}
+	trackers[0] += "#fragment"
+	if _, err = parseSource(Source{Magnet: magnet, Trackers: trackers}); err == nil {
+		t.Fatal("invalid duplicate bypassed validation")
 	}
 }

@@ -229,3 +229,31 @@ copies the size rather than retaining the caller's mutable pointer.
 The complete Go race suite passes (9.879 s), including exact and mismatched
 source-size fixtures. The Rust gateway workspace suite passes. This change
 binds file identity and does not establish client/device latency or rollout.
+
+## Gateway integration checkpoint, 2026-10-09
+
+The gateway's opt-in torrent path now prepares a supervised shared-runtime handle
+and sends its private Range URI through the existing vetted FFmpeg/output bridge.
+The inherited Rust workspace passes with `cargo test --workspace -- --test-threads=1`.
+A parallel run hit the existing legacy Android cache-lock release test while
+other tests spawned processes; its isolated/serial check passes. The new Go race
+suite passes, including duplicate discovery-hint validation.
+
+`python3 scripts/qualify-gateway-torrents.py` passes two owned, real-FFmpeg fixtures:
+HLS video conversion, compatible viewers, independent seek output and decoded
+seek comparison, final teardown, concurrent unrelated metadata preparation,
+and a selected file larger than a 256 KiB rolling cache. The upstream Go seeder
+and private-network worker exist only in a Go test executable. Production native
+artifacts exclude them. These fixtures do not establish public-source speed,
+actual browser/Roku presentation or sustained physical-device behavior.
+
+A retired rqbit seeder fixture intermittently refused fragmented incoming TCP
+handshakes (`NotEnoughData` after a valid 20-byte prefix). This explains that
+fixture's absent-peer failures; it is not asserted as the cause of every reported
+public-swarm timeout. Gateway correctness uses upstream seeding instead of
+patching the legacy transport. See `docs/GATEWAY_TORRENT_RUNTIME.md`.
+
+Magnet/metainfo and add-on tracker hints can overlap. Runtime admission now
+validates and deduplicates those hints before applying the 32-destination bound;
+invalid repeated hints still fail validation. Platform artifacts must be rebuilt
+from this checkpoint before consumers adopt that change.

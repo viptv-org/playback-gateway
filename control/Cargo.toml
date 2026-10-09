@@ -5,6 +5,8 @@ edition = "2021"
 license = "GPL-2.0-only"
 
 [dependencies]
+torrent-runtime-host = { path = "../runtime-host" }
+base64 = "0.22"
 playback-engine = { path = "../engine" }
 axum = { version = "0.7", features = ["macros"] }
 tokio = { version = "1", features = ["full"] }

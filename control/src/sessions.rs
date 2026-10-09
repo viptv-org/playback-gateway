@@ -2,7 +2,7 @@
 //! jobs retain their admission reservation until the engine confirms teardown.
 use crate::{
     credentials::{hash, random_hex, Credentials, Principal, Scope},
-    protocol::{CreateSession, IDLE_GRACE_SECONDS, STARTUP_DEADLINE_SECONDS, VIEWER_LEASE_SECONDS},
+    protocol::{CreateSession, IDLE_GRACE_SECONDS, VIEWER_LEASE_SECONDS},
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -53,6 +53,7 @@ struct Job {
     fingerprint: String,
     state: JobState,
     created: u64,
+    startup_seconds: u64,
     idle_since: Option<u64>,
     viewers: BTreeSet<String>,
     reservations: BTreeSet<String>,
@@ -423,6 +424,7 @@ impl Sessions {
             fingerprint,
             state: JobState::Starting,
             created: now,
+            startup_seconds: request.input.startup_seconds(),
             idle_since: None,
             viewers: BTreeSet::new(),
             reservations: BTreeSet::new(),
@@ -463,7 +465,7 @@ impl Sessions {
             return false;
         };
         if job.state != JobState::Starting
-            || now.saturating_sub(job.created) >= STARTUP_DEADLINE_SECONDS
+            || now.saturating_sub(job.created) >= job.startup_seconds
             || !job.viewers.iter().any(|id| {
                 self.viewers
                     .get(id)
@@ -719,7 +721,7 @@ impl Sessions {
         let mut stopping = Vec::new();
         for job in self.jobs.values_mut() {
             let timed_out = job.state == JobState::Starting
-                && now.saturating_sub(job.created) >= STARTUP_DEADLINE_SECONDS;
+                && now.saturating_sub(job.created) >= job.startup_seconds;
             if (timed_out
                 || job
                     .idle_since
@@ -790,6 +792,9 @@ fn source_identity(request: &CreateSession) -> [u8; 32] {
             headers,
             request.input.live,
             request.input.file_index,
+            request.input.archive_index,
+            request.input.expected_file_size,
+            request.input.trackers,
             request.position_seconds
         ])
         .to_string(),
@@ -866,6 +871,9 @@ mod tests {
                 headers: BTreeMap::new(),
                 live: true,
                 file_index: None,
+                archive_index: None,
+                expected_file_size: None,
+                trackers: Vec::new(),
             },
             output: Output {
                 conversion: crate::protocol::Conversion::Auto,

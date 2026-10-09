@@ -303,16 +303,33 @@ func parseSource(source Source) (*torrent.TorrentSpec, error) {
 		return nil, errors.New("unsupported source discovery field")
 	}
 	spec.Trackers = append(spec.Trackers, source.Trackers)
-	count := 0
+	// Magnets/metainfo and the add-on can repeat the same hints. Preserve tiers
+	// while bounding unique destinations rather than rejecting valid duplicates.
+	seen := map[string]bool{}
+	trackers := make([][]string, 0, len(spec.Trackers))
+	rawCount := 0
 	for _, tier := range spec.Trackers {
+		unique := make([]string, 0, len(tier))
 		for _, tracker := range tier {
-			count++
+			rawCount++
 			u, e := url.Parse(tracker)
-			if count > 32 || len(tracker) > 2048 || e != nil || u.Hostname() == "" || u.User != nil || (u.Scheme != "http" && u.Scheme != "https" && u.Scheme != "udp") {
+			if rawCount > 256 || len(tracker) > 2048 || e != nil || u.Hostname() == "" || u.User != nil || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https" && u.Scheme != "udp") {
 				return nil, errors.New("invalid tracker")
 			}
+			if seen[tracker] {
+				continue
+			}
+			seen[tracker] = true
+			if len(seen) > 32 {
+				return nil, errors.New("invalid tracker")
+			}
+			unique = append(unique, tracker)
+		}
+		if len(unique) > 0 {
+			trackers = append(trackers, unique)
 		}
 	}
+	spec.Trackers = trackers
 	return spec, nil
 }
 

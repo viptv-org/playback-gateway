@@ -1,5 +1,5 @@
 [workspace]
-members = ["engine", "control", "ffi", "torrent-policy", "telemetry"]
+members = ["engine", "control", "ffi", "torrent-policy", "telemetry", "runtime-host"]
 resolver = "2"
 exclude = ["third_party/rqbit"]
 

@@ -6,11 +6,13 @@ this repository. See PROVENANCE.md for the original tested engine source.
 
 ## Implementation status
 
-The shared Go torrent replacement is a separate, inactive
-[qualification candidate](torrent-runtime/README.md). Its
-[ledger](torrent-runtime/QUALIFICATION.md) records measured startup, correctness
-findings and the gates still required before consumer integration. Existing
-transport behavior described below remains the current production path.
+The opt-in gateway torrent path now uses the shared Go runtime, with the same
+immutable engine revision shipped to Android and desktop. It retains the existing
+FFmpeg planner, output sharing and independently authorized viewer delivery.
+See [gateway integration](docs/GATEWAY_TORRENT_RUNTIME.md),
+[qualification](torrent-runtime/QUALIFICATION.md) and
+[deferred performance](docs/TORRENT_PERFORMANCE_FOLLOWUP.md).
+Physical-device qualification and production rollout remain separate.
 
 The standalone service, scoped control/media API and Docker image are implemented
 and locally tested. Do not deploy it publicly until the remaining acceptance
@@ -70,101 +72,47 @@ and remaining format, TLS, hardware, storage and crash-containment acceptance.
 
 ### Opt-in torrent and archive inputs
 
-`TORRENT_ENABLED=true` enables BitTorrent v1 magnets and HTTP(S) `.torrent`
-metainfo. It defaults to false; capabilities report `torrent: false` until
-enabled. Inputs must set `live: false`. Optional `input.file_index` selects a
-payload file; otherwise the largest supported media/archive entry is selected.
-Safe filename/size metadata accompanies the viewer response. FFmpeg consumes a
-private, token-protected loopback Range endpoint; public delivery still uses
-the existing authenticated HLS/progressive viewer paths.
+`TORRENT_ENABLED=true` enables public BitTorrent v1 magnets and HTTP(S) `.torrent`
+inputs. It defaults to false. When enabled, startup must successfully open the
+supervised Go worker before capabilities advertise torrent support. Set
+`TORRENT_WORKER` for a local build; the Docker image includes the pinned Linux
+x86_64 executable and dependency notices.
 
-`TORRENT_CACHE_MAX_BYTES` defaults to 2 GiB, minimum 256 MiB, shared across
-active input reservations and compressed archive spools. The service defaults
-`TORRENT_PIECE_CACHE_BYTES` to 256 MiB per ordinary-video torrent input. Larger
-non-archive torrents use fixed disk slots instead of requiring the full payload
-to fit: active readers share the input, pieces near their positions are fetched,
-and old pieces are evicted and downloaded again when seeking back. Current
-reads, in-flight writes and checksum validation protect their slots. Rolling
-inputs do not advertise or upload pieces, since availability can be evicted.
-The cache must fit at least two complete torrent pieces. Set
-`TORRENT_PIECE_CACHE_BYTES=0` to use full-payload storage for every torrent.
-The engine library opts into rolling storage through `TorrentConfig`.
+Torrent acquisition uses public UDP/HTTP(S) trackers, DHT, PEX and TCP/uTP through
+unmodified anacrolix/torrent. Caller tracker hints are preserved. Private trackers,
+webseeds, alternate source/peer parameters and automatic router mapping are
+outside this release. HTTP metainfo and direct HTTP RAR remain behind the vetted
+egress proxy. Native clients acquire locally and do not use this gateway route.
 
-Torrents containing archive files and small torrents that fit the per-input budget
-retain full-payload reservation/storage. The Android native facade enables the
-same rolling piece cache with exact-file authority and a supplied aggregate cap.
-Compressed archive extraction also reserves its complete verified spool.
-Rolling input does not bound FFmpeg's output spool; media delivery has separate
-limits. See [rolling torrent cache](docs/ROLLING_TORRENT_CACHE.md).
+Inputs must be VOD. `input.file_index` selects a torrent file; otherwise the
+largest file wins, with stable index ties. Optional `trackers`, `archive_index`
+and `expected_file_size` preserve discovery and resolved selection constraints.
+The selected length may exceed device storage. Stored, unencrypted RAR/RAR5,
+including multipart archives, maps member offsets to verified torrent pieces;
+compressed/encrypted entries are specifically refused.
 
-The cache directory is `DATA_DIR/torrent-cache`, private and exclusively locked.
-This is a logical slot/payload/spool budget; filesystem block rounding and
-metadata need a separate operator filesystem limit. Compose supplies a separate
-cache tmpfs, configurable with `TORRENT_SPOOL_SIZE`, in addition to the media
-mount. For disk-backed deployment replace that cache tmpfs with a private,
-quota-limited disk mount; raising a tmpfs limit consumes memory.
-Optional `TORRENT_LISTEN_PORT` opens an inbound TCP peer listener for the first
-active namespace; later namespaces use outbound connections. No peer port is
-published by default.
+`TORRENT_CACHE_MAX_BYTES` remains the aggregate gateway input cache budget,
+default 2 GiB and minimum 256 MiB. The runtime uses piece-addressed storage,
+counts incomplete writes and records, respects free-space reserve, and retains
+verified pieces across stop/restart. The runtime directory is
+`DATA_DIR/torrent-cache/shared-runtime-v2`, with exclusive worker ownership.
+`TORRENT_PIECE_CACHE_BYTES` and `TORRENT_LISTEN_PORT` are legacy comparison
+settings and do not configure the shared Go transport. Output spooling has its
+own independent limits; use the operator filesystem mounts described in
+[bounded media](docs/BOUNDED_MEDIA.md).
 
-Peer/DHT connections are an explicit opt-in exception to HTTP private-address
-denial. HTTP metainfo, redirects and direct stored-RAR ranges still pass the
-existing egress policy. HTTP trackers are stripped before librqbit admission:
-its `disable_trackers` option is ineffective in the pinned version. Private
-tracker torrents and webseed metainfo are refused; librqbit has no webseed
-implementation. Source-provided peers and alternate source parameters are
-refused. One process manager uses per-namespace sessions to prevent librqbit's
-global infohash deduplication from crossing namespace boundaries.
+Preparation has a 120-second torrent budget and the runtime's 60-second
+meaningful-progress limit. Private authority renews while preparation is active;
+viewer leases renew while an authenticated create request opens the output.
+Existing HTTP startup limits remain unchanged. Source metadata acquisition is
+serialized per source identity, allowing unrelated torrents to proceed concurrently.
+The final output closes its private handle; retirement retains admission until
+owned cleanup settles. A stuck worker is terminated, and recovery revalidates cache.
 
-Stored RAR payloads, including ordered multipart volumes, expose member ranges
-without a second payload copy. Compressed torrent archives are fully extracted
-and checksum-verified into a bounded spool before playback; partial-progress
-seeking is unavailable. Direct HTTP RAR supports stored members only. Encrypted
-archives are refused. Native clients can use the torrent-only
-[UniFFI/Kotlin facade](ffi/README.md); its selected-package dependency graph
-excludes archive extraction/unrar-rs. The engine's separate `archive` feature
-remains enabled for the default gateway. Native archive unpacking is outside
-that facade. [Torrent qualification](docs/TORRENT_QUALIFICATION.md) records
-exact test scope and remaining acceptance.
-
-In-process consumers can explicitly request independent exact-file leases with
-`TorrentManager::start_selected_magnet` / `start_selected_metainfo`; each requires
-a metadata file index and owns separate stop state and loopback byte authority.
-Only that file's metadata and bytes are exposed by the returned handle. Repeated
-selected starts share payload/reservation, not tokens. Existing `start_magnet` /
-`start_metainfo` preserve shared-handle and all-file gateway/archive behavior;
-explicit clones always remain aliases. These opt-in APIs do not provide
-cancellable acquisition, bounded joined shutdown or public-only peer/DHT policy,
-and do not qualify a native authorization integration. See the
-[facade boundaries](ffi/README.md#opt-in-independent-selected-file-leases).
-
-The separate strict native path uses `new_native_public` and
-`begin_native_selected_magnet` / `begin_native_selected_metainfo` with an exact
-hash/index/verified size and the caller's remaining monotonic budget. It owns
-cancellation before IO, shares pending exact-file payloads with independent byte
-grants, and exposes joined retirement or sticky failed settlement. Strict foreign
-handles use status polling and refuse callbacks. See
-[owned selected acquisitions](ffi/README.md#owned-strict-selected-acquisitions)
-for the ABI and remaining qualification limits; this does not activate a client
-or establish a bound on arbitrary stalled OS IO.
-
-Native integrations can construct `TorrentManager::new_native_public` and use
-`start_native_selected_magnet` / `start_native_selected_metainfo` with an exact
-canonical hash, file index and verified selected size. These sessions enforce
-public destination policy and bounded metadata at the dependency boundaries,
-suppress tracker/PEX workers and use a versioned bootstrap inventory. They
-require the generic expected selection before payload file access. The separate
-`test-network-policy` build feature permits only exact owned private TCP seeders
-with DHT disabled; production native artifacts exclude it. Backend metadata
-consumers can adopt the lightweight `torrent-policy` crate without the engine.
-See [native network policy](docs/NATIVE_NETWORK_POLICY.md). Acquisition lifetime,
-FFI adoption and physical/public-peer qualification remain independent gates.
-
-The dependency additions are pinned in Cargo.lock. See
-[provenance](PROVENANCE.md) for licensing restrictions. Never enable librqbit
-tracing targets in production: they emit peer addresses and torrent identifiers.
-The service installs no tracing subscriber; embedders must suppress the target
-prefix `librqbit=off` before installing one.
+The old engine/facade remains for native v1 compatibility, development comparison
+and rollback qualification. The gateway API does not acquire torrents through it.
+See [legacy facade](ffi/README.md), [comparison ledger](docs/TORRENT_QUALIFICATION.md)
+and [native v1 policy](docs/NATIVE_NETWORK_POLICY.md).
 
 IPTV inputs can use **HTTP or HTTPS**. Public gateway control and media endpoints
 must sit behind HTTPS ingress. The gateway can fetch plain HTTP upstream while
