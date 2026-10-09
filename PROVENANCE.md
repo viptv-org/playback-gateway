@@ -127,3 +127,15 @@ window while only a few transferred data. These native-only budgets let
 unresponsive candidates release slots promptly. They do not change the
 three-second DHT query budget, thirty-second acquisition deadline, ordinary
 gateway defaults, read authority or source selection.
+
+
+## Continuous loopback readers
+
+The token-protected HTTP Range body retains one torrent reader from the requested
+byte offset through response completion. Each 64 KiB frame advances that same
+reader instead of dropping its download priority and briefly registering another
+reader at byte zero. Standalone range reads also register their actual offset
+before waking peer workers. Existing selected-file authority, verified-piece IO,
+read accounting and owned connection cancellation remain in force. A real-storage
+HTTP-body regression fails when the reader disappears between frames; it also
+checks retired bodies cannot publish another chunk and release their read charge.

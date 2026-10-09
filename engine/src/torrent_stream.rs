@@ -18,7 +18,7 @@ use std::{
 use tokio::{net::TcpListener, sync::Semaphore, task::JoinSet};
 use uuid::Uuid;
 type Body = UnsyncBoxBody<Bytes, io::Error>;
-pub trait TorrentRangeSource: Send + Sync {
+pub trait TorrentRangeSource: Send + Sync + 'static {
     fn file_size(&self, index: u32) -> Option<u64>;
     fn is_closed(&self) -> bool {
         false
@@ -32,6 +32,26 @@ pub trait TorrentRangeSource: Send + Sync {
         offset: u64,
         length: u32,
     ) -> futures::future::BoxFuture<'_, Result<Vec<u8>, String>>;
+    /// Retain one reader's position throughout an HTTP response. Generic range
+    /// providers can use independent reads; torrent storage overrides this.
+    fn read_stream(
+        self: Arc<Self>,
+        index: u32,
+        start: u64,
+        count: u64,
+    ) -> futures::stream::BoxStream<'static, Result<Vec<u8>, String>> {
+        Box::pin(async_stream::try_stream! {
+            let mut offset = start;
+            let end = start.checked_add(count).ok_or("Invalid torrent range".to_owned())?;
+            while offset < end {
+                if self.is_closed() { Err("Torrent stream stopped".to_owned())?; }
+                let bytes = self.read_range(index, offset, (end - offset).min(64 * 1024) as u32).await?;
+                if bytes.is_empty() { Err("Torrent stream truncated".to_owned())?; }
+                offset += bytes.len() as u64;
+                yield bytes;
+            }
+        })
+    }
 }
 pub struct LoopbackStream {
     token: String,
@@ -212,18 +232,7 @@ async fn serve(
     let body = if request.method() == Method::HEAD {
         empty(StatusCode::OK).into_body()
     } else {
-        let stream = async_stream::try_stream! {
-            let mut offset=start; let end=start+count;
-            while offset<end {
-                let Some(state)=source.upgrade().filter(|s|!s.is_closed()) else { Err(io::Error::new(io::ErrorKind::Interrupted,"Torrent stream stopped"))?; unreachable!() };
-                let length=(end-offset).min(64*1024) as u32;
-                let bytes=state.read_range(index,offset,length).await.map_err(io::Error::other)?;
-                if bytes.is_empty(){Err(io::Error::new(io::ErrorKind::UnexpectedEof,"Torrent stream truncated"))?;}
-                offset+=bytes.len() as u64;
-                yield Frame::data(Bytes::from(bytes));
-            }
-        };
-        StreamBody::new(stream).boxed_unsync()
+        range_body(source, index, start, count)
     };
     let mut builder = Response::builder()
         .status(if partial {
@@ -242,6 +251,23 @@ async fn serve(
         );
     }
     Ok(builder.body(body).expect("numeric headers"))
+}
+pub(crate) fn range_body(
+    source: Weak<dyn TorrentRangeSource>,
+    index: u32,
+    start: u64,
+    count: u64,
+) -> Body {
+    let stream = async_stream::try_stream! {
+        use futures::StreamExt;
+        let state = source.upgrade().filter(|s| !s.is_closed())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::Interrupted, "Torrent stream stopped"))?;
+        let mut reader = state.read_stream(index, start, count);
+        while let Some(bytes) = reader.next().await {
+            yield Frame::data(Bytes::from(bytes.map_err(io::Error::other)?));
+        }
+    };
+    StreamBody::new(stream).boxed_unsync()
 }
 fn parse_range(value: &str, size: u64) -> Option<(u64, u64)> {
     let value = value.strip_prefix("bytes=")?;
@@ -292,5 +318,13 @@ impl TorrentRangeSource for HandleState {
         length: u32,
     ) -> futures::future::BoxFuture<'_, Result<Vec<u8>, String>> {
         Box::pin(self.read_range(index, offset, length))
+    }
+    fn read_stream(
+        self: Arc<Self>,
+        index: u32,
+        start: u64,
+        count: u64,
+    ) -> futures::stream::BoxStream<'static, Result<Vec<u8>, String>> {
+        self.range_chunks(index, start, count)
     }
 }

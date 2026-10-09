@@ -567,3 +567,113 @@ async fn native_metadata_peer_is_retained_for_payload_without_second_discovery()
         .unwrap();
     assert_eq!(first, bytes[..128]);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn http_range_keeps_one_torrent_reader_between_body_chunks() {
+    use crate::torrent_stream::{range_body, TorrentRangeSource};
+    use http_body_util::BodyExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let folder = tmp.path().join("owned");
+    std::fs::create_dir(&folder).unwrap();
+    let source = folder.join("owned.mkv");
+    let bytes: Vec<u8> = (0..200_000).map(|n| (n % 251) as u8).collect();
+    std::fs::write(&source, &bytes).unwrap();
+    let metainfo = librqbit::create_torrent(&source, Default::default())
+        .await
+        .unwrap()
+        .as_bytes()
+        .unwrap()
+        .to_vec();
+    let manager = TorrentManager::new(TorrentConfig {
+        enabled: true,
+        cache_dir: tmp.path().join("cache"),
+        enable_dht: false,
+        ..Default::default()
+    })
+    .unwrap();
+    let lock = Arc::new(prepare_cache(&manager.inner.config.cache_dir).unwrap());
+    let session = Session::new_with_opts(
+        folder.clone(),
+        SessionOptions {
+            disable_dht: true,
+            disable_dht_persistence: true,
+            disable_trackers: true,
+            listen_port_range: None,
+            enable_upnp_port_forwarding: false,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let managed = session
+        .add_torrent(
+            AddTorrent::from_bytes(metainfo),
+            Some(AddTorrentOptions {
+                overwrite: true,
+                output_folder: Some(folder.to_str().unwrap().into()),
+                disable_trackers: true,
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap()
+        .into_handle()
+        .unwrap();
+    managed.wait_until_initialized().await.unwrap();
+    let entry = Arc::new(Entry {
+        _cache_lock: lock,
+        session: session.clone(),
+        managed,
+        files: vec![TorrentFile {
+            index: 0,
+            name: "owned.mkv".into(),
+            size: bytes.len() as u64,
+        }],
+        folder,
+        size: bytes.len() as u64,
+        users: AtomicUsize::new(0),
+        readers: AtomicUsize::new(0),
+        idle_since: std::sync::Mutex::new(std::time::Instant::now()),
+        handles: std::sync::Mutex::new(HashMap::new()),
+    });
+    let handle = manager
+        .lease_entry(entry.clone(), 0, LeaseMode::SelectedFile)
+        .await
+        .unwrap();
+    let source: Arc<dyn TorrentRangeSource> = handle.state.clone();
+    let mut body = range_body(Arc::downgrade(&source), 0, 70_000, 130_000);
+    let first = body.frame().await.unwrap().unwrap().into_data().unwrap();
+    assert_eq!(first.as_ref(), &bytes[70_000..135_536]);
+    assert_eq!(
+        entry.readers.load(Ordering::Acquire),
+        1,
+        "HTTP chunks must retain the decoder's current torrent reader"
+    );
+    assert!(handle.read_settler().has_pending_reads());
+    let second = body.frame().await.unwrap().unwrap().into_data().unwrap();
+    assert_eq!(second.as_ref(), &bytes[135_536..]);
+    drop(body);
+    assert_eq!(entry.readers.load(Ordering::Acquire), 0);
+    let mut cancelled_body = range_body(Arc::downgrade(&source), 0, 0, 130_000);
+    assert!(cancelled_body.frame().await.unwrap().is_ok());
+    handle.stop();
+    assert!(handle.read_settler().closed_reads_pending());
+    assert!(
+        cancelled_body.frame().await.unwrap().is_err(),
+        "a retired reader cannot publish another HTTP chunk"
+    );
+    drop(cancelled_body);
+    assert_eq!(entry.readers.load(Ordering::Acquire), 0);
+    assert_eq!(
+        handle
+            .stop_and_settle_until(tokio::time::Instant::now() + Duration::from_secs(2))
+            .await,
+        Settlement::Settled
+    );
+    assert_eq!(
+        session
+            .shutdown_and_settle_until(tokio::time::Instant::now() + Duration::from_secs(2))
+            .await,
+        Settlement::Settled
+    );
+}

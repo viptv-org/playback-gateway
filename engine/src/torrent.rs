@@ -41,7 +41,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
-    io::{AsyncReadExt, AsyncSeekExt},
+    io::AsyncReadExt,
     sync::{Mutex, Notify, OnceCell},
     time::timeout,
 };
@@ -1038,6 +1038,41 @@ impl HandleState {
         }
         self.entry.files.get(index as usize)
     }
+    pub(crate) fn range_chunks(
+        self: Arc<Self>,
+        index: u32,
+        offset: u64,
+        count: u64,
+    ) -> futures::stream::BoxStream<'static, Result<Vec<u8>, String>> {
+        Box::pin(async_stream::try_stream! {
+            let _operation = self.io_tasks.register().ok_or("Torrent stream stopped".to_owned())?;
+            if self.stopped.load(Ordering::Acquire) { Err("Torrent stream stopped".to_owned())?; }
+            let file = self.file(index).ok_or("Invalid torrent file index".to_owned())?;
+            let end = offset.checked_add(count).filter(|end| *end <= file.size)
+                .ok_or("Invalid torrent range".to_owned())?;
+            self.entry.readers.fetch_add(1, Ordering::AcqRel);
+            self.reads.active.fetch_add(1, Ordering::AcqRel);
+            let _reader = TorrentReadGuard { reads: self.reads.clone(), entry: self.entry.clone(), manager: self.manager.clone() };
+            if self.stopped.load(Ordering::Acquire) { Err("Torrent stream stopped".to_owned())?; }
+            let mut reader = self.entry.managed.clone().stream_at(index as usize, offset)
+                .map_err(|_| "Torrent stream unavailable".to_owned())?;
+            let mut position = offset;
+            while position < end {
+                let mut bytes = vec![0; (end - position).min(64 * 1024) as usize];
+                let result = tokio::select! {
+                    biased;
+                    _ = self.io_tasks.cancellation_token().cancelled() => Err("Torrent stream stopped".to_owned()),
+                    result = timeout(READ_TIMEOUT, reader.read_exact(&mut bytes)) => result
+                        .map_err(|_| "Torrent read timed out".to_owned())
+                        .and_then(|read| read.map_err(|_| "Torrent read failed".to_owned())),
+                };
+                result?;
+                if self.stopped.load(Ordering::Acquire) { Err("Torrent stream stopped".to_owned())?; }
+                position += bytes.len() as u64;
+                yield bytes;
+            }
+        })
+    }
     pub(crate) async fn read_range(
         &self,
         index: u32,
@@ -1072,12 +1107,8 @@ impl HandleState {
                     .entry
                     .managed
                     .clone()
-                    .stream(index as usize)
+                    .stream_at(index as usize, offset)
                     .map_err(|_| "Torrent stream unavailable")?;
-                reader
-                    .seek(std::io::SeekFrom::Start(offset))
-                    .await
-                    .map_err(|_| "Torrent seek failed")?;
                 let mut bytes = vec![0; count];
                 timeout(READ_TIMEOUT, reader.read_exact(&mut bytes))
                     .await

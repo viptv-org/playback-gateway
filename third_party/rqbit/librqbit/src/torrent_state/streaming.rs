@@ -378,6 +378,12 @@ impl ManagedTorrent {
     }
 
     pub fn stream(self: Arc<Self>, file_id: usize) -> anyhow::Result<FileStream> {
+        self.stream_at(file_id, 0)
+    }
+
+    /// Publish the desired position before notifying download workers, so a
+    /// range reader never temporarily prioritizes the beginning of the file.
+    pub fn stream_at(self: Arc<Self>, file_id: usize, position: u64) -> anyhow::Result<FileStream> {
         if self.retired.load(Ordering::Acquire) {
             anyhow::bail!("torrent is retired");
         }
@@ -393,12 +399,13 @@ impl ManagedTorrent {
             |_fd, fi| (fi.len, fi.offset_in_torrent),
             &metadata,
         )?;
+        anyhow::ensure!(position <= fd_len, "invalid stream position");
         let streams = self.streams()?;
         let s = FileStream {
             stream_id: streams.next_id(),
             streams: streams.clone(),
             file_id,
-            position: 0,
+            position,
 
             file_len: fd_len,
             file_torrent_abs_offset: fd_offset,
@@ -413,7 +420,7 @@ impl ManagedTorrent {
             s.stream_id,
             StreamState {
                 file_id,
-                position: 0,
+                position,
                 waker: None,
                 file_len: fd_len,
                 file_abs_offset: fd_offset,
