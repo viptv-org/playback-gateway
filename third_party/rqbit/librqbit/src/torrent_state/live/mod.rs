@@ -129,12 +129,13 @@ fn piece_takeover_due(
     average: Option<Duration>,
     threshold: f64,
     native_current: bool,
+    idle: Duration,
 ) -> bool {
-    if native_current {
+    if native_current && idle >= Duration::from_secs(2) {
         // The decoder must not wait for a speed sample from an idle/slow initial
         // owner while faster peers download unrelated lookahead pieces. The native
-        // caller supplies time since the last newly accepted chunk, not piece age.
-        return elapsed >= Duration::from_secs(2);
+        // idle duration measures the last newly accepted chunk, not piece age.
+        return true;
     }
     average.is_some_and(|average| elapsed.as_secs_f64() > average.as_secs_f64() * threshold)
 }
@@ -146,25 +147,52 @@ mod native_idle_recovery_tests;
 mod startup_piece_tests {
     use super::*;
     #[test]
-    fn decoder_current_piece_can_move_before_first_speed_sample() {
-        assert!(piece_takeover_due(Duration::from_secs(3), None, 10., true));
-        assert!(!piece_takeover_due(
-            Duration::from_millis(500),
-            None,
-            10.,
-            true
-        ));
-        assert!(!piece_takeover_due(
+    fn progressing_decoder_piece_can_move_to_measured_faster_peer() {
+        assert!(piece_takeover_due(
             Duration::from_secs(3),
-            None,
+            Some(Duration::from_millis(100)),
             10.,
-            false
+            true,
+            Duration::from_millis(100)
         ));
         assert!(!piece_takeover_due(
             Duration::from_secs(3),
             Some(Duration::from_secs(1)),
             10.,
-            false
+            true,
+            Duration::from_millis(100)
+        ));
+    }
+
+    #[test]
+    fn decoder_current_piece_can_move_before_first_speed_sample() {
+        assert!(piece_takeover_due(
+            Duration::from_secs(3),
+            None,
+            10.,
+            true,
+            Duration::from_secs(3)
+        ));
+        assert!(!piece_takeover_due(
+            Duration::from_millis(500),
+            None,
+            10.,
+            true,
+            Duration::from_millis(500)
+        ));
+        assert!(!piece_takeover_due(
+            Duration::from_secs(3),
+            None,
+            10.,
+            false,
+            Duration::from_secs(3)
+        ));
+        assert!(!piece_takeover_due(
+            Duration::from_secs(3),
+            Some(Duration::from_secs(1)),
+            10.,
+            false,
+            Duration::from_secs(3)
         ));
     }
 }
@@ -1484,20 +1512,14 @@ impl PeerHandler {
                 .filter(|(id, r)| {
                     r.peer != self.addr && available.get(id.get_usize()).is_some_and(|have| *have)
                 })
-                .map(|(p, r)| {
-                    let elapsed = if native && current.contains(p) {
-                        r.last_progress.elapsed()
-                    } else {
-                        r.started.elapsed()
-                    };
-                    (p, elapsed, r)
-                })
-                .filter(|(id, elapsed, _)| {
+                .map(|(p, r)| (p, r.started.elapsed(), r))
+                .filter(|(id, elapsed, request)| {
                     piece_takeover_due(
                         *elapsed,
                         my_avg_time,
                         threshold,
                         native && current.contains(id),
+                        request.last_progress.elapsed(),
                     )
                 })
                 .max_by_key(|(id, elapsed, _)| (native && current.contains(id), *elapsed))?;
@@ -1508,6 +1530,7 @@ impl PeerHandler {
                 my_avg_time,
                 threshold,
                 native && current.contains(idx),
+                piece_req.last_progress.elapsed(),
             ) {
                 // If the piece is locked and someone is actively writing to disk, don't steal it.
                 if let Some(_g) = self.state.per_piece_locks[idx.get_usize()].try_write() {
