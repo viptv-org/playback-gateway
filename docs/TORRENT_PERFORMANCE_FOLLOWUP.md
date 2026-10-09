@@ -76,3 +76,25 @@ physical-device qualification, general swarm reliability or production rollout.
 
 The Android integration and qualification details are recorded in
 `android/docs/TORRENT_RUNTIME_V2.md` in the organization workspace.
+
+## Linux desktop integration observations, 2026-10-09
+
+The bundled Linux app's real Rust host and native plugin decoded the original
+private failing H.264 source. One cold MPV trial reached its local endpoint in
+12.9 s and rendered frames in 18.8 s. Retained cache gave GStreamer an endpoint
+in 0.232 s and rendered frames in 3.37 s; a 120-second forward seek required
+58.0 s for new rendered frames after position landing. MPV opened retained cache
+in 0.411 s, but two forward-seek checks failed the subsequent-frame gate within
+60 s. A later MPV trial produced rendered destination frames after 20.4 s.
+The earlier failures remain an open reliability investigation; a later success
+does not establish consistent seeking.
+
+These app-window checks exercise the worker/native decoder path directly. They
+exclude backend account/source-screen admission, use a software-rendered owned
+Xvfb display and are single observations. Engine/cache differences prevent a
+cold/warm or Stremio speed comparison. Prioritize MPV seek behavior, then repeat
+cold/warm/seek trials and actual authenticated web/Roku delivery qualification.
+
+The Linux check also caught and fixed a Rust host startup-protocol defect:
+the production worker's readiness banner must be consumed before the first
+control reply. Shared-host regression and gateway fixtures now include it.

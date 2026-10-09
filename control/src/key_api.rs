@@ -99,11 +99,19 @@ impl IntoResponse for ApiError {
             | "invalid_position"
             | "invalid_namespace"
             | "invalid_idempotency_key" => StatusCode::BAD_REQUEST,
-            "unsupported_output" => StatusCode::UNPROCESSABLE_ENTITY,
+            "unsupported_output"
+            | "compressed_archive_unsupported"
+            | "encrypted_archive_unsupported"
+            | "archive_volume_missing"
+            | "archive_metadata_invalid" => StatusCode::UNPROCESSABLE_ENTITY,
             "viewer_capacity" | "input_capacity" | "output_capacity" | "torrent_cache_capacity" => {
                 StatusCode::TOO_MANY_REQUESTS
             }
-            "startup_timeout" => StatusCode::GATEWAY_TIMEOUT,
+            "startup_timeout"
+            | "torrent_no_peers"
+            | "torrent_metadata_timeout"
+            | "torrent_archive_timeout"
+            | "torrent_buffering_timeout" => StatusCode::GATEWAY_TIMEOUT,
             "source_preparation_failed" | "processing_failed" | "media_unavailable" => {
                 StatusCode::BAD_GATEWAY
             }
