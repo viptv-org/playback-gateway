@@ -149,14 +149,6 @@ five-second idle wait fails that regression, while the one-second retry passes
 and joins consumer/seeder shutdown. Ordinary gateway retry timing is unchanged.
 
 
-Native stream lookahead is capped at 16 MiB per reader, while retaining at least
-one complete verified piece and the existing 256 MiB input reservation. The
-rolling cache size must not allocate 128 MiB of future work that competes with
-startup/preroll ranges. Ordinary gateway lookahead and cache admission remain
-unchanged. Public-swarm measurements qualify transfer benefit separately from
-artifact integrity and owned range/retirement tests.
-
-
 Native piece takeovers request only chunks still missing from the selected
 piece. Previously received chunks stay private until complete-piece hashing;
 owned wire fixtures verify the receiver does not expose a partial prefix and

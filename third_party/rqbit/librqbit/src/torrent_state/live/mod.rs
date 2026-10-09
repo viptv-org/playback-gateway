@@ -1406,16 +1406,7 @@ impl PeerHandler {
                     let priority_streamed_pieces = self
                         .state
                         .streams
-                        .iter_next_pieces(
-                            &self.state.lengths,
-                            self.state.files.rolling_capacity(),
-                            self.state
-                                .shared
-                                .connector
-                                .network_policy
-                                .is_native()
-                                .then_some(16 * 1024 * 1024),
-                        )
+                        .iter_next_pieces(&self.state.lengths, self.state.files.rolling_capacity())
                         .filter(|pid| {
                             !chunk_tracker.is_piece_have(*pid)
                                 && !g.inflight_pieces.contains_key(pid)
