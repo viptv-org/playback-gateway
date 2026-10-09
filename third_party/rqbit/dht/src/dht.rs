@@ -522,9 +522,20 @@ impl<C: RecursiveRequestCallbacks> RecursiveRequest<C> {
 
         let response = match response {
             Ok(ResponseOrError::Response(r)) => r,
-            Ok(ResponseOrError::Error(e)) => bail!("error response: {:?}", e),
+            Ok(ResponseOrError::Error(e)) => {
+                if id.is_none() && self.dht.network_policy.is_native() {
+                    self.bootstrap_seeded.write().remove(&addr);
+                }
+                bail!("error response: {:?}", e)
+            }
             Err(e) => {
                 self.mark_node_error(addr);
+                // A lost first query must not permanently suppress the only
+                // vetted roots of a cold lookup. The looper retries after the
+                // bounded request has finished, without duplicate active probes.
+                if id.is_none() && self.dht.network_policy.is_native() {
+                    self.bootstrap_seeded.write().remove(&addr);
+                }
                 return Err(e);
             }
         };
@@ -1709,6 +1720,59 @@ mod native_policy_tests {
         );
         assert_eq!(
             result.expect("native lookup stopped before the reachable seeded peer"),
+            Some("1.0.0.1:7000".parse().unwrap())
+        );
+    }
+
+    #[tokio::test]
+    async fn native_lost_bootstrap_query_retries_before_metadata_deadline() {
+        let (sender, mut receiver) = unbounded_channel();
+        let state = isolated_state(sender);
+        state
+            .bootstrap_roots
+            .write()
+            .push("1.1.1.1:6000".parse().unwrap());
+        let driver = tokio::spawn({
+            let state = state.clone();
+            async move {
+                let mut dropped = false;
+                while let Some(packet) = receiver.recv().await {
+                    if !dropped {
+                        dropped = true;
+                        continue;
+                    }
+                    state
+                        .on_received_message(
+                            Message {
+                                transaction_id: packet.message.transaction_id.clone(),
+                                version: None,
+                                ip: None,
+                                kind: MessageKind::Response(Response {
+                                    id: Id20::new([7; 20]),
+                                    values: Some(vec![bprotocol::CompactPeerInfo {
+                                        addr: "1.0.0.1:7000".parse().unwrap(),
+                                    }]),
+                                    ..Default::default()
+                                }),
+                            },
+                            packet.addr,
+                        )
+                        .unwrap();
+                }
+            }
+        });
+        let mut peers = state.get_peers(Id20::new([255; 20]), None);
+        let result = tokio::time::timeout(Duration::from_secs(6), peers.next()).await;
+        drop(peers);
+        driver.abort();
+        let _ = driver.await;
+        assert!(
+            state
+                .shutdown_and_wait_until(tokio::time::Instant::now() + Duration::from_secs(1))
+                .await
+        );
+        assert_eq!(
+            result.expect("one lost bootstrap query disabled all retries until metadata timed out"),
             Some("1.0.0.1:7000".parse().unwrap())
         );
     }
