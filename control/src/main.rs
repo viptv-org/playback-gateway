@@ -117,7 +117,7 @@ fn main() {
     // Engine warnings contain closed categories, not source URLs or headers.
     // Exclude dependency transport events and arbitrary environment filters.
     tracing_subscriber::fmt()
-        .with_env_filter("off,playback_engine=warn")
+        .with_env_filter("off,playback_engine=info,playback_gateway=info,service_telemetry=warn")
         .with_ansi(false)
         .init();
     let result = Settings::read().and_then(|settings| {
@@ -219,6 +219,22 @@ async fn run(settings: Settings) -> Result<(), &'static str> {
         )
         .map_err(|_| "credential permissions unavailable")?;
     }
+    let telemetry = match service_telemetry::Telemetry::initialize(
+        service_telemetry::Service::Gateway,
+        settings.data.join("observability-budget.json"),
+    )
+    .await
+    {
+        Ok(telemetry) => telemetry,
+        Err(reason) => {
+            tracing::warn!(?reason, "Optional observability disabled");
+            service_telemetry::Telemetry::default()
+        }
+    };
+    tracing::info!(
+        observability_enabled = telemetry.enabled(),
+        "Optional observability configured"
+    );
     let engine = PlaybackManager::new_with_hardware_and_replay_budget(
         Config {
             ffmpeg: settings.ffmpeg,
@@ -254,23 +270,31 @@ async fn run(settings: Settings) -> Result<(), &'static str> {
     let app = api::router(Api {
         workers: workers.clone(),
         ready: ready.clone(),
-    });
+    })
+    .layer(axum::middleware::from_fn_with_state(
+        telemetry.clone(),
+        service_telemetry::middleware::observe,
+    ));
     let (stop, mut stopped) = tokio::sync::watch::channel(false);
     let reaper = {
         let workers = workers.clone();
         let ready = ready.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(1));
-            loop {
-                tokio::select! {
-                    _ = stopped.changed() => break,
-                    _ = interval.tick() => {
-                        let Some(now) = SystemTime::now().duration_since(UNIX_EPOCH).ok().map(|elapsed| elapsed.as_secs()) else { ready.store(false, Ordering::Release); continue; };
-                        ready.store(workers.reap(now).await.is_ok(), Ordering::Release);
+        let background_context = telemetry.background_context();
+        tokio::spawn(service_telemetry::in_context(
+            background_context,
+            async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(1));
+                loop {
+                    tokio::select! {
+                        _ = stopped.changed() => break,
+                        _ = interval.tick() => {
+                            let Some(now) = SystemTime::now().duration_since(UNIX_EPOCH).ok().map(|elapsed| elapsed.as_secs()) else { ready.store(false, Ordering::Release); continue; };
+                            ready.store(workers.reap(now).await.is_ok(), Ordering::Release);
+                        }
                     }
                 }
-            }
-        })
+            },
+        ))
     };
     let shutdown_ready = ready.clone();
     let (shutdown_started, mut shutdown_requested) = tokio::sync::watch::channel(false);
@@ -300,6 +324,7 @@ async fn run(settings: Settings) -> Result<(), &'static str> {
     let _ = stop.send(true);
     let _ = reaper.await;
     workers.shutdown().await;
+    telemetry.shutdown().await;
     result
 }
 async fn shutdown_signal() {

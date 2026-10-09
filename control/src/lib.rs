@@ -1,5 +1,6 @@
 pub mod api;
 pub mod credentials;
+mod diagnostics;
 pub mod key_api;
 pub mod network;
 pub mod protocol;

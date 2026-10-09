@@ -160,6 +160,28 @@ impl Workers {
         idempotency: &str,
         now: u64,
     ) -> Result<Viewer, &'static str> {
+        let observation = service_telemetry::observe(service_telemetry::Operation::GatewayPrepare);
+        let context = observation.context();
+        let outcome = service_telemetry::in_context(
+            context,
+            self.create_inner(principal, request, idempotency, now),
+        )
+        .await;
+        observation.finish(match &outcome {
+            Ok(_) => service_telemetry::Outcome::Success,
+            Err(code) => {
+                service_telemetry::Outcome::Failed(service_telemetry::Failure::from_code(code))
+            }
+        });
+        outcome
+    }
+    async fn create_inner(
+        &self,
+        principal: &Principal,
+        request: &CreateSession,
+        idempotency: &str,
+        now: u64,
+    ) -> Result<Viewer, &'static str> {
         request.validate()?;
         principal.require(&request.namespace, Scope::Create)?;
         self.require_active(principal, now).await?;
@@ -346,7 +368,17 @@ impl Workers {
             complete: false,
         };
         let remaining = deadline.saturating_sub(started.elapsed());
+        let operation = service_telemetry::observe(service_telemetry::Operation::EngineStart);
         let outcome = tokio::time::timeout(remaining, prepared.start()).await;
+        match &outcome {
+            Ok(Ok(response)) => {
+                operation.processing(&response.video_mode, &response.audio_mode);
+                operation.finish(service_telemetry::Outcome::Success);
+            }
+            _ => operation.finish(service_telemetry::Outcome::Failed(
+                service_telemetry::Failure::Decode,
+            )),
+        }
         let response = match outcome {
             Ok(Ok(response)) => response,
             _ => return Err("processing_failed"),
@@ -420,7 +452,15 @@ impl Workers {
             .map(|(job, response)| (job.clone(), response.id.clone()))
             .collect();
         for (job, id) in active {
-            if !self.engine.heartbeat(&id).await {
+            let health = service_telemetry::observe(service_telemetry::Operation::EngineHealth);
+            let alive = self.engine.heartbeat(&id).await;
+            health.finish(if alive {
+                service_telemetry::Outcome::Success
+            } else {
+                service_telemetry::Outcome::Failed(service_telemetry::Failure::Decode)
+            });
+            if !alive {
+                tracing::warn!(job_tag = %crate::diagnostics::tag(&job), engine_tag = %crate::diagnostics::tag(&id), "Output engine heartbeat lost; failing viewers");
                 self.sessions
                     .lock()
                     .map_err(|_| "session_store_unavailable")?

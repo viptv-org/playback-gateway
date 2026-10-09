@@ -110,6 +110,11 @@ impl IntoResponse for ApiError {
             "request_too_large" => StatusCode::PAYLOAD_TOO_LARGE,
             _ => StatusCode::SERVICE_UNAVAILABLE,
         };
+        tracing::warn!(
+            error_code = self.0,
+            status = status.as_u16(),
+            "Gateway rejected operation"
+        );
         (status, Json(serde_json::json!({"error": {"code": self.0}}))).into_response()
     }
 }
