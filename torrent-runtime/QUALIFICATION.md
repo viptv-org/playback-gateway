@@ -290,3 +290,14 @@ revocation proof. Advisory progress also arrived through that path as measured
 peer/metadata/buffering transitions. Gateway scope/cancellation and backend
 cross-account/no-renewal tests cover its independent routes; native v1 envelopes
 are unchanged. Physical Roku/Windows presentation remains separately unverified.
+
+## Durable resolved selection
+
+The runtime persists the resolved torrent-file/archive-member indices and lengths
+as a checksummed record in the same bounded cache. Explicit and automatic input
+constraints have separate keys. On restart it revalidates the retained choice
+against authenticated torrent metadata and archive lengths before exposing bytes.
+Records contain no playback authority or source credentials, and are excluded
+from payload-progress counters. Race tests cover restart reuse, inconsistent
+index refusal and stored archive-member records; the real gateway media fixtures
+continue to pass. Platform artifacts must adopt this source checkpoint together.

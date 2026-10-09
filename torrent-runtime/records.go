@@ -3,6 +3,8 @@ package torrentruntime
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -147,7 +149,41 @@ func (r *Runtime) saveRouting() {
 
 // Metadata/routing residency never enters verified payload-progress counters.
 func payloadRecord(key string) bool {
-	return !strings.HasSuffix(key, "-ffffffff") && key != routingRecord
+	return !strings.HasSuffix(key, "-ffffffff") && !strings.HasSuffix(key, "-fffffffd") && key != routingRecord
 }
 
 var _ io.ReaderAt = (*verifiedReader)(nil)
+
+// Selection is content identity, never a lease or source credential. Each input
+// selection constraint has its own durable, budgeted record.
+type resolvedSelection struct {
+	Hash         string `json:"hash"`
+	FileIndex    int    `json:"file_index"`
+	ArchiveIndex *int   `json:"archive_index"`
+	Length       int64  `json:"length"`
+	OuterLength  int64  `json:"outer_length"`
+}
+
+func selectionRecord(hash string, fileIndex, archiveIndex *int) string {
+	data, _ := json.Marshal(struct {
+		Hash          string
+		File, Archive *int
+	}{hash, fileIndex, archiveIndex})
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:20]) + "-fffffffd"
+}
+func (h *Handle) restoreSelection(key string) *resolvedSelection {
+	raw := h.r.cache.readRecord(key, 1024)
+	var selected resolvedSelection
+	if len(raw) == 0 || json.Unmarshal(raw, &selected) != nil || selected.Hash != h.t.InfoHash().HexString() || selected.FileIndex < 0 || selected.FileIndex > 65535 || selected.Length <= 0 || selected.OuterLength <= 0 || (selected.ArchiveIndex != nil && (*selected.ArchiveIndex < 0 || *selected.ArchiveIndex > 65535)) {
+		return nil
+	}
+	return &selected
+}
+func (h *Handle) saveSelection(key string, fileIndex int, archiveIndex *int, length, outerLength int64) error {
+	data, err := json.Marshal(resolvedSelection{h.t.InfoHash().HexString(), fileIndex, archiveIndex, length, outerLength})
+	if err != nil {
+		return err
+	}
+	return h.r.cache.writeRecord(key, data)
+}

@@ -417,12 +417,12 @@ func (r *Runtime) Prepare(parent context.Context, source Source, expires time.Ti
 		v := *source.ExpectedFileSize
 		expectedSize = &v
 	}
-	go h.prepare(index, archiveIndex, expectedSize)
+	go h.prepare(index, archiveIndex, expectedSize, selectionRecord(t.InfoHash().HexString(), index, archiveIndex))
 	go h.watch()
 	return h, nil
 }
 
-func (h *Handle) prepare(index, archiveIndex *int, expectedSize *int64) {
+func (h *Handle) prepare(index, archiveIndex *int, expectedSize *int64, selectionKey string) {
 	defer close(h.done)
 	select {
 	case <-h.ctx.Done():
@@ -443,6 +443,20 @@ func (h *Handle) prepare(index, archiveIndex *int, expectedSize *int64) {
 		h.fail("invalid_metadata")
 		return
 	}
+	retained := h.restoreSelection(selectionKey)
+	if retained != nil {
+		value := retained.FileIndex
+		if index != nil && *index != value {
+			h.fail("file_index_unavailable")
+			return
+		}
+		index = &value
+		if archiveIndex != nil && (retained.ArchiveIndex == nil || *archiveIndex != *retained.ArchiveIndex) {
+			h.fail("archive_index_unavailable")
+			return
+		}
+		archiveIndex = retained.ArchiveIndex
+	}
 	selected := 0
 	if index != nil {
 		selected = *index
@@ -458,6 +472,10 @@ func (h *Handle) prepare(index, archiveIndex *int, expectedSize *int64) {
 		}
 	}
 	f := files[selected]
+	if retained != nil && retained.OuterLength != f.Length() {
+		h.fail("file_index_unavailable")
+		return
+	}
 	if expectedSize != nil && f.Length() != *expectedSize {
 		h.fail("file_index_unavailable")
 		return
@@ -488,6 +506,17 @@ func (h *Handle) prepare(index, archiveIndex *int, expectedSize *int64) {
 		}
 	} else if archiveIndex != nil {
 		h.fail("invalid_archive_selection")
+		return
+	}
+	if retained != nil && retained.Length != length {
+		h.fail("archive_index_unavailable")
+		return
+	}
+	if h.ctx.Err() != nil {
+		return
+	}
+	if err := h.saveSelection(selectionKey, selected, resolvedArchiveIndex, length, f.Length()); err != nil {
+		h.fail("metadata_cache_unavailable")
 		return
 	}
 	h.mu.Lock()

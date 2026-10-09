@@ -22,10 +22,10 @@ func TestGatewayQualificationWorker(t *testing.T) {
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 65536), MaxControlBytes)
 	controller := &Controller{}
-    writer := bufio.NewWriter(os.Stdout)
-    fmt.Fprintln(writer, `{"version":2,"ready":true,"qualification":"candidate"}`)
-    writer.Flush()
-    for scanner.Scan() {
+	writer := bufio.NewWriter(os.Stdout)
+	fmt.Fprintln(writer, `{"version":2,"ready":true,"qualification":"candidate"}`)
+	writer.Flush()
+	for scanner.Scan() {
 		var request command
 		data := scanner.Bytes()
 		var response []byte

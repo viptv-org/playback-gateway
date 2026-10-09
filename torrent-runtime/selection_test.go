@@ -4,6 +4,7 @@ package torrentruntime
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -143,5 +144,69 @@ func TestExpectedSourceSizeIsBoundBeforeServingOrArchiveParsing(t *testing.T) {
 	if h, err := r.Prepare(context.Background(), Source{Metainfo: raw, FileIndex: &index, ExpectedFileSize: &invalid}, time.Now().Add(time.Minute)); err == nil {
 		h.Close()
 		t.Fatal("invalid source length admitted")
+	}
+}
+
+func TestResolvedSelectionSurvivesRestartAndIsRevalidated(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "small.bin"), bytes.Repeat([]byte("s"), 4096), 0600)
+	os.WriteFile(filepath.Join(dir, "large.bin"), bytes.Repeat([]byte("l"), 8192), 0600)
+	seed, raw := seedPath(t, dir, false)
+	root := t.TempDir()
+	r, err := newRuntime(Config{CacheDir: root, CacheBytes: 64 << 10, ReadaheadBytes: 4096}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := readyHandle(t, r, raw)
+	resolved := h.Observe()
+	hash := h.t.InfoHash().HexString()
+	key := selectionRecord(hash, nil, nil)
+	stored := h.restoreSelection(key)
+	if stored == nil || stored.FileIndex != resolved.FileIndex || stored.Length != resolved.Length {
+		t.Fatal("ready selection was not persisted")
+	}
+	if payloadRecord(key) {
+		t.Fatal("selection record was mistaken for verified payload progress")
+	}
+	r.Close()
+	seed.Close()
+	r, err = newRuntime(Config{CacheDir: root, CacheBytes: 64 << 10, ReadaheadBytes: 4096}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	h, err = r.Prepare(context.Background(), Source{Magnet: "magnet:?xt=urn:btih:" + hash}, time.Now().Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-h.done:
+	case <-time.After(time.Second):
+		t.Fatal("recorded selection required fresh metadata")
+	}
+	if got := h.Observe(); !got.Ready || got.FileIndex != stored.FileIndex || got.Length != stored.Length {
+		t.Fatal("restart did not retain resolved identity")
+	}
+	// A well-formed but inconsistent record cannot select an unavailable file.
+	stored.FileIndex = 99
+	data, _ := json.Marshal(stored)
+	if err := r.cache.writeRecord(key, data); err != nil {
+		t.Fatal(err)
+	}
+	another, err := r.Prepare(context.Background(), Source{Magnet: "magnet:?xt=urn:btih:" + hash}, time.Now().Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-another.done:
+	case <-time.After(time.Second):
+		t.Fatal("inconsistent selection did not settle")
+	}
+	if another.Observe().Ready || another.Observe().Error != "file_index_unavailable" {
+		t.Fatal("inconsistent retained selection was served")
+	}
+	explicit := 0
+	if selectionRecord(hash, &explicit, nil) == key {
+		t.Fatal("explicit and automatic selection constraints shared a record")
 	}
 }

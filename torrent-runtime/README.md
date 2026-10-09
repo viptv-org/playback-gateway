@@ -105,3 +105,8 @@ commit corpus identities, media URLs, decoded output or raw peer logs. The
 ordinary test suite uses locally owned data and peers. See
 [research](../docs/TORRENT_RUNTIME_RESEARCH.md) for source citations and the
 comparison methodology.
+
+Resolved file/member selections persist independently of authority as budgeted,
+checksummed cache records. Restarts reuse that tuple and revalidate it against
+torrent/archive metadata; missing records resolve the same immutable content
+using explicit-index/largest rules. No selection record permits media access.

@@ -84,6 +84,10 @@ func TestStoredArchiveTorrentRanges(t *testing.T) {
 			if selection == nil || *selection != 0 {
 				t.Fatal("resolved archive selection was not reported")
 			}
+			retained := h.restoreSelection(selectionRecord(h.t.InfoHash().HexString(), &index, nil))
+			if retained == nil || retained.ArchiveIndex == nil || *retained.ArchiveIndex != 0 || retained.Length != int64(len(expected)) {
+				t.Fatal("resolved archive member was not persisted")
+			}
 			*selection = 9
 			if *h.Observe().ArchiveIndex != 0 {
 				t.Fatal("observed selection mutated live identity")
