@@ -283,6 +283,13 @@ impl ChunkTracker {
         }
     }
 
+    /// Received chunks remain private until the complete piece passes its hash.
+    pub(crate) fn is_chunk_received(&self, chunk: &ChunkInfo) -> bool {
+        self.chunk_status
+            .get(self.lengths.chunk_range(chunk.piece_index).start + chunk.chunk_index as usize)
+            .is_some_and(|received| *received)
+    }
+
     pub fn is_chunk_ready_to_upload(&self, chunk: &ChunkInfo) -> bool {
         self.have
             .as_slice()

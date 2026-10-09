@@ -155,3 +155,13 @@ rolling cache size must not allocate 128 MiB of future work that competes with
 startup/preroll ranges. Ordinary gateway lookahead and cache admission remain
 unchanged. Public-swarm measurements qualify transfer benefit separately from
 artifact integrity and owned range/retirement tests.
+
+
+Native piece takeovers request only chunks still missing from the selected
+piece. Previously received chunks stay private until complete-piece hashing;
+owned wire fixtures verify the receiver does not expose a partial prefix and
+the successor requests only the remaining offsets. Native peer retirement
+also checks current piece ownership before clearing received state. Cancelled
+requests from a former owner cannot reset a successor's prefix or checksum work.
+A forced old-peer disconnect fails that regression before the ownership fence
+and passes afterwards, with joined consumer/seeder retirement.

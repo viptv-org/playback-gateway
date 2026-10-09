@@ -1200,11 +1200,17 @@ impl PeerHandler {
                         req.piece_index.get(),
                         req.chunk_index
                     );
-                    if self.state.files.rolling_capacity().is_some()
-                        && g.inflight_pieces
-                            .get(&req.piece_index)
-                            .is_some_and(|p| p.peer == handle)
-                    {
+                    let owns_piece = g
+                        .inflight_pieces
+                        .get(&req.piece_index)
+                        .is_some_and(|p| p.peer == handle);
+                    let native = self.state.shared.connector.network_policy.is_native();
+                    // Cancelled requests from a previous owner cannot erase the
+                    // successor's received chunks or pending checksum work.
+                    if native && !owns_piece {
+                        continue;
+                    }
+                    if (native || self.state.files.rolling_capacity().is_some()) && owns_piece {
                         g.inflight_pieces.remove(&req.piece_index);
                     }
                     g.get_chunks_mut()?
@@ -1657,6 +1663,17 @@ impl PeerHandler {
             };
 
             for chunk in self.state.lengths.iter_chunk_infos(next) {
+                // A takeover can retain chunks written by the previous owner.
+                // They remain private until the full piece passes its checksum.
+                if self.state.shared.connector.network_policy.is_native()
+                    && self
+                        .state
+                        .lock_read("native_missing_chunk")
+                        .get_chunks()?
+                        .is_chunk_received(&chunk)
+                {
+                    continue;
+                }
                 let request = Request {
                     index: next.get(),
                     begin: chunk.offset,

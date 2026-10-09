@@ -11,7 +11,7 @@ use crate::{
 use std::{
     path::Path,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Condvar, Mutex,
     },
     time::Duration,
@@ -21,7 +21,8 @@ use tokio::{io::AsyncReadExt, time::timeout};
 #[derive(Default)]
 struct Gate {
     armed: AtomicBool,
-    entered: AtomicBool,
+    block_from: AtomicU64,
+    reads: Mutex<Vec<u64>>,
     active: AtomicBool,
     released: Mutex<bool>,
     changed: Condvar,
@@ -68,8 +69,12 @@ impl TorrentStorage for DelayedStorage {
         self.inner.init(shared, metadata)
     }
     fn pread_exact(&self, id: usize, offset: u64, buf: &mut [u8]) -> anyhow::Result<()> {
+        if self.gate.armed.load(Ordering::Acquire) {
+            self.gate.reads.lock().unwrap().push(offset);
+        }
         if self.gate.armed.load(Ordering::Acquire)
-            && !self.gate.entered.swap(true, Ordering::AcqRel)
+            && offset >= self.gate.block_from.load(Ordering::Acquire)
+            && offset < 64 * 1024
         {
             self.gate.active.store(true, Ordering::Release);
             let released = self.gate.released.lock().unwrap();
@@ -108,6 +113,20 @@ impl TorrentStorage for DelayedStorage {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn native_idle_peer_recovers_decoder_piece_before_socket_expiry() {
+    recover_from_owned_peer(false, false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn native_takeover_requests_only_missing_chunks_before_hash_verification() {
+    recover_from_owned_peer(true, false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn native_retired_peer_cannot_reset_successor_partial_chunks() {
+    recover_from_owned_peer(true, true).await;
+}
+
+async fn recover_from_owned_peer(partial: bool, retire_previous: bool) {
     let seed = tempfile::tempdir().unwrap();
     let source = seed.path().join("owned.bin");
     let bytes: Vec<u8> = (0..2 * 1024 * 1024 - 1).map(|n| (n % 251) as u8).collect();
@@ -134,6 +153,15 @@ async fn native_idle_peer_recovers_decoder_piece_before_socket_expiry() {
     let mut sessions = Vec::new();
     let mut peers = Vec::new();
     let gate = Arc::new(Gate::default());
+    let fast_gate = Arc::new(Gate::default());
+    fast_gate.block_from.store(
+        if retire_previous { 48 * 1024 } else { u64::MAX },
+        Ordering::Release,
+    );
+    let _release_fast = ReleaseOnDrop(fast_gate.clone());
+    if partial {
+        gate.block_from.store(32 * 1024, Ordering::Release);
+    }
     let _release = ReleaseOnDrop(gate.clone());
     for slow in [true, false] {
         let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -142,6 +170,7 @@ async fn native_idle_peer_recovers_decoder_piece_before_socket_expiry() {
         let session = Session::new_with_opts(
             seed.path().to_owned(),
             SessionOptions {
+                peer_id: Some(crate::tests::test_util::TestPeerMetadata::good().as_peer_id()),
                 disable_dht: true,
                 disable_dht_persistence: true,
                 disable_trackers: true,
@@ -159,7 +188,14 @@ async fn native_idle_peer_recovers_decoder_piece_before_socket_expiry() {
                     overwrite: true,
                     output_folder: Some(seed.path().to_str().unwrap().into()),
                     disable_trackers: true,
-                    storage_factory: slow.then(|| DelayedFactory(gate.clone()).boxed()),
+                    storage_factory: Some(
+                        DelayedFactory(if slow {
+                            gate.clone()
+                        } else {
+                            fast_gate.clone()
+                        })
+                        .boxed(),
+                    ),
                     ..Default::default()
                 }),
             )
@@ -168,10 +204,18 @@ async fn native_idle_peer_recovers_decoder_piece_before_socket_expiry() {
             .into_handle()
             .unwrap();
         handle.wait_until_initialized().await.unwrap();
+        // An incomplete fixture peer stays connected through interest negotiation.
+        // Only the first piece is read; the final advertised piece is withheld.
+        let live = handle.live().unwrap();
+        live.lock_write("owned_incomplete_peer")
+            .get_chunks_mut()
+            .unwrap()
+            .evict_piece(live.lengths.last_piece_id(), &live.metadata.file_infos);
         sessions.push(session);
         peers.push(peer);
     }
     gate.armed.store(true, Ordering::Release);
+    fast_gate.armed.store(true, Ordering::Release);
     let cache = tempfile::tempdir().unwrap();
     let consumer = Session::new_with_opts(
         cache.path().to_owned(),
@@ -222,26 +266,116 @@ async fn native_idle_peer_recovers_decoder_piece_before_socket_expiry() {
     .await
     .expect("slow seeder never received the decoder piece request");
     timeout(Duration::from_secs(2), async {
-        while handle
-            .live()
-            .unwrap()
-            .lock_read("owned_all_reserved")
-            .inflight_pieces
-            .len()
-            != 32
-        {
+        loop {
+            let live = handle.live().unwrap();
+            let g = live.lock_read("owned_work_reserved");
+            let all_reserved = live.lengths.iter_piece_infos().take(31).all(|piece| {
+                g.inflight_pieces.contains_key(&piece.piece_index)
+                    || g.get_chunks().unwrap().is_piece_have(piece.piece_index)
+            });
+            drop(g);
+            if all_reserved {
+                break;
+            }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     })
     .await
     .expect("slow peer did not reserve the fixture before recovery");
-    // Every piece is already reserved by the slow peer before introducing the
-    // fast peer; its requester must retry rather than awaiting another transfer.
+    if partial {
+        timeout(Duration::from_secs(2), async {
+            loop {
+                let live = handle.live().unwrap();
+                let chunks: Vec<_> = live
+                    .lengths
+                    .iter_chunk_infos(live.lengths.validate_piece_index(0).unwrap())
+                    .take(2)
+                    .collect();
+                if chunks.iter().all(|chunk| {
+                    live.lock_read("owned_received_prefix")
+                        .get_chunks()
+                        .unwrap()
+                        .is_chunk_received(chunk)
+                }) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("slow peer prefix never reached the actual chunk tracker");
+    }
+    assert!(
+        !reading.is_finished(),
+        "unverified cached chunks cannot reach a reader"
+    );
+    // All available work is reserved or complete before introducing the fast
+    // peer, so recovery cannot rely on a new lookahead transfer completing.
     handle
         .live()
         .unwrap()
         .add_peer_if_not_seen(peers[1])
         .unwrap();
+    let successor_kept_prefix = if retire_previous {
+        timeout(Duration::from_millis(3800), async {
+            while !fast_gate.active.load(Ordering::Acquire) {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            loop {
+                let live = handle.live().unwrap();
+                let chunks: Vec<_> = live
+                    .lengths
+                    .iter_chunk_infos(live.lengths.validate_piece_index(0).unwrap())
+                    .take(2)
+                    .collect();
+                if chunks.iter().all(|chunk| {
+                    live.lock_read("owned_successor_prefix")
+                        .get_chunks()
+                        .unwrap()
+                        .is_chunk_received(chunk)
+                }) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("successor did not retain its received prefix before the forced old-peer close");
+        let live = handle.live().unwrap();
+        live.peers
+            .with_live_mut(peers[0], "owned_retire_previous", |peer| {
+                peer.tx
+                    .send(super::WriterRequest::Disconnect(Ok(())))
+                    .unwrap();
+            })
+            .expect("previous peer disappeared before the fixture retired it");
+        timeout(Duration::from_secs(1), async {
+            while live
+                .peers
+                .with_live_mut(peers[0], "owned_previous_closed", |_| ())
+                .is_some()
+            {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("previous peer did not close");
+        let chunks: Vec<_> = live
+            .lengths
+            .iter_chunk_infos(live.lengths.validate_piece_index(0).unwrap())
+            .take(2)
+            .collect();
+        let kept = chunks.iter().all(|chunk| {
+            live.lock_read("owned_retained_prefix")
+                .get_chunks()
+                .unwrap()
+                .is_chunk_received(chunk)
+        });
+        fast_gate.release();
+        kept
+    } else {
+        true
+    };
     let result = timeout(Duration::from_millis(3800), reading).await;
     gate.release();
     assert_eq!(
@@ -262,5 +396,25 @@ async fn native_idle_peer_recovers_decoder_piece_before_socket_expiry() {
         .expect("idle peer waited until its socket expired instead of recovering the decoder piece")
         .unwrap()
         .unwrap();
+    assert!(
+        successor_kept_prefix,
+        "retired peer invalidated chunks now held by its successor"
+    );
     assert_eq!(first.as_slice(), &bytes[..16]);
+    if partial {
+        let mut reads: Vec<_> = fast_gate
+            .reads
+            .lock()
+            .unwrap()
+            .iter()
+            .copied()
+            .filter(|offset| *offset < 64 * 1024)
+            .collect();
+        reads.sort_unstable();
+        assert_eq!(
+            reads,
+            vec![32 * 1024, 48 * 1024],
+            "takeover must not request the prefix already on disk"
+        );
+    }
 }
