@@ -384,6 +384,7 @@ pub struct NativeMetainfo {
     canonical: Vec<u8>,
     hash: [u8; 20],
     file_sizes: Vec<u64>,
+    trackers: Vec<String>,
 }
 impl std::fmt::Debug for NativeMetainfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -402,6 +403,9 @@ impl NativeMetainfo {
     }
     pub fn file_sizes(&self) -> &[u64] {
         &self.file_sizes
+    }
+    pub fn trackers(&self) -> &[String] {
+        &self.trackers
     }
     pub fn total_payload_bytes(&self) -> u64 {
         self.file_sizes.iter().sum()
@@ -452,6 +456,7 @@ pub fn vet_native_metainfo(data: &[u8]) -> Result<NativeMetainfo> {
     }
     let mut info_range = None;
     let mut sizes = None;
+    let mut trackers = Vec::new();
     while parser.bytes.get(parser.offset) != Some(&b'e') {
         let key = parser.bytes()?;
         let start = parser.offset;
@@ -461,7 +466,15 @@ pub fn vet_native_metainfo(data: &[u8]) -> Result<NativeMetainfo> {
                 sizes = Some(inspect_info(&value)?);
                 info_range = Some(start..parser.offset);
             }
-            b"announce" => tracker(&value)?,
+            b"announce" => {
+                tracker(&value)?;
+                let value = std::str::from_utf8(bytes(&value)?)
+                    .map_err(|_| invalid())?
+                    .to_owned();
+                if !trackers.contains(&value) {
+                    trackers.push(value)
+                }
+            }
             b"announce-list" => match &value {
                 Value::List(tiers) => {
                     for tier in tiers {
@@ -469,6 +482,12 @@ pub fn vet_native_metainfo(data: &[u8]) -> Result<NativeMetainfo> {
                             Value::List(urls) => {
                                 for u in urls {
                                     tracker(u)?;
+                                    let value = std::str::from_utf8(bytes(u)?)
+                                        .map_err(|_| invalid())?
+                                        .to_owned();
+                                    if !trackers.contains(&value) {
+                                        trackers.push(value)
+                                    }
                                 }
                             }
                             _ => return Err(invalid()),
@@ -487,6 +506,9 @@ pub fn vet_native_metainfo(data: &[u8]) -> Result<NativeMetainfo> {
         }
     }
     let info = &data[info_range.ok_or_else(invalid)?];
+    if trackers.len() > 32 {
+        return Err(invalid());
+    }
     let mut sha = Sha1::new();
     sha.update(info);
     let mut canonical = Vec::with_capacity(info.len() + 8);
@@ -500,6 +522,7 @@ pub fn vet_native_metainfo(data: &[u8]) -> Result<NativeMetainfo> {
         canonical,
         hash: sha.finalize().into(),
         file_sizes: sizes.ok_or_else(invalid)?,
+        trackers,
     })
 }
 
@@ -559,6 +582,10 @@ mod tests {
         ]);
         let vetted = vet_native_metainfo(&annotated).unwrap();
         assert_eq!(vetted.canonical_bytes(), bare);
+        assert_eq!(
+            vetted.trackers(),
+            &["udp://tracker.invalid:6969".to_string()]
+        );
         assert_eq!(
             vetted.info_hash(),
             vet_native_metainfo(&bare).unwrap().info_hash()
@@ -689,6 +716,7 @@ mod tests {
             canonical: vec![],
             hash: unknown.info_hash,
             file_sizes: vec![0],
+            trackers: vec![],
         };
         assert!(unknown.verify(&empty).is_err());
         assert!(empty.verify_selection(Some(&hash), 0, None).is_err());
