@@ -1,5 +1,5 @@
 {
-  "revision": "b636742efe1c89c658eaf5ac9277478fe72b2828",
+  "revision": "11872567b94e5c3df763fef0742a91a3d030e629",
   "repository": "viptv-org/playback-gateway",
   "files": {
     "LICENSE": "edaef632cbb643e4e7a221717a6c441a4c1a7c918e6e4d56debc3d8739b233f6",
@@ -112,6 +112,6 @@
     "licenses/modernc.org/memory/LICENSE-MMAP-GO": "c2eba69f20d05414538c3a5df7694dde392e065ff70882e1625e90f5d6659fff",
     "licenses/modernc.org/sqlite/LICENSE": "c6fe05491a60ae13bcd223088d2705e36dede24e5587226231d2459ada5c4822",
     "licenses/zombiezen.com/go/sqlite/LICENSE": "118071c2cf0cfc253e30bc71952e2fbe15411b84099f49b61ae47d03c031640b",
-    "torrent-worker": "93f4416a70ef14b3c4b6f3d5433cefcef81038de5ba1cb7728f6934e1ca462ce"
+    "torrent-worker": "5117f3577d6e7338ad1e7b707bdb7b97db80a7e140eb3e680cbb78bac901cd1b"
   }
 }
