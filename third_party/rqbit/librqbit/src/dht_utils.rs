@@ -1,4 +1,8 @@
-use std::{collections::HashSet, net::SocketAddr, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    net::SocketAddr,
+    sync::Arc,
+};
 
 use anyhow::Context;
 use buffers::ByteBufOwned;
@@ -37,6 +41,13 @@ pub async fn read_metainfo_from_peer_receiver<A: Stream<Item = SocketAddr> + Unp
     connector: Arc<StreamConnector>,
 ) -> ReadMetainfoResult<A> {
     let mut seen = HashSet::<SocketAddr>::new();
+    let mut attempts = HashMap::<SocketAddr, u8>::new();
+    let mut inflight = HashSet::<SocketAddr>::new();
+    let max_attempts = if connector.network_policy.is_native() {
+        3
+    } else {
+        1
+    };
     let mut addrs = addrs_stream;
 
     let semaphore = tokio::sync::Semaphore::new(128);
@@ -45,7 +56,10 @@ pub async fn read_metainfo_from_peer_receiver<A: Stream<Item = SocketAddr> + Unp
         let semaphore = &semaphore;
         let connector = connector.clone();
         async move {
-            let token = semaphore.acquire().await?;
+            let token = semaphore
+                .acquire()
+                .await
+                .expect("metadata semaphore is not closed");
             let ret = peer_info_reader::read_metainfo_from_peer(
                 addr,
                 peer_id,
@@ -58,15 +72,18 @@ pub async fn read_metainfo_from_peer_receiver<A: Stream<Item = SocketAddr> + Unp
             .await
             .with_context(|| format!("error reading metainfo from {addr}"));
             drop(token);
-            ret.map(|(info, info_bytes)| (addr, info, info_bytes))
+            (addr, ret)
         }
     };
 
     let mut unordered = FuturesUnordered::new();
 
     for a in initial_addrs {
-        seen.insert(a);
-        unordered.push(read_info_guarded(a));
+        if seen.insert(a) {
+            attempts.insert(a, 1);
+            inflight.insert(a);
+            unordered.push(read_info_guarded(a));
+        }
     }
 
     let mut addrs_completed = false;
@@ -79,9 +96,12 @@ pub async fn read_metainfo_from_peer_receiver<A: Stream<Item = SocketAddr> + Unp
         tokio::select! {
             done = unordered.next(), if !unordered.is_empty() => {
                 match done {
-                    Some(Ok((peer, info, info_bytes))) => return ReadMetainfoResult::Found { peer, info, info_bytes, seen, rx: addrs },
-                    Some(Err(e)) => {
-                        debug!("{:#}", e);
+                    Some((peer, result)) => {
+                        inflight.remove(&peer);
+                        match result {
+                            Ok((info, info_bytes)) => return ReadMetainfoResult::Found { peer, info, info_bytes, seen, rx: addrs },
+                            Err(e) => debug!("{:#}", e),
+                        }
                     },
                     None => unreachable!()
                 }
@@ -90,7 +110,12 @@ pub async fn read_metainfo_from_peer_receiver<A: Stream<Item = SocketAddr> + Unp
             next_addr = addrs.next(), if !addrs_completed => {
                 match next_addr {
                     Some(addr) => {
-                        if seen.insert(addr) {
+                        // Rediscovery can recover transient native connection/handshake
+                        // failures. Never duplicate an active attempt or retry forever.
+                        let tried = attempts.entry(addr).or_default();
+                        if *tried < max_attempts && inflight.insert(addr) {
+                            *tried += 1;
+                            seen.insert(addr);
                             unordered.push(read_info_guarded(addr));
                         }
                         continue;
@@ -103,6 +128,9 @@ pub async fn read_metainfo_from_peer_receiver<A: Stream<Item = SocketAddr> + Unp
         };
     }
 }
+
+#[cfg(all(test, feature = "test-network-policy"))]
+mod metadata_retry_tests;
 
 #[cfg(test)]
 mod tests {

@@ -2104,7 +2104,7 @@ impl PeerHandler {
             .div_ceil(CHUNK_SIZE as u64)
             .try_into()?;
 
-        if piece_id as usize > total_pieces {
+        if piece_id as usize >= total_pieces {
             bail!("piece out of bounds")
         }
 
@@ -2116,7 +2116,10 @@ impl PeerHandler {
             .send(WriterRequest::Message(Message::Extended(
                 ExtendedMessage::UtMetadata(UtMetadata::Data {
                     piece: piece_id,
-                    total_size: end - offset,
+                    // BEP 9: total_size is the whole metadata size, not the piece length.
+                    total_size: metadata_size
+                        .try_into()
+                        .context("metadata size exceeds protocol limits")?,
                     data: data.into(),
                 }),
             )))
