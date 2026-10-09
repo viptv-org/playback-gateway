@@ -113,6 +113,14 @@ pub struct TorrentTransportDiagnostics {
     pub queued_peers: u64,
     pub dead_peers: u64,
     pub not_needed_peers: u64,
+    pub current_readers: u64,
+    pub blocked_pieces: u64,
+    pub unreserved_pieces: u64,
+    pub received_current_chunks: u64,
+    pub total_current_chunks: u64,
+    pub current_owners_live: u64,
+    pub max_current_age_ms: u64,
+    pub steals: u64,
 }
 #[uniffi::export(callback_interface)]
 pub trait TorrentProgressListener: Send + Sync {
@@ -460,6 +468,14 @@ impl TorrentHandle {
             queued_peers: snapshot.queued_peers,
             dead_peers: snapshot.dead_peers,
             not_needed_peers: snapshot.not_needed_peers,
+            current_readers: snapshot.current_readers,
+            blocked_pieces: snapshot.blocked_pieces,
+            unreserved_pieces: snapshot.unreserved_pieces,
+            received_current_chunks: snapshot.received_current_chunks,
+            total_current_chunks: snapshot.total_current_chunks,
+            current_owners_live: snapshot.current_owners_live,
+            max_current_age_ms: snapshot.max_current_age_ms,
+            steals: snapshot.steals,
         }
     }
     /// Replaces any previous listener. Callbacks run on a native blocking

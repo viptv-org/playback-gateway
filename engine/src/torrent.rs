@@ -108,6 +108,14 @@ pub struct TorrentDiagnostics {
     pub queued_peers: u64,
     pub dead_peers: u64,
     pub not_needed_peers: u64,
+    pub current_readers: u64,
+    pub blocked_pieces: u64,
+    pub unreserved_pieces: u64,
+    pub received_current_chunks: u64,
+    pub total_current_chunks: u64,
+    pub current_owners_live: u64,
+    pub max_current_age_ms: u64,
+    pub steals: u64,
 }
 
 #[derive(Clone)]
@@ -965,6 +973,13 @@ impl TorrentHandle {
         }
     }
     pub fn diagnostics(&self) -> TorrentDiagnostics {
+        let wait = self
+            .state
+            .entry
+            .managed
+            .live()
+            .map(|live| live.stream_wait_diagnostics())
+            .unwrap_or_default();
         let stats = self.state.entry.managed.stats();
         let active = stats.live.is_some();
         let live = stats.live;
@@ -979,6 +994,14 @@ impl TorrentHandle {
             queued_peers: snapshot.peer_stats.queued as u64,
             dead_peers: snapshot.peer_stats.dead as u64,
             not_needed_peers: snapshot.peer_stats.not_needed as u64,
+            current_readers: wait.current_readers,
+            blocked_pieces: wait.blocked_pieces,
+            unreserved_pieces: wait.unreserved_pieces,
+            received_current_chunks: wait.received_current_chunks,
+            total_current_chunks: wait.total_current_chunks,
+            current_owners_live: wait.current_owners_live,
+            max_current_age_ms: wait.max_current_age_ms,
+            steals: snapshot.peer_stats.steals as u64,
         }
     }
     /// Invalidates this lease and every explicit clone. Independent leases,

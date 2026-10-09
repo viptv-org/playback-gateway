@@ -2692,7 +2692,15 @@ data class TorrentTransportDiagnostics (
     var `connectingPeers`: kotlin.ULong,
     var `queuedPeers`: kotlin.ULong,
     var `deadPeers`: kotlin.ULong,
-    var `notNeededPeers`: kotlin.ULong
+    var `notNeededPeers`: kotlin.ULong,
+    var `currentReaders`: kotlin.ULong,
+    var `blockedPieces`: kotlin.ULong,
+    var `unreservedPieces`: kotlin.ULong,
+    var `receivedCurrentChunks`: kotlin.ULong,
+    var `totalCurrentChunks`: kotlin.ULong,
+    var `currentOwnersLive`: kotlin.ULong,
+    var `maxCurrentAgeMs`: kotlin.ULong,
+    var `steals`: kotlin.ULong
 ) {
 
     companion object
@@ -2713,6 +2721,14 @@ public object FfiConverterTypeTorrentTransportDiagnostics: FfiConverterRustBuffe
             FfiConverterULong.read(buf),
             FfiConverterULong.read(buf),
             FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
         )
     }
 
@@ -2725,7 +2741,15 @@ public object FfiConverterTypeTorrentTransportDiagnostics: FfiConverterRustBuffe
             FfiConverterULong.allocationSize(value.`connectingPeers`) +
             FfiConverterULong.allocationSize(value.`queuedPeers`) +
             FfiConverterULong.allocationSize(value.`deadPeers`) +
-            FfiConverterULong.allocationSize(value.`notNeededPeers`)
+            FfiConverterULong.allocationSize(value.`notNeededPeers`) +
+            FfiConverterULong.allocationSize(value.`currentReaders`) +
+            FfiConverterULong.allocationSize(value.`blockedPieces`) +
+            FfiConverterULong.allocationSize(value.`unreservedPieces`) +
+            FfiConverterULong.allocationSize(value.`receivedCurrentChunks`) +
+            FfiConverterULong.allocationSize(value.`totalCurrentChunks`) +
+            FfiConverterULong.allocationSize(value.`currentOwnersLive`) +
+            FfiConverterULong.allocationSize(value.`maxCurrentAgeMs`) +
+            FfiConverterULong.allocationSize(value.`steals`)
     )
 
     override fun write(value: TorrentTransportDiagnostics, buf: ByteBuffer) {
@@ -2738,6 +2762,14 @@ public object FfiConverterTypeTorrentTransportDiagnostics: FfiConverterRustBuffe
             FfiConverterULong.write(value.`queuedPeers`, buf)
             FfiConverterULong.write(value.`deadPeers`, buf)
             FfiConverterULong.write(value.`notNeededPeers`, buf)
+            FfiConverterULong.write(value.`currentReaders`, buf)
+            FfiConverterULong.write(value.`blockedPieces`, buf)
+            FfiConverterULong.write(value.`unreservedPieces`, buf)
+            FfiConverterULong.write(value.`receivedCurrentChunks`, buf)
+            FfiConverterULong.write(value.`totalCurrentChunks`, buf)
+            FfiConverterULong.write(value.`currentOwnersLive`, buf)
+            FfiConverterULong.write(value.`maxCurrentAgeMs`, buf)
+            FfiConverterULong.write(value.`steals`, buf)
     }
 }
 

@@ -112,6 +112,18 @@ use super::{
     ManagedTorrentShared, TorrentMetadata,
 };
 
+/// Numeric stream-wait facts, without source or peer identity.
+#[derive(Default)]
+pub struct StreamWaitDiagnostics {
+    pub current_readers: u64,
+    pub blocked_pieces: u64,
+    pub unreserved_pieces: u64,
+    pub received_current_chunks: u64,
+    pub total_current_chunks: u64,
+    pub current_owners_live: u64,
+    pub max_current_age_ms: u64,
+}
+
 fn piece_takeover_due(
     elapsed: Duration,
     average: Option<Duration>,
@@ -885,6 +897,49 @@ impl TorrentStateLive {
                 }
             }
         }
+    }
+
+    pub fn stream_wait_diagnostics(&self) -> StreamWaitDiagnostics {
+        let current = self.streams.current_pieces(&self.lengths);
+        let mut result = StreamWaitDiagnostics {
+            current_readers: current.len() as u64,
+            ..Default::default()
+        };
+        let mut owners = Vec::new();
+        {
+            let g = self.lock_read("stream_wait_diagnostics");
+            if let Ok(chunks) = g.get_chunks() {
+                for id in current {
+                    if chunks.is_piece_have(id) {
+                        continue;
+                    }
+                    result.blocked_pieces += 1;
+                    for chunk in self.lengths.iter_chunk_infos(id) {
+                        result.total_current_chunks += 1;
+                        result.received_current_chunks +=
+                            u64::from(chunks.is_chunk_received(&chunk));
+                    }
+                    if let Some(piece) = g.inflight_pieces.get(&id) {
+                        result.max_current_age_ms = result.max_current_age_ms.max(
+                            piece
+                                .started
+                                .elapsed()
+                                .as_millis()
+                                .try_into()
+                                .unwrap_or(u64::MAX),
+                        );
+                        owners.push(piece.peer);
+                    } else {
+                        result.unreserved_pieces += 1;
+                    }
+                }
+            }
+        }
+        // Peer locks follow state observation, never nest inside the state lock.
+        for owner in owners {
+            result.current_owners_live += u64::from(self.peers.with_live(owner, |_| ()).is_some());
+        }
+        result
     }
 
     pub(crate) fn notify_stream_position(&self) {
