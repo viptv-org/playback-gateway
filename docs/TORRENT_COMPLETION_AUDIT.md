@@ -9,9 +9,9 @@ rollout and physical-device testing are separately coordinated.
 | Shared unmodified upstream engine | Go module/lock and library-boundary audit | Keep pinned upgrade qualification |
 | Verified bounded reusable cache | Go race fixtures for storage, eviction, crash reuse and corrupt data; large native/gateway files | Sustained public multi-viewer trials |
 | Discovery hints, trackers/DHT/PEX/TCP/uTP | Go discovery/policy fixtures and duplicate-hint test | Public source variability recorded |
-| Explicit/largest selection, stored multipart RAR4/5 seek mapping | Go selection/archive fixtures, independent inner selection and refusal cases | Physical decoder archive trial |
+| Explicit/largest selection, stored multipart RAR4/5 seek mapping | Go selection/archive fixtures, independent inner selection and refusal cases | Controlled stored-RAR4/5/multipart Range fixtures pass; physical decoder archive trial is separate |
 | Native v2, strict v1 compatibility | Core native/WASM vectors, backend protocol tests; real Android/Web backend grant-to-decoder paths | Ordinary source-screen and physical-device qualification |
-| Android/TV local acquisition, no gateway fallback | Go/JNI all three ABIs, API24/16KiB APK checks; Media3 emulator frames and seek | Phone media and real backend/core/coordinator tests pass; physical ARM/API24/16-KiB-page tests remain separately coordinated |
+| Android/TV local acquisition, no gateway fallback | Go/JNI all three ABIs, API24/16KiB APK checks; Media3 emulator frames and seek | Phone media and real backend/core/coordinator/actual-app-cache tests pass after fixing ownership marker isolation; physical ARM/API24/16-KiB-page tests remain separately coordinated |
 | Linux desktop local acquisition | Bundled application Go→Rust→MPV/GStreamer rendered frames; seek trials | Full account/source-screen path and sustained playback |
 | Windows desktop packaging | Windows installer build and release suite; extracted worker/notices match hashes | Actual pinned-worker startup/refusal/settlement passed on Windows 2022; TextureStream playback remains unverified |
 | Web gateway playback | Real HTTPS backend profile/vault/add-on→production API/controller→Mediabunny frames and 401-stop proof; separate seek replacement proof | Ordinary account/catalog screens and physical TV trials |
