@@ -73,8 +73,11 @@ func TestPublicSwarmQualification(t *testing.T) {
 			c.DialRateLimiter = rate.NewLimiter(50, 50)
 			c.HalfOpenConnsPerTorrent = 50
 		}
-	case "dial50-fast-prime", "fast-ipv4-prime", "fast-plaintext-prime", "fast-tcp-prime":
+	case "dial50-fast-prime", "fast-ipv4-prime", "fast-plaintext-prime", "fast-tcp-prime", "fast-tcp-preferred-prime":
 		config.primeHeaders = true
+		if profile == "fast-tcp-preferred-prime" {
+			config.utpDialDelay = 150 * time.Millisecond
+		}
 		config.clientTuning = func(c *torrent.ClientConfig) {
 			c.DialRateLimiter = rate.NewLimiter(50, 50)
 			c.HalfOpenConnsPerTorrent = 50

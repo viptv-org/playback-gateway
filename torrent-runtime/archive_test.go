@@ -4,6 +4,8 @@ package torrentruntime
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
+	"hash/crc32"
 	"os"
 	"path/filepath"
 	"testing"
@@ -78,6 +80,14 @@ func TestStoredArchiveTorrentRanges(t *testing.T) {
 			if h.Observe().Length != int64(len(expected)) {
 				t.Fatal("member length mismatch")
 			}
+			selection := h.Observe().ArchiveIndex
+			if selection == nil || *selection != 0 {
+				t.Fatal("resolved archive selection was not reported")
+			}
+			*selection = 9
+			if *h.Observe().ArchiveIndex != 0 {
+				t.Fatal("observed selection mutated live identity")
+			}
 			for _, offset := range []int{0, len(expected) / 2, max(0, len(expected)-128), 0} {
 				end := min(len(expected)-1, offset+127)
 				got := fetchRange(t, h, int64(offset), int64(end))
@@ -87,6 +97,53 @@ func TestStoredArchiveTorrentRanges(t *testing.T) {
 			}
 			if r.cache.Stats().UsedBytes > 32<<10 {
 				t.Fatal("archive exceeded cache budget")
+			}
+		})
+	}
+}
+
+func TestEncryptedHeaderAndMalformedArchivesHaveSpecificRefusals(t *testing.T) {
+	stored, err := os.ReadFile("../engine/assets/rar/stored.rar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// RAR4's 13-byte main header begins after its 7-byte signature. Set the
+	// encrypted-header flag and recompute its real header CRC; this reaches
+	// format parsing instead of merely constructing a FileHeader object.
+	encrypted := append([]byte(nil), stored...)
+	flags := binary.LittleEndian.Uint16(encrypted[10:12]) | 0x80
+	binary.LittleEndian.PutUint16(encrypted[10:12], flags)
+	binary.LittleEndian.PutUint16(encrypted[7:9], uint16(crc32.ChecksumIEEE(encrypted[9:20])))
+	for _, fixture := range []struct {
+		name, code string
+		data       []byte
+	}{
+		{"encrypted-header", "encrypted_archive_unsupported", encrypted},
+		{"malformed", "archive_metadata_invalid", []byte("invalid archive fixture")},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			file := filepath.Join(t.TempDir(), "fixture.rar")
+			if err := os.WriteFile(file, fixture.data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			seed, raw := seedPath(t, file, false)
+			r, err := newRuntime(Config{CacheDir: t.TempDir(), CacheBytes: 64 << 10, ReadaheadBytes: 4096}, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer r.Close()
+			h, err := r.Prepare(context.Background(), Source{Metainfo: raw}, time.Now().Add(time.Minute))
+			if err != nil {
+				t.Fatal(err)
+			}
+			connectSeed(h, seed)
+			select {
+			case <-h.done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("invalid archive parser did not settle")
+			}
+			if h.Observe().Ready || h.Observe().Error != fixture.code {
+				t.Fatalf("incorrect archive refusal: %+v", h.Observe())
 			}
 		})
 	}

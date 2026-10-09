@@ -26,7 +26,7 @@ func (c *Cache) readRecord(key string, maxBytes int64) []byte {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e := c.entries[key]
-	if c.closed || e == nil || !e.complete || e.length > maxBytes {
+	if c.closed || c.failed || e == nil || e.evicting || !e.complete || e.length > maxBytes {
 		return nil
 	}
 	f, err := os.Open(c.path(key))
@@ -48,7 +48,7 @@ func (c *Cache) writeRecord(key string, data []byte) error {
 		return errors.New("record capacity unavailable")
 	}
 	c.mu.Lock()
-	if c.closed {
+	if c.closed || c.failed {
 		c.mu.Unlock()
 		return os.ErrClosed
 	}

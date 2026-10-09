@@ -158,7 +158,8 @@ func (r *demandReader) updateDemand(span pieceWindow) error {
 	return nil
 }
 
-// Caller holds Runtime.mu; cache callbacks never acquire that mutex.
+// Caller holds Runtime.mu. Cache demand changes do not invoke eviction; its
+// disk allocation callbacks acquire this mutex only after releasing Cache.mu.
 func (r *Runtime) reprioritize(t *torrent.Torrent) {
 	next := map[int]torrent.PiecePriority{}
 	wanted := map[int]bool{}

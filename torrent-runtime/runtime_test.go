@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -231,6 +232,25 @@ func TestSourceIdentityAndSelectionValidation(t *testing.T) {
 	for _, s := range []Source{{}, {Magnet: "secret-invalid-source"}, {Magnet: "magnet:?xt=urn:btih:0000000000000000000000000000000000000000"}} {
 		if _, err := parseSource(s); err == nil {
 			t.Fatal("invalid source admitted")
+		}
+	}
+}
+
+func TestBriefTCPPreferenceRetainsUTPOnlyPeerPlayback(t *testing.T) {
+	seed, raw, data := seedFixture(t, true)
+	r, err := newRuntime(Config{CacheDir: t.TempDir(), CacheBytes: 64 << 10, ReadaheadBytes: 4096, utpDialDelay: 50 * time.Millisecond}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	h := readyHandle(t, r, raw)
+	connectSeed(h, seed)
+	if got := fetchRange(t, h, 0, 4095); !bytes.Equal(got, data[:4096]) {
+		t.Fatal("uTP-only verified playback failed with a delayed dial")
+	}
+	for _, peer := range h.t.PeerConns() {
+		if !strings.HasPrefix(peer.Network, "udp") && !strings.HasPrefix(peer.Network, "utp") {
+			t.Fatal("uTP-only fixture connected over another transport")
 		}
 	}
 }

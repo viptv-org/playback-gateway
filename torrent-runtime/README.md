@@ -17,7 +17,9 @@ players and output transcoding remain outside this module.
 or playing. Once ready, the handle owns a token-protected loopback media URL.
 `Renew` accepts at most sixty seconds of authority. `ReportFirstFrame` ends the
 120-second startup deadline; endpoint readiness does not. `Close` revokes access
-and stops the torrent after its final handle retires. Cached data is not authority.
+and retires the torrent after its final handle closes. It also waits for
+unfinished dial/handshake attempts; an upstream Drop by itself does not join
+those. The controller enforces the worker settlement deadline during this wait. Cached data is not authority.
 
 The private version-2 JSON controller exposes `open`, `prepare`, `observe`,
 `renew`, `first_frame`, `close` and `shutdown` over worker stdin/stdout or JNI.
@@ -28,21 +30,23 @@ the executable exits with status 3 when settlement exceeds two seconds.
 
 `prepare` takes a magnet or metainfo, optional tracker hints and file index,
 and `authority_ms`. Absent file selection means the largest torrent file, with
-the first index winning ties. Stored archive selection is separately recorded
-as an archive index. Compressed, solid or encrypted archives are refused.
+the first index winning ties. Resolved stored archive selection is reported in progress as `archive_index`
+and can be supplied on a subsequent preparation. Observation returns its own
+copy so callers cannot mutate live selection. Compressed, solid or encrypted archives are refused.
 
 Each cache directory has one exclusive process owner. The default budget is
 2 GiB, reduced to retain 512 MiB of free disk space. Piece records include their
 allocation overhead. Incomplete writes, verified data and metadata/routing
 records share the budget; complete archive extraction is never staged. Hashing
-and reads pin storage. Eviction is atomic with storage completion queries and verified reads;
-reader demand refreshes upstream completion after an eviction. The strict
-pre-deletion engine-notification contract is still a qualification item. A restart checks persisted records; incomplete or corrupt records cannot
+and reads pin storage. Eviction first makes the piece unavailable to reads and completion queries,
+waits for any engine publication, synchronizes engine completion, and only
+then deletes its bytes. The allocation charge remains until deletion. A failed
+unlink terminates cache access and wakes waiting writers. A restart checks persisted records; incomplete or corrupt records cannot
 be served. Final handle closure retains verified data for an authorized replay.
 
 Public peer and tracker destinations are checked, automatic router mapping is
 disabled, and discovery enables trackers, DHT, PEX, TCP and uTP. Bench-only
-connection and header-priming experiments are unexported configuration hooks;
+connection, TCP head-start and header-priming experiments are unexported configuration hooks;
 their results must not be mistaken for production defaults.
 
 ## Local checks and packaging
@@ -61,6 +65,15 @@ Set `GO` when the executable is not on PATH. Windows cross-compilation requires
 MinGW. Android uses API 24 for arm64-v8a, armeabi-v7a and x86_64; the build script
 checks 16 KiB ELF segment alignment and packages the Java byte-array JNI wrapper.
 The Android parent must host this wrapper in an app-private worker process.
+Only the Go library owns C++ code in that process; its C++ runtime is statically
+linked and the JNI bridge is pure C. Every emitted library is checked for
+unpackaged dependencies as well as 16 KiB alignment. NDK notices accompany the
+artifacts.
+
+The standalone `scripts/build-android-probe.py` packages a separate ABI test app
+from a verified artifact inventory. It exercises JNI open/refusal/shutdown in a
+private process and records a local result. This does not exercise Media3 or a
+product client; use an explicitly selected emulator for its installation.
 
 The transitive Android network-interface dependency `wlynxg/anet v0.0.3`
 uses a private Go symbol. Android builds therefore use its upstream-documented

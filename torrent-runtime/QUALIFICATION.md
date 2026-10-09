@@ -86,12 +86,51 @@ timed out under the earlier comparison configuration. Those runs do not model
 current Stremio's normal defaults and do not support an engine ranking. An
 interrupted upstream rqbit trial is not recorded as a failure.
 
+## Integrity-matched official reference
+
+The shipped official server exposes `{"virtual":false}` on first hash-based
+creation. An independent owned 2 MiB corrupt-piece fixture proved that mode
+withholds all bytes until original-piece verification and recovers with a valid
+piece; the unchanged default exposed the corrupt prefix. No official source
+patch was used. See [source and fixture proof](../docs/STREMIO_GO_REFERENCE.md#follow-up-supported-integrity-comparison).
+
+Six serialized cold runs (three per source), fresh private caches, normal
+tracker/DHT inventory and the same one-frame command yielded:
+
+| Reference | A median/range | B median/range |
+| --- | --- | --- |
+| Official whole-piece mode | 2.789 / 2.711–2.978 s | 7.083 / 5.868–10.180 s |
+
+Default-mode and whole-piece-mode results describe different integrity
+behavior; neither may be substituted for the other. These small live samples
+show no uniform engine winner: the candidate is slower on A and faster on B
+under the whole-piece mode. The comparative gate remains unpassed.
+
+Additional candidate experiments retained the verified-byte rule. Plaintext-first
+plus fast dial/priming produced A/B medians 6.196/6.509 s (three each), so it is
+not adopted. A separate TCP-only diagnostic produced 3.739/5.973 s; disabling
+uTP is not a production proposal. A same-socket 150 ms TCP-head-start experiment
+kept uTP and DHT enabled. Three cold runs per source produced A/B medians
+3.417/6.347 s (ranges 3.113–7.775 / 2.620–6.804 s). The uneven results do not
+justify changing production defaults; the private hook remains qualification-only.
+
 ## Controlled correctness evidence
 
 After the dependency and review fixes, `go test -race -p 1 -timeout 90s ./...`
-passed locally (4.557 seconds for the runtime package). It covers:
+passed locally (9.107 seconds for the runtime package). It covers:
 
 - Owned TCP and uTP peers, bounded rolling reads and seek/re-download.
+- Tracker-only and DHT-only magnets resolve metadata and verified bytes, with
+  competing discovery disabled; ten repetitions passed under the race detector.
+- A raw owned wire peer cannot expose a partial prefix, a complete corrupt piece
+  is refused, and a distinct healthy peer recovers the waiting reader. Dropped
+  handshakes and unreachable metadata cancellation settle.
+- Encrypted RAR4 headers and malformed archives receive specific refusals.
+- Eviction revokes live engine completion before unlink, retains its charge,
+  rechecks concurrent allocations, and fences retirement and unlink failures.
+  The completion callback waits through upstream publication before invalidating.
+- A brief TCP head start still permits outgoing uTP-only verified playback.
+- Resolved archive-member selection is reported and cannot be mutated by callers.
 - Shared-boundary pieces, exact selected-file ranges, suffix ranges and largest
   selection ties.
 - Offline reuse of verified bytes and metadata after restart.
@@ -109,6 +148,16 @@ passed locally (4.557 seconds for the runtime package). It covers:
   suspension-aware expiry and the startup deadline through first frame.
 - A blocked worker close reaches its two-second termination response and its
   cache is recoverable after process exit.
+- A real connected peer that never answers its handshake exposed premature
+  successful close: upstream Drop alone did not join that attempt. Final-handle
+  cleanup now waits for outgoing attempts to retire. Owned child-worker
+  fixtures cover both explicit close and cancellation followed by shutdown.
+  Each reaches the controller deadline, terminates with status 3, closes the
+  actual peer connection, and releases cache ownership for safe restart.
+- Shutdown revokes every live handle before joining blocked storage, and also
+  joins handles already being retired by cancellation or expiry. Retiring
+  handles continue to count against admission until cleanup finishes.
+  Earlier public stop timings predate this stronger join check and must be rerun.
 
 These tests do not yet cover the full hostile-wire, large-media, malformed
 archive or cross-platform matrix. Process-kill recovery is not a power-loss
@@ -121,8 +170,14 @@ The initial Linux worker and shared library built and passed process lifecycle
 and C ABI load/call/free smoke tests. The Windows x86_64 worker cross-compiled.
 Android API 24 libraries built for all three ABIs with 16 KiB alignment checks.
 These were dirty-tree v1.61.0 candidate artifacts, not an immutable release set.
-The existing emulator did not answer a getprop probe; no physical device was
-used. Android ABI loading and platform playback remain unverified.
+The initial Android x86_64 load probe caught an omitted `libc++_shared.so`
+dependency. The corrected build statically links the only C++ owner inside its
+private worker; all three ABI libraries then passed dependency/alignment checks.
+A separate API 36 x86_64 emulator loaded JNI and passed runtime open, invalid
+source refusal and shutdown in an independently verified worker process. The
+standalone probe was a dirty-tree qualification build, not a consumer build.
+ARM loading, API 24 execution, 16 KiB-page execution and Media3 playback remain
+unverified; no physical device was used.
 
 The existing Rust gateway workspace tests and design validation passed.
 
@@ -132,12 +187,11 @@ The existing Rust gateway workspace tests and design validation passed.
    Stremio comparisons, including randomized cold/warm repeats on the failure
    corpus. Record steady playback, seeks, memory, disk and cancellation; revise
    the candidate until reliability and latency gates pass.
-2. Complete tracker-only/DHT-only, dropped-handshake, unreachable, slow and
-   corrupt-peer fixtures. Stress eviction with files larger than available
-   storage, concurrent viewers and repeated crash/restart.
-3. Complete strict engine-notification ordering before cache deletion, and
-   complete the archive matrix, including encrypted/malformed data and seeks
-   across every multipart boundary.
+2. Extend discovery/hostile-wire fixtures to the full network matrix, and stress
+   eviction with files larger than device storage, simultaneous active
+   viewers and repeated crash/restart.
+3. Complete the archive matrix, including encrypted RAR5, every multipart
+   boundary and explicit/default inner-member selection across multiple entries.
 4. Build and verify Android ABI loading/Media3, Linux and Windows native player
    behavior. Cross-compilation alone does not qualify playback.
 5. Integrate backend/core versioned negotiation and shared deadlines, Android
@@ -148,3 +202,13 @@ The existing Rust gateway workspace tests and design validation passed.
    wrappers only after replacement qualification.
 
 Physical-device tests and production rollout remain separately coordinated.
+
+## DHT fixture dependency observation
+
+The pinned anacrolix/dht in-memory peer store builds its key from IP alone,
+then decodes the key as IP plus port when serving `get_peers`. An owned fixture
+using that store could not return the correct peer. The fixture root now uses
+an independent fixed response; the candidate's real DHT lookup resolves it.
+This does not indicate that third-party DHT roots use that broken store.
+The runtime's incoming DHT peer-store behavior and memory bounds require follow-up
+before qualification. [Pinned store source](https://github.com/anacrolix/dht/blob/ec3a9bd99456/peer-store/in-memory.go).

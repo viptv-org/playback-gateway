@@ -35,6 +35,7 @@ type Config struct {
 	MaxHandles     int    `json:"max_handles,omitempty"`
 	clientTuning   func(*torrent.ClientConfig)
 	primeHeaders   bool
+	utpDialDelay   time.Duration
 }
 type Source struct {
 	Magnet       string   `json:"magnet,omitempty"`
@@ -48,11 +49,12 @@ func (Source) String() string   { return "[private torrent source]" }
 func (Source) GoString() string { return "[private torrent source]" }
 
 type Progress struct {
-	Stage     string `json:"stage"`
-	Ready     bool   `json:"ready"`
-	Error     string `json:"error,omitempty"`
-	FileIndex int    `json:"file_index"`
-	Length    int64  `json:"length"`
+	Stage        string `json:"stage"`
+	Ready        bool   `json:"ready"`
+	Error        string `json:"error,omitempty"`
+	FileIndex    int    `json:"file_index"`
+	ArchiveIndex *int   `json:"archive_index,omitempty"`
+	Length       int64  `json:"length"`
 }
 
 type Runtime struct {
@@ -62,6 +64,9 @@ type Runtime struct {
 	server           *http.Server
 	listener         net.Listener
 	handles          map[string]*Handle
+	retiring         map[*Handle]chan struct{}
+	shutdownDone     chan struct{}
+	shutdownError    error
 	refs             map[*torrent.Torrent]int
 	demands          map[*demandReader]pieceWindow
 	priorities       map[*torrent.Torrent]map[int]torrent.PiecePriority
@@ -125,7 +130,7 @@ func newRuntime(cfg Config, privateFixture bool) (*Runtime, error) {
 		readAhead = 32 << 20
 	}
 	readAhead = min(readAhead, c.limit/4)
-	r := &Runtime{cache: c, handles: map[string]*Handle{}, refs: map[*torrent.Torrent]int{}, demands: map[*demandReader]pieceWindow{}, priorities: map[*torrent.Torrent]map[int]torrent.PiecePriority{}, readAhead: readAhead, privateFixture: privateFixture}
+	r := &Runtime{cache: c, handles: map[string]*Handle{}, retiring: map[*Handle]chan struct{}{}, shutdownDone: make(chan struct{}), refs: map[*torrent.Torrent]int{}, demands: map[*demandReader]pieceWindow{}, priorities: map[*torrent.Torrent]map[int]torrent.PiecePriority{}, readAhead: readAhead, privateFixture: privateFixture}
 	r.primeHeaders = cfg.primeHeaders
 	r.maxInputs = cfg.MaxInputs
 	r.maxHandles = cfg.MaxHandles
@@ -162,10 +167,27 @@ func newRuntime(cfg Config, privateFixture bool) (*Runtime, error) {
 	if cfg.clientTuning != nil {
 		cfg.clientTuning(cc)
 	}
+	if cfg.utpDialDelay > 0 {
+		cc.DialForPeerConns = false
+	}
 	client, err := torrent.NewClient(cc)
 	if err != nil {
 		c.Close()
 		return nil, errors.New("torrent engine unavailable")
+	}
+	if cfg.utpDialDelay > 0 {
+		for _, listener := range client.Listeners() {
+			dialer, ok := listener.(torrent.Dialer)
+			if !ok {
+				client.Close()
+				c.Close()
+				return nil, errors.New("peer dialer unavailable")
+			}
+			if strings.HasPrefix(dialer.DialerNetwork(), "udp") {
+				dialer = delayedDialer{dialer, cfg.utpDialDelay, client.Closed()}
+			}
+			client.AddDialer(dialer)
+		}
 	}
 	l, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
@@ -174,11 +196,60 @@ func newRuntime(cfg Config, privateFixture bool) (*Runtime, error) {
 		return nil, errors.New("local reader unavailable")
 	}
 	r.client = client
+	c.beforeEvict = r.invalidateBeforeEviction
+	c.onFailure = func() {
+		r.mu.Lock()
+		handles := make([]*Handle, 0, len(r.handles))
+		for _, h := range r.handles {
+			handles = append(handles, h)
+		}
+		r.mu.Unlock()
+		for _, h := range handles {
+			h.fail("cache_unavailable")
+		}
+	}
 	r.listener = l
 	r.server = &http.Server{Handler: http.HandlerFunc(r.serve), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192}
 	r.restoreRouting()
 	go r.server.Serve(l)
 	return r, nil
+}
+
+func (r *Runtime) invalidateBeforeEviction(key string) {
+	var hash metainfo.Hash
+	decoded, err := hex.DecodeString(key[:40])
+	if err != nil {
+		return
+	}
+	copy(hash[:], decoded)
+	index, err := strconv.ParseUint(key[41:], 16, 32)
+	if err != nil {
+		return
+	}
+	for {
+		// Storage has released its mutex. Fence the entire engine lookup/update
+		// against Drop: a retained dropped torrent cannot safely update the
+		// shared upstream request-order object.
+		r.mu.Lock()
+		t, ok := r.client.Torrent(hash)
+		if !ok || t.Info() == nil || int(index) >= t.NumPieces() {
+			r.mu.Unlock()
+			return
+		}
+		piece := t.Piece(int(index))
+		state := piece.State()
+		if !state.Marking && !state.Hashing && !state.QueuedForHash {
+			piece.UpdateCompletion()
+			r.mu.Unlock()
+			return
+		}
+		// MarkComplete returns before upstream publishes its completion bit.
+		// Wait for that publication before revoking it, otherwise its later true
+		// bit could overwrite our invalidation. The tombstone excludes new IO;
+		// readers and allocations remain fenced, and Drop remains free to run.
+		r.mu.Unlock()
+		time.Sleep(time.Millisecond)
+	}
 }
 
 func parseSource(source Source) (*torrent.TorrentSpec, error) {
@@ -258,10 +329,23 @@ func (r *Runtime) Prepare(parent context.Context, source Source, expires time.Ti
 	if r.closed {
 		return nil, errors.New("runtime closed")
 	}
-	if len(r.handles) >= r.maxHandles {
+	r.cache.mu.Lock()
+	cacheFailed := r.cache.failed
+	r.cache.mu.Unlock()
+	if cacheFailed {
+		return nil, ErrCacheUnavailable
+	}
+	if len(r.handles)+len(r.retiring) >= r.maxHandles {
 		return nil, errors.New("handle capacity unavailable")
 	}
-	if _, exists := r.client.Torrent(spec.InfoHash); !exists && len(r.refs) >= r.maxInputs {
+	inputs := map[*torrent.Torrent]bool{}
+	for t := range r.refs {
+		inputs[t] = true
+	}
+	for h := range r.retiring {
+		inputs[h.t] = true
+	}
+	if _, exists := r.client.Torrent(spec.InfoHash); !exists && len(inputs) >= r.maxInputs {
 		return nil, errors.New("input capacity unavailable")
 	}
 	if len(spec.InfoBytes) == 0 {
@@ -339,6 +423,7 @@ func (h *Handle) prepare(index, archiveIndex *int) {
 		return
 	}
 	length := f.Length()
+	var resolvedArchiveIndex *int
 	open := func(ctx context.Context) (io.ReadSeekCloser, error) {
 		return &demandReader{h: h, ctx: ctx, file: f}, nil
 	}
@@ -352,6 +437,8 @@ func (h *Handle) prepare(index, archiveIndex *int) {
 			return
 		}
 		length = catalog.length
+		resolved := catalog.index
+		resolvedArchiveIndex = &resolved
 		open = func(ctx context.Context) (io.ReadSeekCloser, error) {
 			return h.openStoredArchive(ctx, f, catalog.index)
 		}
@@ -366,7 +453,7 @@ func (h *Handle) prepare(index, archiveIndex *int) {
 	}
 	h.file = f
 	h.openMedia = open
-	h.progress = Progress{Stage: "buffering", Ready: true, FileIndex: selected, Length: length}
+	h.progress = Progress{Stage: "buffering", Ready: true, FileIndex: selected, ArchiveIndex: resolvedArchiveIndex, Length: length}
 	if h.r.primeHeaders && !archiveName(f.Path()) {
 		ctx, cancel := context.WithCancel(h.ctx)
 		h.primeCancel = cancel
@@ -455,7 +542,16 @@ func (h *Handle) fail(code string) {
 	h.mu.Unlock()
 	h.Close()
 }
-func (h *Handle) Observe() Progress { h.mu.Lock(); defer h.mu.Unlock(); return h.progress }
+func (h *Handle) Observe() Progress {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	progress := h.progress
+	if progress.ArchiveIndex != nil {
+		index := *progress.ArchiveIndex
+		progress.ArchiveIndex = &index
+	}
+	return progress
+}
 func (h *Handle) MediaURL() string {
 	return "http://" + h.r.listener.Addr().String() + "/media/" + h.token
 }
@@ -476,6 +572,14 @@ func (h *Handle) Close() {
 		h.cancel()
 		r := h.r
 		r.mu.Lock()
+		joined := make(chan struct{})
+		r.retiring[h] = joined
+		defer func() {
+			r.mu.Lock()
+			delete(r.retiring, h)
+			r.mu.Unlock()
+			close(joined)
+		}()
 		delete(r.handles, h.token)
 		r.refs[h.t]--
 		last := r.refs[h.t] == 0
@@ -483,9 +587,25 @@ func (h *Handle) Close() {
 			delete(r.refs, h.t)
 			delete(r.priorities, h.t)
 			h.t.Drop()
-			r.metadataProgress.Delete(h.t.InfoHash())
 		}
 		r.mu.Unlock()
+		if last {
+			// Upstream Drop joins storage, but dial/handshake attempts are still
+			// counted until outgoingConnection retires them. Do not report joined
+			// transport cleanup early. The private Controller bounds this wait to
+			// two seconds and orders termination of its owned worker if necessary.
+			for h.t.Stats().HalfOpenPeers != 0 {
+				time.Sleep(time.Millisecond)
+			}
+			r.mu.Lock()
+			// A late completed-handshake callback can still update the meter
+			// during joined retirement. Remove it afterward, while preserving a
+			// new authorized playback of the same hash admitted meanwhile.
+			if _, live := r.client.Torrent(h.t.InfoHash()); !live {
+				r.metadataProgress.Delete(h.t.InfoHash())
+			}
+			r.mu.Unlock()
+		}
 	})
 }
 
@@ -558,7 +678,11 @@ func (r *Runtime) Close() error {
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
-		return nil
+		<-r.shutdownDone
+		r.mu.Lock()
+		err := r.shutdownError
+		r.mu.Unlock()
+		return err
 	}
 	r.closed = true
 	handles := make([]*Handle, 0, len(r.handles))
@@ -566,13 +690,34 @@ func (r *Runtime) Close() error {
 		handles = append(handles, h)
 	}
 	r.mu.Unlock()
+	// Authority revocation is independent of joining storage/handshakes. One
+	// blocked input must not leave another handle readable during shutdown.
+	for _, h := range handles {
+		h.cancel()
+	}
+	r.server.Close()
 	for _, h := range handles {
 		h.Close()
 	}
+	// Watchers can retire a handle before shutdown snapshots the live map.
+	// Retain and join those tasks too, rather than falsely reporting success.
+	r.mu.Lock()
+	retiring := make([]chan struct{}, 0, len(r.retiring))
+	for _, done := range r.retiring {
+		retiring = append(retiring, done)
+	}
+	r.mu.Unlock()
+	for _, done := range retiring {
+		<-done
+	}
 	r.saveRouting()
-	r.server.Close()
 	r.client.Close()
-	return r.cache.Close()
+	err := r.cache.Close()
+	r.mu.Lock()
+	r.shutdownError = err
+	close(r.shutdownDone)
+	r.mu.Unlock()
+	return err
 }
 
 type publicPeers struct{ allowPrivate bool }

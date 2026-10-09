@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 
@@ -38,6 +39,7 @@ else:
     if not ndk:
         raise SystemExit('ANDROID_NDK_HOME is required')
     tools = Path(ndk) / 'toolchains/llvm/prebuilt/linux-x86_64/bin'
+    shutil.copyfile(tools.parent / 'NOTICE', out / 'NDK-TOOLCHAIN-NOTICE.txt')
     for abi, arch, target in [('arm64-v8a', 'arm64', 'aarch64-linux-android'),
                               ('armeabi-v7a', 'arm', 'armv7a-linux-androideabi'),
                               ('x86_64', 'amd64', 'x86_64-linux-android')]:
@@ -45,7 +47,8 @@ else:
         dest.mkdir(parents=True, exist_ok=True)
         native = dict(env, GOOS='android', GOARCH=arch, GOARM='7',
                       CC=str(tools / (target + '24-clang')),
-                      CXX=str(tools / (target + '24-clang++')))
+                      CXX=str(tools / (target + '24-clang++')),
+                      CGO_LDFLAGS='-static-libstdc++')
         # anacrolix's Android interface dependency anet v0.0.3 links net.zoneCache.
         # Upstream requires this Go 1.23+ flag; keep it Android-only. ABI loading
         # and interface enumeration remain mandatory qualification on toolchain bumps.
@@ -56,11 +59,23 @@ else:
              '-Wl,-rpath,$ORIGIN', '-I', str(dest),
              str(ROOT / 'platform/android/bridge.c'), '-L', str(dest),
              '-ltorrent_runtime', '-o', str(dest / 'libtorrent_runtime_jni.so')], native)
+        # This private worker has one C++ owner: the Go runtime's uTP dependency.
+        # The JNI bridge is pure C, and C++ objects never cross that interface.
+        # Link its runtime statically so no omitted shared dependency or the
+        # NDK's 4 KiB-only armv7 shared runtime enters our 16 KiB artifact set.
+        stale_runtime = dest / 'libc++_shared.so'
+        if stale_runtime.exists():
+            stale_runtime.unlink()
         for library in dest.glob('*.so'):
             headers = subprocess.check_output([str(tools / 'llvm-readelf'), '-lW', str(library)], text=True)
             loads = [line.split() for line in headers.splitlines() if line.strip().startswith('LOAD')]
             if not loads or any(int(row[-1], 16) < 16384 for row in loads):
                 raise SystemExit('16 KiB ELF alignment check failed: ' + library.name)
+            dynamic = subprocess.check_output([str(tools / 'llvm-readelf'), '-d', str(library)], text=True)
+            system = {'libc.so', 'libm.so', 'libdl.so', 'liblog.so', 'libandroid.so', 'libz.so'}
+            for needed in re.findall(r'\(NEEDED\).*?\[(.*?)\]', dynamic):
+                if needed not in system and not (dest / needed).is_file():
+                    raise SystemExit('Unpackaged native dependency: ' + library.name + ' -> ' + needed)
     classes = out / 'classes'
     classes.mkdir(exist_ok=True)
     run(['javac', '--release', '8', '-d', str(classes), str(ROOT / 'platform/android/NativeRuntime.java')])

@@ -26,6 +26,7 @@ const pieceHeaderBytes = 64
 func pieceKey(hash string, index int) string { return fmt.Sprintf("%s-%08x", hash, index) }
 
 var ErrCapacity = errors.New("torrent cache capacity unavailable")
+var ErrCacheUnavailable = errors.New("torrent cache unavailable")
 
 // Cache owns a single namespace. Its lock serializes mutations with reads so a
 // slot cannot disappear or be overwritten during an actual disk operation.
@@ -39,6 +40,7 @@ type Cache struct {
 	entries         map[string]*cacheEntry
 	lock            *os.File
 	closed          bool
+	failed          bool
 	changed         chan struct{}
 	streaming       bool
 	wanted          map[string]bool
@@ -46,6 +48,8 @@ type Cache struct {
 	factors         map[*bool]int64
 	payloadCapacity atomic.Int64
 	capacity        func() (int64, bool)
+	beforeEvict     func(string)
+	onFailure       func()
 }
 
 type cacheEntry struct {
@@ -54,6 +58,7 @@ type cacheEntry struct {
 	complete  bool
 	pins      int
 	verifying bool
+	evicting  bool
 	used      time.Time
 	writes    []byteSpan
 }
@@ -184,6 +189,30 @@ func (c *Cache) setDemand(hash string, wanted, heads map[int]bool) {
 		c.wanted[key] = true
 		c.protected[key] = heads[index]
 	}
+	c.signalLocked()
+}
+
+func (c *Cache) signalLocked() {
+	close(c.changed)
+	c.changed = make(chan struct{})
+}
+
+func (c *Cache) failLocked() error {
+	if !c.failed {
+		c.failed = true
+		c.signalLocked()
+		if c.onFailure != nil {
+			go c.onFailure()
+		}
+	}
+	return ErrCacheUnavailable
+}
+
+func (c *Cache) waitChangeLocked() {
+	changed := c.changed
+	c.mu.Unlock()
+	<-changed
+	c.mu.Lock()
 }
 
 func (c *Cache) restore() error {
@@ -243,7 +272,7 @@ func (c *Cache) Stats() CacheStats {
 func (c *Cache) OpenTorrent(_ context.Context, info *metainfo.Info, hash metainfo.Hash) (storage.TorrentImpl, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.closed {
+	if c.closed || c.failed {
 		return storage.TorrentImpl{}, os.ErrClosed
 	}
 	if info.PieceLength <= 0 || info.PieceLength > c.limit/2 || c.charge(info.PieceLength) > c.limit/2 {
@@ -266,6 +295,7 @@ func (c *Cache) OpenTorrent(_ context.Context, info *metainfo.Info, hash metainf
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		closed = true
+		c.signalLocked()
 		delete(c.factors, &closed)
 		c.updateCapacityLocked()
 		for key := range c.wanted {
@@ -307,7 +337,7 @@ func (r *verifiedReader) Close() error { return nil }
 func (r *verifiedReader) ReadAt(b []byte, off int64) (int, error) {
 	r.c.mu.Lock()
 	defer r.c.mu.Unlock()
-	if r.c.closed {
+	if r.c.closed || r.c.failed {
 		return 0, os.ErrClosed
 	}
 	if off < 0 {
@@ -319,7 +349,7 @@ func (r *verifiedReader) ReadAt(b []byte, off int64) (int, error) {
 		relative := off % r.info.PieceLength
 		key := fmt.Sprintf("%s-%08x", r.hash, index)
 		e := r.c.entries[key]
-		if e == nil || !e.complete || relative >= e.length {
+		if e == nil || e.evicting || !e.complete || relative >= e.length {
 			return n, io.EOF
 		}
 		count := min(int64(len(b)-n), e.length-relative)
@@ -351,20 +381,52 @@ func (c *Cache) reserveLocked(extra int64, except string) error {
 	}
 	entries := make([]*cacheEntry, 0, len(c.entries))
 	for _, e := range c.entries {
-		if e.key != except && e.pins == 0 && !e.verifying && !c.protected[e.key] {
+		if e.key != except && e.pins == 0 && !e.verifying && !e.evicting && !c.protected[e.key] {
 			entries = append(entries, e)
 		}
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].used.Before(entries[j].used) })
 	for _, e := range entries {
-		if err := os.Remove(c.path(e.key)); err != nil {
-			return errors.New("cache eviction failed")
+		// An earlier victim may have yielded the mutex while synchronizing with
+		// the engine. Recheck every candidate and the aggregate reservation.
+		if c.closed || c.failed {
+			return os.ErrClosed
 		}
-		delete(c.entries, e.key)
-		c.used -= c.charge(e.length)
 		if c.used+extra <= c.limit {
 			return nil
 		}
+		if c.entries[e.key] != e || e.pins != 0 || e.verifying || e.evicting || c.protected[e.key] {
+			continue
+		}
+		e.evicting = true
+		c.signalLocked()
+		if c.beforeEvict != nil && payloadRecord(e.key) {
+			// Completion and all read paths now report unavailable, but the bytes
+			// and their charge remain. Never call the engine with the cache locked:
+			// UpdateCompletion calls back into Completion synchronously.
+			callback := c.beforeEvict
+			c.mu.Unlock()
+			callback(e.key)
+			c.mu.Lock()
+		}
+		if c.closed || c.failed {
+			return os.ErrClosed
+		}
+		if c.entries[e.key] != e {
+			continue
+		} // Joined owner retirement removed it.
+		if err := os.Remove(c.path(e.key)); err != nil {
+			return c.failLocked()
+		}
+		delete(c.entries, e.key)
+		c.used -= c.charge(e.length)
+		c.signalLocked()
+		if c.used+extra <= c.limit {
+			return nil
+		}
+	}
+	if c.used+extra <= c.limit {
+		return nil
 	}
 	return ErrCapacity
 }
@@ -375,9 +437,6 @@ func (p *cachePiece) WriteAt(b []byte, off int64) (int, error) {
 	c := p.c
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.closed || *p.ownerClosed {
-		return 0, os.ErrClosed
-	}
 	if off < 0 || off > p.length || int64(len(b)) > p.length-off {
 		return 0, errors.New("invalid piece write")
 	}
@@ -385,13 +444,41 @@ func (p *cachePiece) WriteAt(b []byte, off int64) (int, error) {
 	// data as immediately evicted; completion stays false and a hash read sees
 	// EOF rather than fabricated zero-filled holes. Upstream explicitly treats
 	// storage IO loss differently from peer-supplied corrupt data.
-	if c.streaming && payloadRecord(p.key) && !c.wanted[p.key] {
-		return len(b), nil
-	}
-	e := c.entries[p.key]
-	if e == nil {
+	var e *cacheEntry
+	for {
+		if c.closed || c.failed || *p.ownerClosed {
+			return 0, os.ErrClosed
+		}
+		if c.streaming && payloadRecord(p.key) && !c.wanted[p.key] {
+			return len(b), nil
+		}
+		e = c.entries[p.key]
+		if e != nil {
+			if e.evicting {
+				c.waitChangeLocked()
+				continue
+			}
+			break
+		}
 		if err := c.reserveLocked(c.charge(p.length), p.key); err != nil {
+			transient := false
+			for _, entry := range c.entries {
+				transient = transient || entry.pins > 0 || entry.verifying || entry.evicting
+			}
+			if errors.Is(err, ErrCapacity) && transient && payloadRecord(p.key) && c.charge(p.length) <= c.limit {
+				c.waitChangeLocked()
+				continue
+			}
 			return 0, err
+		}
+		if c.closed || c.failed || *p.ownerClosed {
+			return 0, os.ErrClosed
+		}
+		if c.entries[p.key] != nil {
+			continue
+		}
+		if c.streaming && payloadRecord(p.key) && !c.wanted[p.key] {
+			return len(b), nil
 		}
 		f, err := os.OpenFile(c.path(p.key), os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
 		if err != nil {
@@ -415,9 +502,12 @@ func (p *cachePiece) WriteAt(b []byte, off int64) (int, error) {
 		e = &cacheEntry{key: p.key, length: p.length, used: time.Now()}
 		c.entries[p.key] = e
 		c.used += c.charge(p.length)
+		break
 	}
 	if e.complete {
-		return 0, errors.New("cannot overwrite verified piece")
+		// A concurrent hasher may have published before a late duplicate write
+		// reaches storage. Keep immutable verified bytes; this is not disk failure.
+		return len(b), nil
 	}
 	f, err := os.OpenFile(c.path(p.key), os.O_RDWR, 0600)
 	if err != nil {
@@ -428,6 +518,9 @@ func (p *cachePiece) WriteAt(b []byte, off int64) (int, error) {
 	if n > 0 {
 		e.recordWrite(off, off+int64(n))
 	}
+	if err == nil && !payloadRecord(p.key) {
+		e.verifying = true
+	}
 	e.used = time.Now()
 	return n, err
 }
@@ -436,11 +529,11 @@ func (p *cachePiece) ReadAt(b []byte, off int64) (int, error) {
 	c := p.c
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.closed || *p.ownerClosed {
+	if c.closed || c.failed || *p.ownerClosed {
 		return 0, os.ErrClosed
 	}
 	e := c.entries[p.key]
-	if e == nil {
+	if e == nil || e.evicting {
 		return 0, io.EOF
 	}
 	if off < 0 {
@@ -468,7 +561,7 @@ func (p *cachePiece) Completion() storage.Completion {
 	p.c.mu.Lock()
 	defer p.c.mu.Unlock()
 	e := p.c.entries[p.key]
-	return storage.Completion{Ok: true, Complete: !p.c.closed && !*p.ownerClosed && e != nil && e.complete}
+	return storage.Completion{Ok: true, Complete: !p.c.closed && !p.c.failed && !*p.ownerClosed && e != nil && !e.evicting && e.complete}
 }
 
 func (p *cachePiece) MarkComplete() error {
@@ -476,13 +569,13 @@ func (p *cachePiece) MarkComplete() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e := c.entries[p.key]
-	if c.closed || *p.ownerClosed {
+	if c.closed || c.failed || *p.ownerClosed {
 		return os.ErrClosed
 	}
-	if e == nil {
+	if e == nil || e.evicting {
 		return io.EOF
 	}
-	defer func() { e.verifying = false }()
+	defer func() { e.verifying = false; c.signalLocked() }()
 	if e.complete {
 		return nil
 	}
@@ -510,8 +603,6 @@ func (p *cachePiece) MarkComplete() error {
 	e.complete = true
 	e.writes = nil
 	e.used = time.Now()
-	close(c.changed)
-	c.changed = make(chan struct{})
 	return nil
 }
 
@@ -520,13 +611,14 @@ func (p *cachePiece) MarkNotComplete() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e := c.entries[p.key]
-	if c.closed || *p.ownerClosed {
+	if c.closed || c.failed || *p.ownerClosed {
 		return os.ErrClosed
 	}
-	if e == nil {
+	if e == nil || e.evicting {
 		return nil
 	}
 	e.verifying = false
+	c.signalLocked()
 	e.complete = false
 	e.writes = nil
 	f, err := os.OpenFile(c.path(p.key), os.O_RDWR, 0600)
@@ -546,17 +638,17 @@ type pinnedReader struct {
 
 func (r *pinnedReader) ReadAt(b []byte, off int64) (int, error) { return r.p.ReadAt(b, off) }
 func (r *pinnedReader) Close() error {
-	r.once.Do(func() { r.p.c.mu.Lock(); r.e.pins--; r.p.c.mu.Unlock() })
+	r.once.Do(func() { r.p.c.mu.Lock(); r.e.pins--; r.p.c.signalLocked(); r.p.c.mu.Unlock() })
 	return nil
 }
 func (p *cachePiece) NewReader() (storage.PieceReader, error) {
 	p.c.mu.Lock()
 	defer p.c.mu.Unlock()
 	e := p.c.entries[p.key]
-	if p.c.closed || *p.ownerClosed {
+	if p.c.closed || p.c.failed || *p.ownerClosed {
 		return nil, os.ErrClosed
 	}
-	if e == nil {
+	if e == nil || e.evicting {
 		return nil, io.EOF
 	}
 	e.pins++
@@ -575,5 +667,6 @@ func (c *Cache) Close() error {
 		return nil
 	}
 	c.closed = true
+	c.signalLocked()
 	return c.lock.Close()
 }
