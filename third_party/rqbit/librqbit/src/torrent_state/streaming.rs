@@ -78,6 +78,7 @@ impl TorrentStreams {
         &'a self,
         lengths: &'a Lengths,
         capacity: Option<u64>,
+        max_lookahead: Option<u64>,
     ) -> impl Iterator<Item = ValidPieceIndex> + 'a {
         struct Interleave<I> {
             all: VecDeque<I>,
@@ -103,6 +104,13 @@ impl TorrentStreams {
                     .max(u64::from(lengths.default_piece_length()))
             })
             .unwrap_or(PER_STREAM_BUF_DEFAULT);
+        let lookahead = max_lookahead
+            .map(|limit| {
+                lookahead
+                    .min(limit)
+                    .max(u64::from(lengths.default_piece_length()))
+            })
+            .unwrap_or(lookahead);
         let mut all: Vec<_> = self
             .streams
             .iter()

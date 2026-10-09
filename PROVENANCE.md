@@ -147,3 +147,11 @@ A stalled owned seeder reserves the full fixture; an additional fast seeder must
 then serve the decoder's verified first bytes within 3.8 seconds. The previous
 five-second idle wait fails that regression, while the one-second retry passes
 and joins consumer/seeder shutdown. Ordinary gateway retry timing is unchanged.
+
+
+Native stream lookahead is capped at 16 MiB per reader, while retaining at least
+one complete verified piece and the existing 256 MiB input reservation. The
+rolling cache size must not allocate 128 MiB of future work that competes with
+startup/preroll ranges. Ordinary gateway lookahead and cache admission remain
+unchanged. Public-swarm measurements qualify transfer benefit separately from
+artifact integrity and owned range/retirement tests.
