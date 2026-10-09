@@ -210,5 +210,7 @@ then decodes the key as IP plus port when serving `get_peers`. An owned fixture
 using that store could not return the correct peer. The fixture root now uses
 an independent fixed response; the candidate's real DHT lookup resolves it.
 This does not indicate that third-party DHT roots use that broken store.
-The runtime's incoming DHT peer-store behavior and memory bounds require follow-up
-before qualification. [Pinned store source](https://github.com/anacrolix/dht/blob/ec3a9bd99456/peer-store/in-memory.go).
+The production client leaves that optional peer store unset; the defect belongs
+to the test-root setup and does not require a runtime peer-store replacement.
+See [library ownership audit](../docs/TORRENT_LIBRARY_BOUNDARY.md).
+[Pinned store source](https://github.com/anacrolix/dht/blob/ec3a9bd99456/peer-store/in-memory.go).

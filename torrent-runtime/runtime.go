@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/anacrolix/torrent"
@@ -767,30 +768,30 @@ func (p *publicPacket) WriteTo(b []byte, addr net.Addr) (int, error) {
 	return p.PacketConn.WriteTo(b, addr)
 }
 func publicDial(privateFixture bool) func(context.Context, string, string) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: 10 * time.Second,
+		ControlContext: func(_ context.Context, _ string, address string, _ syscall.RawConn) error {
+			// Go has already resolved the candidate address here. Validate the exact
+			// socket destination before connect; keep DNS, address-family racing and
+			// the single overall dial budget in the standard library.
+			host, port, err := net.SplitHostPort(address)
+			if err != nil {
+				return errors.New("invalid destination")
+			}
+			n, err := strconv.Atoi(port)
+			if err != nil || n < 1 || n > 65535 {
+				return errors.New("invalid destination")
+			}
+			if !privateFixture && !publicIP(net.ParseIP(host)) {
+				return errors.New("non-public destination")
+			}
+			return nil
+		},
+	}
 	return func(ctx context.Context, network, address string) (net.Conn, error) {
-		host, port, err := net.SplitHostPort(address)
+		conn, err := dialer.DialContext(ctx, network, address)
 		if err != nil {
-			return nil, errors.New("invalid destination")
+			return nil, errors.New("destination unavailable")
 		}
-		n, e := strconv.Atoi(port)
-		if e != nil || n < 1 || n > 65535 {
-			return nil, errors.New("invalid destination")
-		}
-		ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-		if err != nil {
-			return nil, errors.New("destination lookup failed")
-		}
-		for _, ip := range ips {
-			if !privateFixture && !publicIP(ip.IP) {
-				return nil, errors.New("non-public destination")
-			}
-		}
-		for _, ip := range ips {
-			conn, e := (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, network, net.JoinHostPort(ip.IP.String(), port))
-			if e == nil {
-				return conn, nil
-			}
-		}
-		return nil, errors.New("destination unreachable")
+		return conn, nil
 	}
 }

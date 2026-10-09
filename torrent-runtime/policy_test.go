@@ -61,6 +61,45 @@ func TestPublicDestinationsAndUDPTrackerGuard(t *testing.T) {
 	}
 }
 
+func TestTrackerDialDelegatesHostnameResolutionAndChecksActualDestination(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	_, port, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := net.JoinHostPort("localhost", port)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if conn, err := publicDial(false)(ctx, "tcp4", address); err == nil {
+		conn.Close()
+		t.Fatal("resolved private tracker destination was connected")
+	}
+	if err = listener.(*net.TCPListener).SetDeadline(time.Now().Add(50 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	if conn, err := listener.Accept(); err == nil {
+		conn.Close()
+		t.Fatal("destination guard ran after connecting")
+	}
+	if err = listener.(*net.TCPListener).SetDeadline(time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := publicDial(true)(ctx, "tcp4", address)
+	if err != nil {
+		t.Fatal("owned fixture hostname failed through the standard resolver")
+	}
+	defer conn.Close()
+	accepted, err := listener.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted.Close()
+}
+
 func TestStartupBudgetIncludesReadyEndpointUntilFirstFrame(t *testing.T) {
 	_, raw, _ := seedFixture(t, false)
 	r, err := newRuntime(Config{CacheDir: t.TempDir(), CacheBytes: 32 << 10}, true)
