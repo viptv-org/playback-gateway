@@ -22,6 +22,7 @@ use tokio::{io::AsyncReadExt, time::timeout};
 struct Gate {
     armed: AtomicBool,
     block_from: AtomicU64,
+    paced: AtomicBool,
     reads: Mutex<Vec<u64>>,
     active: AtomicBool,
     released: Mutex<bool>,
@@ -73,6 +74,14 @@ impl TorrentStorage for DelayedStorage {
             self.gate.reads.lock().unwrap().push(offset);
         }
         if self.gate.armed.load(Ordering::Acquire)
+            && self.gate.paced.load(Ordering::Acquire)
+            && offset < 64 * 1024
+        {
+            self.gate.active.store(true, Ordering::Release);
+            std::thread::sleep(Duration::from_millis(900));
+            return self.inner.pread_exact(id, offset, buf);
+        }
+        if self.gate.armed.load(Ordering::Acquire)
             && offset >= self.gate.block_from.load(Ordering::Acquire)
             && offset < 64 * 1024
         {
@@ -113,20 +122,25 @@ impl TorrentStorage for DelayedStorage {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn native_idle_peer_recovers_decoder_piece_before_socket_expiry() {
-    recover_from_owned_peer(false, false).await;
+    recover_from_owned_peer(false, false, false).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn native_takeover_requests_only_missing_chunks_before_hash_verification() {
-    recover_from_owned_peer(true, false).await;
+    recover_from_owned_peer(true, false, false).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn native_retired_peer_cannot_reset_successor_partial_chunks() {
-    recover_from_owned_peer(true, true).await;
+    recover_from_owned_peer(true, true, false).await;
 }
 
-async fn recover_from_owned_peer(partial: bool, retire_previous: bool) {
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn native_progressing_owner_is_not_replaced_on_total_piece_age() {
+    recover_from_owned_peer(false, false, true).await;
+}
+
+async fn recover_from_owned_peer(partial: bool, retire_previous: bool, progressing: bool) {
     let seed = tempfile::tempdir().unwrap();
     let source = seed.path().join("owned.bin");
     let bytes: Vec<u8> = (0..2 * 1024 * 1024 - 1).map(|n| (n % 251) as u8).collect();
@@ -154,6 +168,7 @@ async fn recover_from_owned_peer(partial: bool, retire_previous: bool) {
     let mut peers = Vec::new();
     let gate = Arc::new(Gate::default());
     let fast_gate = Arc::new(Gate::default());
+    gate.paced.store(progressing, Ordering::Release);
     fast_gate.block_from.store(
         if retire_previous { 48 * 1024 } else { u64::MAX },
         Ordering::Release,
@@ -378,6 +393,13 @@ async fn recover_from_owned_peer(partial: bool, retire_previous: bool) {
     };
     let result = timeout(Duration::from_millis(3800), reading).await;
     gate.release();
+    let steals = handle
+        .live()
+        .unwrap()
+        .peers
+        .stats
+        .steals
+        .load(Ordering::Relaxed);
     assert_eq!(
         consumer
             .shutdown_and_settle_until(tokio::time::Instant::now() + Duration::from_secs(2))
@@ -401,6 +423,9 @@ async fn recover_from_owned_peer(partial: bool, retire_previous: bool) {
         "retired peer invalidated chunks now held by its successor"
     );
     assert_eq!(first.as_slice(), &bytes[..16]);
+    if progressing {
+        assert_eq!(steals, 0, "a peer delivering new chunks was replaced solely because the whole piece took two seconds");
+    }
     if partial {
         let mut reads: Vec<_> = fast_gate
             .reads

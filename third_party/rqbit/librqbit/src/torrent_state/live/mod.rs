@@ -132,7 +132,8 @@ fn piece_takeover_due(
 ) -> bool {
     if native_current {
         // The decoder must not wait for a speed sample from an idle/slow initial
-        // owner while faster peers download unrelated lookahead pieces.
+        // owner while faster peers download unrelated lookahead pieces. The native
+        // caller supplies time since the last newly accepted chunk, not piece age.
         return elapsed >= Duration::from_secs(2);
     }
     average.is_some_and(|average| elapsed.as_secs_f64() > average.as_secs_f64() * threshold)
@@ -172,6 +173,7 @@ mod startup_piece_tests {
 struct InflightPiece {
     peer: PeerHandle,
     started: Instant,
+    last_progress: Instant,
 }
 
 fn make_piece_bitfield(lengths: &Lengths) -> BF {
@@ -1441,6 +1443,7 @@ impl PeerHandler {
                     InflightPiece {
                         peer: self.addr,
                         started: Instant::now(),
+                        last_progress: Instant::now(),
                     },
                 );
                 g.get_chunks_mut()?.reserve_needed_piece(n);
@@ -1481,7 +1484,14 @@ impl PeerHandler {
                 .filter(|(id, r)| {
                     r.peer != self.addr && available.get(id.get_usize()).is_some_and(|have| *have)
                 })
-                .map(|(p, r)| (p, r.started.elapsed(), r))
+                .map(|(p, r)| {
+                    let elapsed = if native && current.contains(p) {
+                        r.last_progress.elapsed()
+                    } else {
+                        r.started.elapsed()
+                    };
+                    (p, elapsed, r)
+                })
                 .filter(|(id, elapsed, _)| {
                     piece_takeover_due(
                         *elapsed,
@@ -1508,6 +1518,7 @@ impl PeerHandler {
                     let old = piece_req.peer;
                     piece_req.peer = self.addr;
                     piece_req.started = Instant::now();
+                    piece_req.last_progress = piece_req.started;
                     (*idx, old)
                 } else {
                     debug!(?idx, ?piece_req, "attempted to steal but peer was writing");
@@ -1925,7 +1936,13 @@ impl PeerHandler {
                 {
                     return Ok(());
                 }
+                let newly_received = !g.get_chunks()?.is_chunk_received(chunk_info);
                 let chunk_marking_result = g.get_chunks_mut()?.mark_chunk_downloaded(piece);
+                if newly_received {
+                    if let Some(owner) = g.inflight_pieces.get_mut(&chunk_info.piece_index) {
+                        owner.last_progress = Instant::now();
+                    }
+                }
                 trace!(?piece, chunk_marking_result=?chunk_marking_result);
 
                 match chunk_marking_result {
