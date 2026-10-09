@@ -126,6 +126,9 @@ fn piece_takeover_due(
     average.is_some_and(|average| elapsed.as_secs_f64() > average.as_secs_f64() * threshold)
 }
 
+#[cfg(all(test, feature = "test-network-policy"))]
+mod native_idle_recovery_tests;
+
 #[cfg(test)]
 mod startup_piece_tests {
     use super::*;
@@ -1629,13 +1632,14 @@ impl PeerHandler {
                 Some(next) => next,
                 None => {
                     debug!("no pieces to request");
-                    match aframe!(tokio::time::timeout(
-                        // Half of default rw timeout not to race with it.
-                        Duration::from_secs(5),
-                        new_piece_notify
-                    ))
-                    .await
-                    {
+                    // Retry current-piece recovery before native idle sockets
+                    // reach their five-second read deadline.
+                    let retry_after = if self.state.shared.connector.network_policy.is_native() {
+                        Duration::from_secs(1)
+                    } else {
+                        Duration::from_secs(5)
+                    };
+                    match aframe!(tokio::time::timeout(retry_after, new_piece_notify)).await {
                         Ok(()) => debug!("woken up, new pieces might be available"),
                         Err(_) => debug!("woken up by sleep timer"),
                     }

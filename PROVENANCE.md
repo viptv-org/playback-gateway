@@ -139,3 +139,11 @@ before waking peer workers. Existing selected-file authority, verified-piece IO,
 read accounting and owned connection cancellation remain in force. A real-storage
 HTTP-body regression fails when the reader disappears between frames; it also
 checks retired bodies cannot publish another chunk and release their read charge.
+
+
+Native idle requesters retry once per second so the existing two-second
+current-piece takeover runs before the five-second native socket read deadline.
+A stalled owned seeder reserves the full fixture; an additional fast seeder must
+then serve the decoder's verified first bytes within 3.8 seconds. The previous
+five-second idle wait fails that regression, while the one-second retry passes
+and joins consumer/seeder shutdown. Ordinary gateway retry timing is unchanged.
