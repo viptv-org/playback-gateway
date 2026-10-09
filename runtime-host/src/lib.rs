@@ -66,8 +66,20 @@ impl Worker {
         let (requests, pending) = mpsc::sync_channel::<Request>(8);
         std::thread::spawn(move || {
             let mut output = BufReader::new(output);
+            let mut initialized = false;
             for request in pending {
                 let response = (|| {
+                    if !initialized {
+                        let startup: Value = serde_json::from_slice(&read_frame(&mut output)?)
+                            .map_err(|_| WorkerError::Protocol)?;
+                        if startup["version"].as_u64() != Some(2)
+                            || startup["ready"] != true
+                            || startup.get("ok").is_some()
+                        {
+                            return Err(WorkerError::Protocol);
+                        }
+                        initialized = true;
+                    }
                     input
                         .write_all(&request.bytes)
                         .map_err(|_| WorkerError::Unavailable)?;
@@ -203,6 +215,25 @@ mod tests {
             read_frame(&mut vec![b'a'; MAX_FRAME + 1].as_slice()).unwrap_err(),
             WorkerError::Protocol
         );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn readiness_banner_precedes_the_first_control_reply() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("viptv-banner-test-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let script = root.join("worker");
+        std::fs::write(&script, b"#!/bin/sh\nprintf '%s\\n' '{\"version\":2,\"ready\":true,\"qualification\":\"candidate\"}'\nwhile IFS= read -r request; do printf '%s\\n' '{\"version\":2,\"ok\":true}'; done\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let worker = Worker::start(&script, &root, 64 << 20).unwrap();
+        assert_eq!(
+            worker
+                .call(json!({"op":"observe","handle":"1"}), Duration::from_secs(1))
+                .unwrap()["ok"],
+            true
+        );
+        worker.shutdown().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
     }
     #[cfg(unix)]
     #[test]
