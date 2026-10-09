@@ -41,6 +41,7 @@ pub fn router(state: Api) -> Router {
     let control = Router::new()
         .route("/v1/capabilities", get(capabilities))
         .route("/v1/sessions", post(create))
+        .route("/v1/preparations/:id", get(preparation_stage))
         .route("/v1/sessions/:id", get(session).delete(release))
         .route("/v1/sessions/:id/renew", post(renew))
         .layer(DefaultBodyLimit::max(256 * 1024))
@@ -192,6 +193,18 @@ async fn release(
         .release(&principal, &id, now()?)
         .map_err(ApiError)?;
     Ok(StatusCode::NO_CONTENT)
+}
+async fn preparation_stage(
+    State(state): State<Api>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let stage = state
+        .workers
+        .preparation_stage(&principal, &id)
+        .await
+        .map_err(ApiError)?;
+    Ok(Json(serde_json::json!({"stage":stage})))
 }
 async fn capabilities(
     State(state): State<Api>,

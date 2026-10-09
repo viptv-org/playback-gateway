@@ -70,6 +70,7 @@ impl RuntimeSources {
         input: &Input,
         metainfo: Option<Vec<u8>>,
         pending: Option<Arc<dyn Send + Sync>>,
+        stage: Arc<std::sync::atomic::AtomicU8>,
     ) -> Result<Arc<RuntimeSource>, &'static str> {
         let worker = self.worker().await?;
         let mut source = json!({});
@@ -136,6 +137,14 @@ impl RuntimeSources {
             )
             .await?;
             let progress = &reply["progress"];
+            let observed = match progress["stage"].as_str() {
+                Some("finding_peers") => 1,
+                Some("fetching_metadata") => 2,
+                Some("opening_archive") => 3,
+                Some("buffering" | "playing") => 4,
+                _ => 0,
+            };
+            stage.store(observed, std::sync::atomic::Ordering::Release);
             if let Some(code) = progress["error"].as_str() {
                 return Err(if matches!(code, "startup_stalled" | "startup_deadline") {
                     match progress["stage"].as_str() {

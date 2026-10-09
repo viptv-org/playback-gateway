@@ -269,3 +269,11 @@ These fields participate in source identity; they cannot merge incompatible
 selection constraints. Native v1 negotiation is a separate backend contract.
 Compressed/encrypted/missing archive errors and startup phase failures remain
 closed codes; no source URL, private runtime token or decoder stderr is returned.
+
+`GET /v1/preparations/:idempotency_key` reports `{ "stage": null | string }`
+while that key's torrent create request is active. Only its integration key
+and namespace with read scope can observe it. Stages are `finding_peers`,
+`fetching_metadata`, `opening_archive` and `buffering`; no private source,
+capability, byte count or authority is returned. Missing/retired requests return
+404. Observing progress never renews a viewer or private runtime lease.
+Existing session responses and protocol negotiation remain unchanged.

@@ -52,6 +52,29 @@ async fn pending_torrent_admission_blocks_concurrent_inputs_and_cancellation_rec
         .await
         .unwrap()
         .unwrap();
+    assert_eq!(
+        workers
+            .preparation_stage(&principal, "first")
+            .await
+            .unwrap(),
+        Some("fetching_metadata")
+    );
+    let mut other = principal.clone();
+    other.key.id = "other-owned-key".into();
+    assert_eq!(
+        workers.preparation_stage(&other, "first").await.err(),
+        Some("session_not_found")
+    );
+    let mut no_read = principal.clone();
+    no_read
+        .key
+        .spec
+        .scopes
+        .retain(|scope| *scope != Scope::Read);
+    assert_eq!(
+        workers.preparation_stage(&no_read, "first").await.err(),
+        Some("forbidden")
+    );
     request.input.url = format!("http://{address}/other.torrent");
     assert_eq!(
         workers.create(&principal, &request, "other", 0).await.err(),
@@ -68,6 +91,10 @@ async fn pending_torrent_admission_blocks_concurrent_inputs_and_cancellation_rec
     .await
     .unwrap();
     assert_eq!(workers.available(&principal, 0).unwrap().inputs, 1);
+    assert_eq!(
+        workers.preparation_stage(&principal, "first").await.err(),
+        Some("session_not_found")
+    );
     server.abort();
 }
 

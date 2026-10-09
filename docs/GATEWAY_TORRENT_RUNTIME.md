@@ -75,3 +75,28 @@ observation was 21.9 seconds. These are individual integration observations,
 not matched latency comparisons. Browser startup used a test page around the
 production player adapter; full backend account/source-screen admission was
 not part of this probe. Physical Roku delivery remains separate.
+
+## Measured progress and complete backend admission
+
+Gateway preparations expose only a closed stage to the owning integration key
+through `/v1/preparations/:idempotency_key`. Source progress is shared by actual
+input identity; unrelated metadata waits remain concurrent. Observation records
+are bounded and are removed on cancellation/completion. Reading stages confers
+no playback authority and does not renew a lease.
+
+The backend brokers those facts through the separate
+`/api/v2/playback/:id/progress` route after account/profile/source and gateway
+configuration validation. Web maps the stage through shared core's canonical
+copy; Roku's scoped Task field updates its existing status label once per change.
+Old playback session/negotiation envelopes are unchanged. Unknown stage values,
+raw diagnostics and stale request owners never reach the status surface.
+
+A subsequent trusted-HTTPS run exercised the real backend account/profile/vault,
+registered add-on discovery, gateway admission, the production `TvApi`, shared
+Rust/WASM normalization, `PlaybackSessionController` and Mediabunny presentation.
+It showed Finding peers → Fetching metadata → Buffering from measured worker
+states, then presented six frames with an advancing clock. Admission and player
+opening took 18.37 seconds in that one cold observation. Stopping through the
+production controller/backend immediately made its media URL return 401. No
+production data or physical device was involved. The test page wrapped production
+API/controller code; ordinary account login/catalog screens were not exercised.

@@ -15,7 +15,7 @@ use std::{
     collections::HashMap,
     io::{Read, Seek, SeekFrom},
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
         Arc, Weak,
     },
     time::Duration,
@@ -28,7 +28,11 @@ pub struct Sources {
     manager: TorrentManager,
     client: Client,
     resolved: Mutex<HashMap<[u8; 32], CachedSource>>,
-    acquiring: Mutex<HashMap<[u8; 32], Weak<Mutex<()>>>>,
+    acquiring: Mutex<HashMap<[u8; 32], Weak<Acquisition>>>,
+}
+struct Acquisition {
+    lock: Mutex<()>,
+    stage: Arc<AtomicU8>,
 }
 struct CachedSource {
     source: Weak<ResolvedSource>,
@@ -145,6 +149,30 @@ impl Sources {
         resolved.retain(|_, cached| !cached.source.ptr_eq(&Arc::downgrade(source)));
         Ok(())
     }
+    pub async fn stage(&self, namespace: &str, input: &Input) -> Option<&'static str> {
+        let identity = serde_json::to_vec(&(namespace, input)).ok()?;
+        let key: [u8; 32] = Sha256::digest(identity).into();
+        let observed = self
+            .acquiring
+            .lock()
+            .await
+            .get(&key)
+            .and_then(Weak::upgrade)
+            .map(|acquisition| acquisition.stage.load(Ordering::Acquire));
+        match observed {
+            Some(1) => Some("finding_peers"),
+            Some(2) => Some("fetching_metadata"),
+            Some(3) => Some("opening_archive"),
+            Some(4) => Some("buffering"),
+            _ => self
+                .resolved
+                .lock()
+                .await
+                .get(&key)
+                .and_then(|cached| cached.source.upgrade())
+                .map(|_| "buffering"),
+        }
+    }
     pub async fn resolve(
         &self,
         namespace: &str,
@@ -166,12 +194,15 @@ impl Sources {
                     if acquiring.len() >= 1024 {
                         return Err("input_capacity");
                     }
-                    let lock = Arc::new(Mutex::new(()));
+                    let lock = Arc::new(Acquisition {
+                        lock: Mutex::new(()),
+                        stage: Arc::new(AtomicU8::new(0)),
+                    });
                     acquiring.insert(key, Arc::downgrade(&lock));
                     lock
                 }
             };
-            let _acquiring = lock.lock().await;
+            let _acquiring = lock.lock.lock().await;
             // Only this identity is serialized. Other torrents can discover concurrently.
             if let Some(cached) = self
                 .resolved
@@ -198,6 +229,7 @@ impl Sources {
             let metainfo = if input.url.starts_with("magnet:") {
                 None
             } else {
+                lock.stage.store(2, Ordering::Release);
                 let response = fetch(
                     &self.client,
                     &input.url,
@@ -210,7 +242,10 @@ impl Sources {
                 }
                 Some(bounded_body(response, 4 * 1024 * 1024).await?)
             };
-            let runtime = self.runtime.resolve(input, metainfo, pending).await?;
+            let runtime = self
+                .runtime
+                .resolve(input, metainfo, pending, lock.stage.clone())
+                .await?;
             let source = Arc::new(ResolvedSource {
                 url: runtime.url.clone(),
                 file: TorrentFile {

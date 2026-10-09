@@ -283,3 +283,10 @@ observation was 21.9 seconds. These are individual integration observations,
 not matched latency comparisons. Browser startup used a test page around the
 production player adapter; full backend account/source-screen admission was
 not part of this probe. Physical Roku delivery remains separate.
+
+The complete ephemeral backend account/profile/add-on/gateway → production
+browser API/controller → decoder path now has real HTTPS frame and backend-stop
+revocation proof. Advisory progress also arrived through that path as measured
+peer/metadata/buffering transitions. Gateway scope/cancellation and backend
+cross-account/no-renewal tests cover its independent routes; native v1 envelopes
+are unchanged. Physical Roku/Windows presentation remains separately unverified.

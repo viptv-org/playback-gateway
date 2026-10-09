@@ -39,6 +39,7 @@ pub struct Workers {
     sources: Arc<Sources>,
     input_sources: Mutex<BTreeMap<String, Arc<ResolvedSource>>>,
     input_routes: Mutex<BTreeMap<String, Arc<TrustedRange>>>,
+    preparation_progress: ProgressRecords,
 }
 impl Workers {
     pub fn media_storage_available(&self) -> bool {
@@ -150,6 +151,7 @@ impl Workers {
             sources,
             input_sources: Mutex::new(BTreeMap::new()),
             input_routes: Mutex::new(BTreeMap::new()),
+            preparation_progress: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -205,6 +207,32 @@ impl Workers {
         {
             return Ok(viewer);
         }
+        let observation = if request.input.torrent() {
+            let key = (principal.key.id.clone(), idempotency.to_owned());
+            let mut pending = self
+                .preparation_progress
+                .lock()
+                .map_err(|_| "session_store_unavailable")?;
+            if pending.len() >= 1024 {
+                return Err("input_capacity");
+            }
+            // The record contains private input only; the API exposes a closed stage.
+            if pending.contains_key(&key) {
+                None
+            } else {
+                pending.insert(
+                    key.clone(),
+                    (request.namespace.clone(), request.input.clone()),
+                );
+                Some(PreparationProgress {
+                    records: self.preparation_progress.clone(),
+                    key,
+                })
+            }
+        } else {
+            None
+        };
+        let _observation = observation;
         let started = Instant::now();
         let deadline = Duration::from_secs(request.input.startup_seconds());
         let pending = if request.input.torrent() || request.input.archive() {
@@ -445,6 +473,24 @@ impl Workers {
             .get(principal, &reservation.viewer.id, timestamp)
     }
 
+    pub async fn preparation_stage(
+        &self,
+        principal: &Principal,
+        id: &str,
+    ) -> Result<Option<&'static str>, &'static str> {
+        if id.is_empty() || id.len() > 128 {
+            return Err("session_not_found");
+        }
+        let record = self
+            .preparation_progress
+            .lock()
+            .map_err(|_| "session_store_unavailable")?
+            .get(&(principal.key.id.clone(), id.to_owned()))
+            .cloned()
+            .ok_or("session_not_found")?;
+        principal.require(&record.0, Scope::Read)?;
+        Ok(self.sources.stage(&record.0, &record.1).await)
+    }
     async fn key_active(&self, id: &str, now: u64) -> Result<bool, &'static str> {
         let now = i64::try_from(now).map_err(|_| "unauthorized")?;
         let credentials = self.credentials.clone();
@@ -651,6 +697,18 @@ impl Workers {
     }
 }
 
+type ProgressRecords = Arc<Mutex<HashMap<(String, String), (String, crate::protocol::Input)>>>;
+struct PreparationProgress {
+    records: ProgressRecords,
+    key: (String, String),
+}
+impl Drop for PreparationProgress {
+    fn drop(&mut self) {
+        if let Ok(mut records) = self.records.lock() {
+            records.remove(&self.key);
+        }
+    }
+}
 struct SourcePreparation {
     sessions: Arc<Mutex<Sessions>>,
     sources: Arc<Sources>,
