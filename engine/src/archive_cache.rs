@@ -37,6 +37,21 @@ impl ArchiveCache {
             state: Mutex::new(State::default()),
         })))
     }
+    pub async fn initialize(&self) -> Result<(), String> {
+        let cache = self.0.clone();
+        tokio::task::spawn_blocking(move || {
+            if !cache.enabled {
+                return Ok(());
+            }
+            let mut state = cache.state.lock().unwrap_or_else(|e| e.into_inner());
+            if state.lock.is_none() {
+                state.lock = Some(prepare(&cache.path)?);
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|_| "Torrent cache unavailable")?
+    }
     pub async fn reserve_cache(&self, bytes: u64) -> Result<ArchiveCacheReservation, String> {
         let cache = self.0.clone();
         tokio::task::spawn_blocking(move || {
@@ -144,13 +159,15 @@ fn prepare(path: &Path) -> Result<File, String> {
         options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
     }
     let lock = options
-        .open(path.join(".archive-lock"))
+        .open(path.join(".gateway-lock"))
         .map_err(|_| "Torrent cache lock unavailable")?;
     lock.try_lock()
         .map_err(|_| "Torrent cache already in use")?;
     for entry in std::fs::read_dir(path).map_err(|_| "Torrent cache unavailable")? {
         let entry = entry.map_err(|_| "Torrent cache unavailable")?;
-        if entry.file_name().to_string_lossy().starts_with("archive-") {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("archive-") || name.starts_with("torrent-") {
             let kind = entry.file_type().map_err(|_| "Torrent cache unavailable")?;
             if !kind.is_dir() || kind.is_symlink() {
                 return Err("Unsafe torrent cache entry".into());
@@ -198,5 +215,35 @@ mod tests {
         );
         drop(reopened);
         second.reap().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn upgrade_reclaims_inactive_legacy_payload_without_touching_go_records() {
+        let root = tempfile::tempdir().unwrap();
+        let legacy = root.path().join("torrent-0123456789abcdef0123456789abcdef");
+        std::fs::create_dir(&legacy).unwrap();
+        std::fs::write(legacy.join("payload"), b"legacy transport bytes").unwrap();
+        let shared = root.path().join("shared-runtime-v2");
+        std::fs::create_dir(&shared).unwrap();
+        std::fs::write(shared.join("retained.piece"), b"verified Go record").unwrap();
+        let owner = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(root.path().join(".gateway-lock"))
+            .unwrap();
+        owner.try_lock().unwrap();
+        let cache = ArchiveCache::new(root.path().to_owned(), true, MIN_CACHE_BYTES).unwrap();
+        assert!(cache.initialize().await.is_err());
+        assert!(
+            legacy.exists(),
+            "an active legacy owner must prevent migration"
+        );
+        drop(owner);
+        cache.initialize().await.unwrap();
+        assert!(!legacy.exists());
+        assert_eq!(
+            std::fs::read(shared.join("retained.piece")).unwrap(),
+            b"verified Go record"
+        );
     }
 }

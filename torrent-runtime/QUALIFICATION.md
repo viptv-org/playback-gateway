@@ -190,11 +190,15 @@ The existing Rust gateway workspace tests and design validation passed.
    corpus. Record steady playback, seeks, memory, disk and cancellation; revise
    the candidate's reliability and latency. These performance comparisons are
    follow-up work and no longer block owner-authorized client integration.
-2. Extend discovery/hostile-wire fixtures to the full network matrix, and stress
-   eviction with files larger than device storage, simultaneous active
-   viewers and repeated crash/restart.
-3. Complete the archive matrix, including encrypted RAR5, every multipart
-   boundary and explicit/default inner-member selection across multiple entries.
+2. The controlled tracker-only, DHT-only, uTP-only, unreachable, slow,
+   corrupt-piece and dropped-handshake fixtures pass. Rolling cache, cross-file
+   pieces, independent handles and killed-process recovery pass. Sustained
+   physical-device storage/thermal stress remains separately coordinated.
+3. Stored RAR4/RAR5 and multipart ranges pass. The expanded RAR5 fixture covers
+   explicit/default selection among three entries, stable largest-member ties,
+   all seven volume ranges in both seek directions, invalid member selection,
+   actual encrypted headers/members, and compressed RAR5 refusal. Parser memory
+   and the piece budget stay bounded; no whole-file extraction is introduced.
 4. Build and verify Android ABI loading/Media3, Linux and Windows native player
    behavior. Cross-compilation alone does not qualify playback.
 5. Integrate backend/core versioned negotiation and shared deadlines, Android
@@ -205,6 +209,27 @@ The existing Rust gateway workspace tests and design validation passed.
    wrappers only after replacement qualification.
 
 Physical-device tests and production rollout remain separately coordinated.
+
+## Final archive and production dependency checks, 2026-10-09
+
+The full Go race suite passes with the expanded stored/encrypted/compressed RAR5
+matrix (12.394 s); `go vet ./...` passes. The generated fixtures contain original
+byte patterns only. Their writer provenance and public fixture password are in
+`engine/assets/rar-selection/README.md`; no writer binary or provider media ships.
+
+The normal Rust gateway dependency graph excludes rqbit. Generic HTTP Range task
+ownership uses Tokio tracking; HTTP archive reservations preserve cancellation,
+exclusive ownership and accounting until blocking IO ends. Normal-feature tests
+cover real HTTP ranges and task destruction, and workspace tests retain the
+legacy comparison and inherited media tests. Cache upgrade takes the legacy
+parent ownership lock, reclaims inactive old payloads and preserves the Go
+record directory. An active legacy owner prevents migration.
+
+The normal Android debug and optimized APKs exclude the v1 JNI transport and
+notices; the explicit debug comparison option retains them for qualification.
+The production Go code and all consumer artifact pins remain at the same
+immutable `c7bb3f1f9a332c20aa8f81aa165d053c35fa7277` revision. These additional
+archive checks change tests and fixture bytes, not that transport implementation.
 
 ## DHT fixture dependency observation
 

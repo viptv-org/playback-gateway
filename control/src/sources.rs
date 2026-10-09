@@ -61,12 +61,8 @@ impl Sources {
             config.cache_dir.join("shared-runtime-v2"),
             config.max_bytes,
         ));
-        let archive_cache = ArchiveCache::new(
-            config.cache_dir.join("http-archives"),
-            enabled,
-            config.max_bytes,
-        )
-        .map_err(|_| "invalid_torrent_configuration")?;
+        let archive_cache = ArchiveCache::new(config.cache_dir, enabled, config.max_bytes)
+            .map_err(|_| "invalid_torrent_configuration")?;
         let client = Client::builder()
             .no_proxy()
             .proxy(reqwest::Proxy::all(proxy).map_err(|_| "egress_unavailable")?)
@@ -85,6 +81,10 @@ impl Sources {
     }
     pub async fn initialize(&self) -> Result<(), &'static str> {
         if self.enabled {
+            self.archive_cache
+                .initialize()
+                .await
+                .map_err(|_| "torrent_cache_unavailable")?;
             self.runtime.initialize().await?;
         }
         Ok(())

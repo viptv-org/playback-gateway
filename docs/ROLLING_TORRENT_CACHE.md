@@ -70,7 +70,7 @@ It compares the first decoded seek frame with the requested source timestamp
 and checks retained input allocation against the small cache budget.
 
 ```sh
-CARGO_BUILD_JOBS=1 cargo test --locked -p playback-engine --test torrent_rolling
+CARGO_BUILD_JOBS=1 cargo test --locked -p playback-engine --features torrent --test torrent_rolling
 CARGO_BUILD_JOBS=1 PLAYBACK_TEST_FFMPEG=/path/to/ffmpeg9 \
   PLAYBACK_TEST_FFPROBE=/path/to/ffprobe9 cargo test --locked -p playback-gateway --lib \
   workers::torrent_tests::rolling_torrent_viewers_decode_seek_with_bounded_input \

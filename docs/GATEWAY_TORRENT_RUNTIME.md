@@ -12,6 +12,9 @@ archive ranges use Tokio task tracking and a separate bounded archive spool
 owner; stored HTTP archives reserve no payload spool. Torrent archives use the
 Go runtime's verified piece cache and seekable stored-RAR reader. The explicit
 engine `torrent` feature retains v1 comparison/rollback code and inherited tests.
+Startup holds the parent cache's legacy ownership lock and removes inactive
+legacy payload/spool directories before opening Go. An active old owner prevents
+migration; retained `shared-runtime-v2` records are preserved.
 
 Sources share by namespace and full input identity. One identity's preparation
 lock does not cover unrelated metadata waits. Output jobs retain their source
