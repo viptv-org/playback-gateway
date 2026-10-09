@@ -211,17 +211,24 @@ pub fn source_display_text(
     text[..end].to_owned()
 }
 
+pub mod input;
+pub use input::{TorrentConfig, TorrentFile};
+
+#[cfg(feature = "archive")]
+pub mod archive_cache;
+#[cfg(all(feature = "range", not(feature = "torrent")))]
+mod range_tasks;
 #[cfg(feature = "archive")]
 pub mod rar;
 #[cfg(feature = "torrent")]
 pub mod torrent;
-#[cfg(feature = "torrent")]
+#[cfg(feature = "range")]
 mod torrent_stream;
 #[cfg(feature = "torrent")]
 pub use torrent::{
-    AcquisitionStatus, Settlement, TorrentAcquisition, TorrentCacheReservation, TorrentConfig,
-    TorrentFile, TorrentHandle, TorrentManager, TorrentReadSettler, TorrentStatus,
+    AcquisitionStatus, Settlement, TorrentAcquisition, TorrentCacheReservation, TorrentHandle,
+    TorrentManager, TorrentReadSettler, TorrentStatus,
 };
 
-#[cfg(feature = "torrent")]
+#[cfg(feature = "range")]
 pub use torrent_stream::{LoopbackStream, TorrentRangeSource};

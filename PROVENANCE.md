@@ -34,7 +34,7 @@ by itself change the deployed VIPTV backend or prove gateway cutover complete.
 
 ## In-process torrent/archive checkpoint
 
-The torrent transport maintains canonical rqbit sources under
+The explicit development comparison transport maintains canonical rqbit sources under
 `third_party/rqbit`, patched through the root Cargo manifest. `Cargo.lock`
 resolves librqbit 8.1.1, librqbit-core 5.0.0, librqbit-dht 5.3.1 and
 librqbit-tracker-comms 3.0.0 to those local sources; the owning gateway commit
@@ -68,7 +68,9 @@ compression implementation.
 Inherited code and notices remain GPL-2.0-only. Archive-enabled in-process
 binaries have an unresolved GPL-2.0-only/GPL-3.0-or-later distribution
 incompatibility; these licenses are not claimed compatible. The engine's
-`archive` feature owns unrar-rs and remains enabled in the default gateway build.
+`archive` feature owns unrar-rs and remains enabled in the default gateway build,
+independently from its opt-in legacy `torrent` feature. Normal gateway builds do
+not link rqbit; workspace comparison tests and the v1 facade explicitly enable it.
 The selected-package native facade enables only `torrent`, excluding the archive
 extractor and its dependency from its normal build graph. That exclusion does not
 clear other dependency/license obligations or establish distribution readiness. The separate

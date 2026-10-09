@@ -2,9 +2,9 @@
 //! HTTP metainfo and archive ranges always traverse the vetted egress proxy.
 use crate::protocol::Input;
 use playback_engine::{
+    archive_cache::{ArchiveCache, ArchiveCacheReservation},
     rar::{RarMedia, RarVolume},
-    LoopbackStream, TorrentCacheReservation, TorrentConfig, TorrentFile, TorrentManager,
-    TorrentRangeSource,
+    LoopbackStream, TorrentConfig, TorrentFile, TorrentRangeSource,
 };
 use reqwest::{
     header::{HeaderMap, HeaderName, HeaderValue},
@@ -25,7 +25,7 @@ use tokio::sync::{Mutex, Notify};
 pub struct Sources {
     enabled: bool,
     runtime: Arc<crate::runtime_sources::RuntimeSources>,
-    manager: TorrentManager,
+    archive_cache: ArchiveCache,
     client: Client,
     resolved: Mutex<HashMap<[u8; 32], CachedSource>>,
     acquiring: Mutex<HashMap<[u8; 32], Weak<Acquisition>>>,
@@ -52,11 +52,8 @@ impl ResolvedSource {
     }
 }
 impl Sources {
-    pub fn new(mut config: TorrentConfig, proxy: &str) -> Result<Self, &'static str> {
+    pub fn new(config: TorrentConfig, proxy: &str) -> Result<Self, &'static str> {
         let enabled = config.enabled;
-        // Server inputs retain their handle through actual output cleanup.
-        // Once idle, remove them promptly rather than continuing peer downloads.
-        config.idle_timeout = Duration::ZERO;
         let runtime = Arc::new(crate::runtime_sources::RuntimeSources::new(
             std::env::var_os("TORRENT_WORKER")
                 .map(std::path::PathBuf::from)
@@ -64,7 +61,12 @@ impl Sources {
             config.cache_dir.join("shared-runtime-v2"),
             config.max_bytes,
         ));
-        let manager = TorrentManager::new(config).map_err(|_| "invalid_torrent_configuration")?;
+        let archive_cache = ArchiveCache::new(
+            config.cache_dir.join("http-archives"),
+            enabled,
+            config.max_bytes,
+        )
+        .map_err(|_| "invalid_torrent_configuration")?;
         let client = Client::builder()
             .no_proxy()
             .proxy(reqwest::Proxy::all(proxy).map_err(|_| "egress_unavailable")?)
@@ -75,7 +77,7 @@ impl Sources {
         Ok(Self {
             enabled,
             runtime,
-            manager,
+            archive_cache,
             client,
             resolved: Mutex::new(HashMap::new()),
             acquiring: Mutex::new(HashMap::new()),
@@ -124,7 +126,7 @@ impl Sources {
         resolved.retain(|_, cached| cached.source.strong_count() > 0);
         drop(resolved);
         self.runtime.reap().await?;
-        self.manager
+        self.archive_cache
             .reap()
             .await
             .map_err(|_| "torrent_cache_unavailable")
@@ -305,7 +307,11 @@ impl Sources {
         if !inspected.stored {
             return Err("compressed_archive_unsupported");
         }
-        let reservation = self.manager.reserve_cache(0).await.map_err(torrent_error)?;
+        let reservation = self
+            .archive_cache
+            .reserve_cache(0)
+            .await
+            .map_err(torrent_error)?;
         let (media, reservation) = extract_owned(volumes, reservation, pending).await?;
         let file = TorrentFile {
             index: 0,
@@ -340,9 +346,9 @@ impl Sources {
 }
 async fn extract_owned(
     volumes: Vec<Arc<dyn RarVolume>>,
-    reservation: TorrentCacheReservation,
+    reservation: ArchiveCacheReservation,
     pending: Option<Arc<dyn Send + Sync>>,
-) -> Result<(RarMedia, TorrentCacheReservation), &'static str> {
+) -> Result<(RarMedia, ArchiveCacheReservation), &'static str> {
     let path = reservation.path().to_owned();
     let bytes = reservation.bytes();
     tokio::task::spawn_blocking(move || {
@@ -498,7 +504,7 @@ impl Drop for ArchiveReadGuard {
 }
 struct ArchiveSource {
     media: RarMedia,
-    _reservation: Arc<TorrentCacheReservation>,
+    _reservation: Arc<ArchiveCacheReservation>,
     reads: Arc<ArchiveReads>,
 }
 impl TorrentRangeSource for ArchiveSource {
@@ -707,19 +713,17 @@ mod tests {
             }
         }
         let root = tempfile::tempdir().unwrap();
-        let manager = TorrentManager::new(TorrentConfig {
-            enabled: true,
-            cache_dir: root.path().join("cache"),
-            enable_dht: false,
-            max_bytes: playback_engine::torrent::MIN_CACHE_BYTES,
-            ..Default::default()
-        })
+        let archive_cache = ArchiveCache::new(
+            root.path().join("cache"),
+            true,
+            playback_engine::input::MIN_CACHE_BYTES,
+        )
         .unwrap();
-        let retained = manager
-            .reserve_cache(playback_engine::torrent::MIN_CACHE_BYTES - 10000)
+        let retained = archive_cache
+            .reserve_cache(playback_engine::input::MIN_CACHE_BYTES - 10000)
             .await
             .unwrap();
-        let reservation = manager.reserve_cache(10000).await.unwrap();
+        let reservation = archive_cache.reserve_cache(10000).await.unwrap();
         let (opened, opening) = tokio::sync::oneshot::channel();
         let (release, releasing) = std::sync::mpsc::channel();
         let task = tokio::spawn(extract_owned(
@@ -734,13 +738,13 @@ mod tests {
         task.abort();
         let _ = task.await;
         assert!(
-            manager.reserve_cache(1).await.is_err(),
+            archive_cache.reserve_cache(1).await.is_err(),
             "cancellation must not refund bytes still owned by a blocking decoder"
         );
         release.send(()).unwrap();
         let restored = tokio::time::timeout(Duration::from_secs(3), async {
             loop {
-                if let Ok(reservation) = manager.reserve_cache(10000).await {
+                if let Ok(reservation) = archive_cache.reserve_cache(10000).await {
                     break reservation;
                 }
                 tokio::task::yield_now().await;
@@ -791,7 +795,7 @@ mod tests {
                     enabled: true,
                     cache_dir: root.path().join("cache"),
                     enable_dht: false,
-                    max_bytes: playback_engine::torrent::MIN_CACHE_BYTES,
+                    max_bytes: playback_engine::input::MIN_CACHE_BYTES,
                     ..Default::default()
                 },
                 "http://127.0.0.1:9",
@@ -799,11 +803,11 @@ mod tests {
             .unwrap(),
         );
         let retained = sources
-            .manager
-            .reserve_cache(playback_engine::torrent::MIN_CACHE_BYTES - 10000)
+            .archive_cache
+            .reserve_cache(playback_engine::input::MIN_CACHE_BYTES - 10000)
             .await
             .unwrap();
-        let reservation = sources.manager.reserve_cache(10000).await.unwrap();
+        let reservation = sources.archive_cache.reserve_cache(10000).await.unwrap();
         let armed = Arc::new(AtomicBool::new(false));
         let (opened, opening) = tokio::sync::oneshot::channel();
         let (release, releasing) = std::sync::mpsc::channel();
@@ -878,7 +882,7 @@ mod tests {
         let _ = request.await;
         drop(source);
         assert!(
-            sources.manager.reserve_cache(1).await.is_err(),
+            sources.archive_cache.reserve_cache(1).await.is_err(),
             "cancelled HTTP/source futures cannot refund a blocking reader's cache owner"
         );
         let reap = tokio::spawn({
@@ -898,7 +902,7 @@ mod tests {
             .unwrap();
         let restored = tokio::time::timeout(Duration::from_secs(2), async {
             loop {
-                if let Ok(reservation) = sources.manager.reserve_cache(10000).await {
+                if let Ok(reservation) = sources.archive_cache.reserve_cache(10000).await {
                     break reservation;
                 }
                 tokio::task::yield_now().await;

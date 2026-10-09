@@ -109,8 +109,11 @@ serialized per source identity, allowing unrelated torrents to proceed concurren
 The final output closes its private handle; retirement retains admission until
 owned cleanup settles. A stuck worker is terminated, and recovery revalidates cache.
 
-The old engine/facade remains for native v1 compatibility, development comparison
-and rollback qualification. The gateway API does not acquire torrents through it.
+The gateway production dependency graph excludes rqbit. Engine-neutral input
+descriptors, HTTP archive reservations and tracked Range tasks do not enable its
+transport feature. The old engine/facade remains behind the explicit engine
+`torrent` feature for native v1 compatibility, development comparison and rollback
+qualification. Workspace tests enable it to preserve inherited comparison tests.
 See [legacy facade](ffi/README.md), [comparison ledger](docs/TORRENT_QUALIFICATION.md)
 and [native v1 policy](docs/NATIVE_NETWORK_POLICY.md).
 

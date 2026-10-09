@@ -32,7 +32,6 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
-    net::SocketAddr,
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -47,47 +46,11 @@ use tokio::{
 };
 use uuid::Uuid;
 
-pub const MIN_CACHE_BYTES: u64 = 256 * 1024 * 1024;
+pub use crate::input::{validate_magnet, TorrentConfig, TorrentFile, MIN_CACHE_BYTES};
 const MAX_METAINFO_BYTES: usize = 4 * 1024 * 1024;
 pub(crate) const MAX_RANGE_BYTES: u32 = 8 * 1024 * 1024;
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Operator configuration. Constructing a disabled manager does no IO.
-#[derive(Clone)]
-pub struct TorrentConfig {
-    pub enabled: bool,
-    pub cache_dir: PathBuf,
-    pub max_bytes: u64,
-    /// Optional fixed disk-slot reservation per ordinary-video input.
-    /// Archives retain full-payload storage; native exact acquisition also opts in.
-    pub piece_cache_bytes: Option<u64>,
-    pub listen_port: Option<u16>,
-    /// Peer/DHT connections are an explicit opt-in exception to HTTP egress policy.
-    pub enable_dht: bool,
-    /// Operator-supplied bootstrap peers (not source URI fields).
-    pub initial_peers: Vec<SocketAddr>,
-    pub idle_timeout: Duration,
-}
-impl Default for TorrentConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            cache_dir: PathBuf::from("data/torrent-cache"),
-            max_bytes: 2 * 1024 * 1024 * 1024,
-            piece_cache_bytes: None,
-            listen_port: None,
-            enable_dht: true,
-            initial_peers: Vec::new(),
-            idle_timeout: Duration::from_secs(60),
-        }
-    }
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TorrentFile {
-    pub index: u32,
-    pub name: String,
-    pub size: u64,
-}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TorrentStatus {
     pub downloaded_bytes: u64,
@@ -205,7 +168,7 @@ impl TorrentManager {
     #[cfg(feature = "test-network-policy")]
     pub fn new_native_owned(
         mut config: TorrentConfig,
-        owned: Vec<SocketAddr>,
+        owned: Vec<std::net::SocketAddr>,
     ) -> Result<Self, String> {
         if config.enable_dht
             || config.listen_port.is_some()
@@ -1202,56 +1165,6 @@ impl Drop for HandleState {
 }
 /// Validate URI structure without resolving or fetching any URLs. HTTP tracker
 /// fetching and source-provided peers/alternate webseed sources are disabled.
-pub fn validate_magnet(source: &str) -> Result<(), String> {
-    if source.len() > 16 * 1024 {
-        return Err("Invalid magnet URI".into());
-    }
-    let url = url::Url::parse(source).map_err(|_| "Invalid magnet URI")?;
-    if url.scheme() != "magnet"
-        || !url.path().is_empty()
-        || url.fragment().is_some()
-        || url.host_str().is_some()
-    {
-        return Err("Invalid magnet URI".into());
-    }
-    let mut hash = false;
-    for (key, value) in url.query_pairs() {
-        match key.as_ref() {
-            "xt" => {
-                if hash || !value.starts_with("urn:btih:") {
-                    return Err("Unsupported magnet hash".into());
-                }
-                let h = &value[9..];
-                if !(h.len() == 40 && h.chars().all(|c| c.is_ascii_hexdigit())
-                    || h.len() == 32
-                        && h.chars()
-                            .all(|c| c.is_ascii_alphabetic() || ('2'..='7').contains(&c)))
-                {
-                    return Err("Unsupported magnet hash".into());
-                }
-                hash = true;
-            }
-            "tr" => {
-                let u = url::Url::parse(&value).map_err(|_| "Invalid magnet tracker")?;
-                if !matches!(u.scheme(), "http" | "https" | "udp")
-                    || u.host_str().is_none()
-                    || !u.username().is_empty()
-                    || u.password().is_some()
-                    || u.fragment().is_some()
-                {
-                    return Err("Invalid magnet tracker".into());
-                }
-            }
-            "dn" => {}
-            _ => return Err("Unsupported magnet parameter".into()),
-        }
-    }
-    if !hash {
-        return Err("Unsupported magnet hash".into());
-    }
-    librqbit::Magnet::parse(source).map_err(|_| "Invalid magnet URI")?;
-    Ok(())
-}
 fn validate_metainfo(bytes: &[u8]) -> Result<(), String> {
     if bytes.is_empty() || bytes.len() > MAX_METAINFO_BYTES {
         return Err("Invalid torrent metadata".into());
@@ -1488,12 +1401,6 @@ fn strip_trackers(bytes: &[u8]) -> Result<Vec<u8>, String> {
     out.extend_from_slice(parsed.info_bytes.as_ref());
     out.push(b'e');
     Ok(out)
-}
-
-impl std::fmt::Debug for TorrentConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("TorrentConfig(<redacted>)")
-    }
 }
 
 impl Drop for ManagerInner {

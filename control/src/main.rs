@@ -59,7 +59,7 @@ impl Settings {
                 .unwrap_or_else(|_| "2147483648".into())
                 .parse::<u64>()
                 .ok()
-                .filter(|bytes| *bytes >= playback_engine::torrent::MIN_CACHE_BYTES)
+                .filter(|bytes| *bytes >= playback_engine::input::MIN_CACHE_BYTES)
                 .ok_or("invalid TORRENT_CACHE_MAX_BYTES")?,
             torrent_piece_cache_bytes: match std::env::var("TORRENT_PIECE_CACHE_BYTES") {
                 Ok(value) => match value.parse::<u64>() {

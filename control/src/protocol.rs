@@ -53,7 +53,7 @@ impl Input {
         }
         let url = url::Url::parse(&self.url).map_err(|_| "invalid_input")?;
         if url.scheme() == "magnet" {
-            playback_engine::torrent::validate_magnet(&self.url).map_err(|_| "invalid_input")?;
+            playback_engine::input::validate_magnet(&self.url).map_err(|_| "invalid_input")?;
             if !self.headers.is_empty() {
                 return Err("invalid_headers");
             }

@@ -1,4 +1,7 @@
 //! Token-protected loopback Range transport; independent of the media/axum path.
+#[cfg(not(feature = "torrent"))]
+use crate::range_tasks::OwnedTasks;
+#[cfg(feature = "torrent")]
 use crate::torrent::HandleState;
 use http_body_util::{combinators::UnsyncBoxBody, BodyExt, Full, StreamBody};
 use hyper::{
@@ -8,11 +11,12 @@ use hyper::{
     Method, Request, Response, StatusCode,
 };
 use hyper_util::rt::{TokioIo, TokioTimer};
+#[cfg(feature = "torrent")]
 use librqbit::OwnedTasks;
 use std::{
     convert::Infallible,
     io,
-    sync::{atomic::Ordering, Arc, Weak},
+    sync::{Arc, Weak},
     time::Duration,
 };
 use tokio::{net::TcpListener, sync::Semaphore, task::JoinSet};
@@ -61,10 +65,12 @@ pub struct LoopbackStream {
     _source: Option<Arc<dyn TorrentRangeSource>>,
 }
 impl LoopbackStream {
+    #[cfg(feature = "torrent")]
     pub(crate) async fn start(source: Weak<HandleState>) -> Result<Self, String> {
         let source: Weak<dyn TorrentRangeSource> = source;
         Self::start_weak(source, None, OwnedTasks::new(Default::default())).await
     }
+    #[cfg(feature = "torrent")]
     pub(crate) async fn start_owned(
         source: Weak<HandleState>,
         tasks: OwnedTasks,
@@ -298,12 +304,13 @@ fn parse_range(value: &str, size: u64) -> Option<(u64, u64)> {
     Some((start, end - start + 1))
 }
 
+#[cfg(feature = "torrent")]
 impl TorrentRangeSource for HandleState {
     fn file_size(&self, index: u32) -> Option<u64> {
         self.file(index).map(|f| f.size)
     }
     fn is_closed(&self) -> bool {
-        self.stopped.load(Ordering::Acquire)
+        self.stopped.load(std::sync::atomic::Ordering::Acquire)
     }
     fn file_extension(&self, index: u32) -> String {
         self.file(index)

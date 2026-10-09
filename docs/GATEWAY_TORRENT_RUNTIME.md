@@ -7,6 +7,12 @@ termination/reaping and redacted errors. Gateway source resolution preserves
 tracker/file/archive hints and exposes only a registered, exact private Range URI
 to the existing FFmpeg inspection/planner. Source URLs never enter diagnostics.
 
+The production Rust gateway excludes rqbit from its dependency graph. Its HTTP
+archive ranges use Tokio task tracking and a separate bounded archive spool
+owner; stored HTTP archives reserve no payload spool. Torrent archives use the
+Go runtime's verified piece cache and seekable stored-RAR reader. The explicit
+engine `torrent` feature retains v1 comparison/rollback code and inherited tests.
+
 Sources share by namespace and full input identity. One identity's preparation
 lock does not cover unrelated metadata waits. Output jobs retain their source
 through real media-process cleanup; weak source caches cannot confer authority.
@@ -114,3 +120,14 @@ The resolved file/archive tuple is retained in the shared cache independently of
 live authority. Piece, metainfo, routing and selection records share one bounded
 accounting/validation model; selection records do not count as downloaded payload
 progress. Native artifacts and this gateway worker adopt the same source revision.
+
+## Production transport dependency qualification
+
+The normal `cargo check --locked -p playback-gateway` and
+`cargo tree -p playback-gateway --edges normal` exclude every rqbit crate.
+Engine tests with normal features exercise token-protected HEAD/Range bytes,
+revocation and joined listener shutdown. HTTP task retirement must also wait for
+captured IO destruction; a timed-out receipt stays failed after late completion.
+Archive reservations retain their bytes and exclusive directory owner until
+blocking readers finish, and reclaim abandoned spools after restart. Workspace
+tests retain the inherited archive cancellation and legacy transport checks.

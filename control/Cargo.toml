@@ -23,6 +23,7 @@ tracing = "0.1"
 service-telemetry = { path = "../telemetry" }
 
 [dev-dependencies]
+playback-engine = { path = "../engine", features = ["torrent"] }
 librqbit = { version = "=8.1.1", default-features = false, features = ["rust-tls"] }
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
