@@ -59,6 +59,20 @@ func TestGatewayQualificationWorker(t *testing.T) {
 			stats["peers"] = peers
 			stats["pieces"] = pieces
 			stats["received"] = received
+			awaitingFrame := 0
+			for _, handle := range controller.handles {
+				handle.mu.Lock()
+				if !handle.firstFrame {
+					awaitingFrame++
+				}
+				handle.mu.Unlock()
+			}
+			stats["awaiting_first_frame"] = awaitingFrame
+			if handle := controller.handles[request.Handle]; handle != nil {
+				handle.mu.Lock()
+				stats["first_frame_reported"] = handle.firstFrame
+				handle.mu.Unlock()
+			}
 			for _, t := range r.client.Torrents() {
 				stats["known_peers"] = t.Stats().TotalPeers
 				stats["half_open"] = t.Stats().HalfOpenPeers

@@ -41,6 +41,12 @@ pub fn router(state: Api) -> Router {
     let control = Router::new()
         .route("/v1/capabilities", get(capabilities))
         .route("/v1/sessions", post(create))
+        .route("/v2/torrent-sessions", post(create_v2))
+        .route(
+            "/v2/torrent-runtime-protocol",
+            get(torrent_runtime_protocol),
+        )
+        .route("/v2/torrent-sessions/:id/first-frame", post(first_frame))
         .route(
             "/v1/preparations/:id",
             get(preparation_stage).delete(cancel_preparation),
@@ -130,10 +136,58 @@ async fn create(
     headers: HeaderMap,
     body: Result<Json<CreateSession>, JsonRejection>,
 ) -> Result<Response, ApiError> {
+    create_session(state, principal, headers, body, false).await
+}
+async fn create_v2(
+    State(state): State<Api>,
+    Extension(principal): Extension<Principal>,
+    headers: HeaderMap,
+    body: Result<Json<CreateSession>, JsonRejection>,
+) -> Result<Response, ApiError> {
+    create_session(state, principal, headers, body, true).await
+}
+async fn first_frame(
+    State(state): State<Api>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+    body: Result<Json<serde_json::Value>, JsonRejection>,
+) -> Result<StatusCode, ApiError> {
+    if !payload(body)?
+        .as_object()
+        .is_some_and(|object| object.is_empty())
+    {
+        return Err(ApiError("invalid_request"));
+    }
+    state
+        .workers
+        .first_frame(&principal, &id, now()?)
+        .await
+        .map_err(ApiError)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn torrent_runtime_protocol(
+    State(state): State<Api>,
+    Extension(principal): Extension<Principal>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if !principal.key.spec.scopes.contains(&Scope::Capabilities) {
+        return Err(ApiError("forbidden"));
+    }
+    Ok(Json(
+        serde_json::json!({"version":2,"first_frame_ack":state.workers.torrent_enabled()}),
+    ))
+}
+async fn create_session(
+    state: Api,
+    principal: Principal,
+    headers: HeaderMap,
+    body: Result<Json<CreateSession>, JsonRejection>,
+    client_frame_ack: bool,
+) -> Result<Response, ApiError> {
     if !state.ready.load(Ordering::Acquire) || !state.workers.media_storage_available() {
         return Err(ApiError("not_ready"));
     }
-    let request = payload(body)?;
+    let mut request = payload(body)?;
+    request.client_frame_ack = client_frame_ack;
     if headers.get_all("idempotency-key").iter().count() != 1 {
         return Err(ApiError("invalid_idempotency_key"));
     }
@@ -546,6 +600,79 @@ mod tests {
             .0,
             StatusCode::METHOD_NOT_ALLOWED
         );
+        workers.shutdown().await;
+    }
+    #[tokio::test]
+    async fn v2_torrent_routes_preserve_v1_and_reject_unscoped_or_open_ack_bodies() {
+        let (_root, workers, principal) = fixture(false).await;
+        let mut spec = principal.key.spec.clone();
+        spec.scopes.push(Scope::Capabilities);
+        let issued = workers.credentials.issue(BOOTSTRAP, spec, 0).unwrap();
+        let app = router(Api {
+            workers: workers.clone(),
+            ready: Arc::new(AtomicBool::new(true)),
+        });
+        let (status, _, protocol) = call(
+            &app,
+            "GET",
+            "/v2/torrent-runtime-protocol",
+            &issued.secret,
+            None,
+            String::new(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&protocol).unwrap(),
+            serde_json::json!({"version":2,"first_frame_ack":false})
+        );
+        let body = serde_json::to_string(&crate::workers::tests::request(3840)).unwrap();
+        let (status, _, _) = call(
+            &app,
+            "POST",
+            "/v2/torrent-sessions",
+            &issued.secret,
+            Some("modern-http"),
+            body.clone(),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "v2 selects decoder acknowledgement and requires a torrent input"
+        );
+        let (status, _, _) = call(
+            &app,
+            "POST",
+            "/v1/sessions",
+            &issued.secret,
+            Some("legacy-http"),
+            body,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        for body in ["{\"source\":\"private\"}", "[]"] {
+            let (status, _, _) = call(
+                &app,
+                "POST",
+                "/v2/torrent-sessions/unknown/first-frame",
+                &issued.secret,
+                None,
+                body.into(),
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+        }
+        let (status, _, _) = call(
+            &app,
+            "POST",
+            "/v2/torrent-sessions/unknown/first-frame",
+            &issued.secret,
+            None,
+            "{}".into(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
         workers.shutdown().await;
     }
 }

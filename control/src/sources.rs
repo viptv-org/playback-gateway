@@ -41,6 +41,7 @@ struct CachedSource {
 pub struct ResolvedSource {
     pub url: String,
     pub file: TorrentFile,
+    pub client_frame_ack: bool,
     _archive: Option<LoopbackStream>,
     reads: Arc<ArchiveReads>,
     runtime: Option<Arc<crate::runtime_sources::RuntimeSource>>,
@@ -93,8 +94,14 @@ impl Sources {
         self.runtime.shutdown().await
     }
     pub async fn output_ready(&self, source: &Arc<ResolvedSource>) -> Result<(), &'static str> {
+        self.report_first_frame(source).await
+    }
+    pub async fn report_first_frame(
+        &self,
+        source: &Arc<ResolvedSource>,
+    ) -> Result<(), &'static str> {
         if let Some(runtime) = &source.runtime {
-            runtime.output_ready().await?;
+            runtime.report_first_frame().await?;
         }
         Ok(())
     }
@@ -151,8 +158,13 @@ impl Sources {
         resolved.retain(|_, cached| !cached.source.ptr_eq(&Arc::downgrade(source)));
         Ok(())
     }
-    pub async fn stage(&self, namespace: &str, input: &Input) -> Option<&'static str> {
-        let identity = serde_json::to_vec(&(namespace, input)).ok()?;
+    pub async fn stage(
+        &self,
+        namespace: &str,
+        input: &Input,
+        client_frame_ack: bool,
+    ) -> Option<&'static str> {
+        let identity = serde_json::to_vec(&(namespace, input, client_frame_ack)).ok()?;
         let key: [u8; 32] = Sha256::digest(identity).into();
         let observed = self
             .acquiring
@@ -175,16 +187,28 @@ impl Sources {
                 .map(|_| "buffering"),
         }
     }
+    #[cfg(test)]
     pub async fn resolve(
         &self,
         namespace: &str,
         input: &Input,
         pending: Option<Arc<dyn Send + Sync>>,
     ) -> Result<Arc<ResolvedSource>, &'static str> {
+        self.resolve_with_ack(namespace, input, pending, false)
+            .await
+    }
+    pub async fn resolve_with_ack(
+        &self,
+        namespace: &str,
+        input: &Input,
+        pending: Option<Arc<dyn Send + Sync>>,
+        client_frame_ack: bool,
+    ) -> Result<Arc<ResolvedSource>, &'static str> {
         if !self.enabled {
             return Err("unsupported_output");
         }
-        let identity = serde_json::to_vec(&(namespace, input)).map_err(|_| "invalid_input")?;
+        let identity = serde_json::to_vec(&(namespace, input, client_frame_ack))
+            .map_err(|_| "invalid_input")?;
         let key: [u8; 32] = Sha256::digest(identity).into();
         if input.torrent() {
             let lock = {
@@ -249,6 +273,7 @@ impl Sources {
                 .resolve(input, metainfo, pending, lock.stage.clone())
                 .await?;
             let source = Arc::new(ResolvedSource {
+                client_frame_ack,
                 url: runtime.url.clone(),
                 file: TorrentFile {
                     index: runtime.file_index,
@@ -327,6 +352,7 @@ impl Sources {
         .await
         .map_err(torrent_error)?;
         let source = ResolvedSource {
+            client_frame_ack,
             url: stream.url(0),
             file,
             _archive: Some(stream),
@@ -831,6 +857,7 @@ mod tests {
         .unwrap();
         let url = stream.url(0);
         let source = Arc::new(ResolvedSource {
+            client_frame_ack: false,
             url: url.clone(),
             file: TorrentFile {
                 index: 0,

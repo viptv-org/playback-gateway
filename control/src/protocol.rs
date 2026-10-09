@@ -209,6 +209,8 @@ impl Output {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CreateSession {
+    #[serde(skip)]
+    pub client_frame_ack: bool,
     pub namespace: String,
     pub input: Input,
     pub output: Output,
@@ -217,6 +219,9 @@ pub struct CreateSession {
 }
 impl CreateSession {
     pub fn validate(&self) -> Result<(), &'static str> {
+        if self.client_frame_ack && !self.input.torrent() {
+            return Err("invalid_input");
+        }
         validate_namespace(&self.namespace)?;
         self.input.validate()?;
         self.output.validate()?;

@@ -24,6 +24,7 @@ pub struct RuntimeSource {
     handle: String,
     closed: std::sync::atomic::AtomicBool,
     settled: AsyncMutex<bool>,
+    frame_acknowledged: AsyncMutex<bool>,
     renewal: Mutex<Option<tokio::task::JoinHandle<()>>>,
     retirements: Arc<Mutex<Vec<std::thread::JoinHandle<()>>>>,
     // Admission survives cancellation until the owned handle actually settles.
@@ -119,6 +120,7 @@ impl RuntimeSources {
                     handle,
                     closed: std::sync::atomic::AtomicBool::new(false),
                     settled: AsyncMutex::new(false),
+                    frame_acknowledged: AsyncMutex::new(false),
                     renewal: Mutex::new(None),
                     retirements,
                     pending,
@@ -145,17 +147,8 @@ impl RuntimeSources {
                 _ => 0,
             };
             stage.store(observed, std::sync::atomic::Ordering::Release);
-            if let Some(code) = progress["error"].as_str() {
-                return Err(if matches!(code, "startup_stalled" | "startup_deadline") {
-                    match progress["stage"].as_str() {
-                        Some("finding_peers") => "torrent_no_peers",
-                        Some("fetching_metadata") => "torrent_metadata_timeout",
-                        Some("opening_archive") => "torrent_archive_timeout",
-                        _ => "torrent_buffering_timeout",
-                    }
-                } else {
-                    runtime_failure(code)
-                });
+            if let Some(code) = progress_failure(progress) {
+                return Err(code);
             }
             if progress["ready"] == true {
                 let url = reply["media_url"]
@@ -271,22 +264,40 @@ impl RuntimeSource {
     pub(crate) async fn fixture_stats(&self) -> Value {
         call(
             self.worker.clone(),
-            json!({"op":"fixture_stats"}),
+            json!({"op":"fixture_stats","handle":self.handle}),
             Duration::from_secs(3),
         )
         .await
         .unwrap()
     }
-    pub async fn output_ready(&self) -> Result<(), &'static str> {
-        // Gateway FFmpeg has opened this verified source and produced its first output.
-        // Public clients retain their own deadline through actual presentation.
+    pub async fn report_first_frame(&self) -> Result<(), &'static str> {
+        let mut acknowledged = self.frame_acknowledged.lock().await;
+        if self.closed.load(std::sync::atomic::Ordering::Acquire) || !self.worker.is_alive() {
+            return Err("torrent_worker_unavailable");
+        }
+        let reply = call(
+            self.worker.clone(),
+            json!({"op":"observe","handle":self.handle}),
+            Duration::from_secs(3),
+        )
+        .await?;
+        if let Some(code) = progress_failure(&reply["progress"]) {
+            return Err(code);
+        }
+        if reply["progress"]["ready"] != true {
+            return Err("session_not_ready");
+        }
+        if *acknowledged {
+            return Ok(());
+        }
         call(
             self.worker.clone(),
             json!({"op":"first_frame","handle":self.handle}),
             Duration::from_secs(3),
         )
-        .await
-        .map(|_| ())
+        .await?;
+        *acknowledged = true;
+        Ok(())
     }
     pub async fn close(&self) -> Result<(), &'static str> {
         let mut settled = self.settled.lock().await;
@@ -381,6 +392,19 @@ async fn call(
     }
     Ok(reply)
 }
+fn progress_failure(progress: &Value) -> Option<&'static str> {
+    let code = progress["error"].as_str()?;
+    Some(if matches!(code, "startup_stalled" | "startup_deadline") {
+        match progress["stage"].as_str() {
+            Some("finding_peers") => "torrent_no_peers",
+            Some("fetching_metadata") => "torrent_metadata_timeout",
+            Some("opening_archive") => "torrent_archive_timeout",
+            _ => "torrent_buffering_timeout",
+        }
+    } else {
+        runtime_failure(code)
+    })
+}
 fn runtime_failure(code: &str) -> &'static str {
     match code {
         "compressed_archive_unsupported" => "compressed_archive_unsupported",
@@ -390,6 +414,7 @@ fn runtime_failure(code: &str) -> &'static str {
             "archive_metadata_invalid"
         }
         "startup_stalled" | "startup_deadline" => "startup_timeout",
+        "authority_expired" => "session_expired",
         "cache_unavailable" | "metadata_cache_unavailable" => "torrent_cache_capacity",
         "input_limit" | "handle_limit" => "input_capacity",
         "private_torrent_unsupported"

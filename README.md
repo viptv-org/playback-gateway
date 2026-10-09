@@ -12,6 +12,8 @@ FFmpeg planner, output sharing and independently authorized viewer delivery.
 See [gateway integration](docs/GATEWAY_TORRENT_RUNTIME.md),
 [qualification](torrent-runtime/QUALIFICATION.md) and
 [deferred performance](docs/TORRENT_PERFORMANCE_FOLLOWUP.md).
+The opt-in [startup v2 control routes](docs/TORRENT_STARTUP_V2.md) preserve the
+watchdog until a scoped decoder acknowledgement; v1 remains compatible.
 Physical-device qualification and production rollout remain separate.
 
 The standalone service, scoped control/media API and Docker image are implemented

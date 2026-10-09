@@ -153,16 +153,22 @@ async fn disabled_torrent_request_has_no_media_or_peer_side_effects() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires real FFmpeg/ffprobe; deterministic local BitTorrent fixture"]
 async fn real_torrent_viewers_share_output_seek_and_reap_owned_input() {
-    real_torrent_media_fixture(None).await;
+    real_torrent_media_fixture(None, false).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires real FFmpeg/ffprobe; deterministic local BitTorrent fixture"]
 async fn rolling_torrent_viewers_decode_seek_with_bounded_input() {
-    real_torrent_media_fixture(Some(256 * 1024)).await;
+    real_torrent_media_fixture(Some(256 * 1024), false).await;
 }
 
-async fn real_torrent_media_fixture(piece_cache_bytes: Option<u64>) {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires real FFmpeg/ffprobe; deterministic local BitTorrent fixture"]
+async fn v2_torrent_waits_for_scoped_decoded_frame_without_renewing_lease() {
+    real_torrent_media_fixture(None, true).await;
+}
+
+async fn real_torrent_media_fixture(piece_cache_bytes: Option<u64>, client_frame_ack: bool) {
     let ffmpeg = std::env::var("PLAYBACK_TEST_FFMPEG").expect("FFmpeg fixture path");
     let ffprobe = std::env::var("PLAYBACK_TEST_FFPROBE").expect("ffprobe fixture path");
     let root = tempfile::tempdir().unwrap();
@@ -333,6 +339,7 @@ async fn real_torrent_media_fixture(piece_cache_bytes: Option<u64>) {
             .owned_runtime_budget(root.path().join("rolling-runtime-cache"), budget);
     }
     let mut request: CreateSession = serde_json::from_value(serde_json::json!({"namespace":"fixture","input":{"url":source_url,"live":false},"output":{"protocol":"hls","conversion":"video","video_codecs":["h264"],"audio_codecs":["aac"],"max_width":640,"max_height":360}})).unwrap();
+    request.client_frame_ack = client_frame_ack;
     let workers = Arc::new(workers);
     let unrelated = tokio::spawn({
         let workers = workers.clone();
@@ -344,7 +351,7 @@ async fn real_torrent_media_fixture(piece_cache_bytes: Option<u64>) {
     tokio::time::sleep(Duration::from_millis(50)).await;
     let held_source = workers
         .sources
-        .resolve("fixture", &request.input, None)
+        .resolve_with_ack("fixture", &request.input, None, client_frame_ack)
         .await
         .unwrap();
     let result = tokio::time::timeout(
@@ -368,10 +375,30 @@ async fn real_torrent_media_fixture(piece_cache_bytes: Option<u64>) {
         .unwrap()
         .unwrap();
     assert_eq!(bytes.as_ref(), &std::fs::read(&movie).unwrap()[..65536]);
+    if client_frame_ack {
+        let legacy = workers
+            .sources
+            .resolve("fixture", &request.input, None)
+            .await
+            .unwrap();
+        assert_ne!(legacy.url, held_source.url);
+        workers.sources.output_ready(&legacy).await.unwrap();
+        assert_eq!(
+            held_source.fixture_stats().await["first_frame_reported"],
+            false
+        );
+        drop(legacy);
+    }
     let first = workers
         .create(&principal, &request, "first", 0)
         .await
         .unwrap();
+    if client_frame_ack {
+        assert_eq!(
+            held_source.fixture_stats().await["first_frame_reported"],
+            false
+        );
+    }
     let second = workers
         .create(&principal, &request, "second", 2)
         .await
@@ -394,6 +421,57 @@ async fn real_torrent_media_fixture(piece_cache_bytes: Option<u64>) {
     let target = workers.media_target(&first.id, &token, 4).await.unwrap();
     let path = root.path().join("media").join(&target.id);
     assert_decodable(&ffmpeg, &path, root.path(), "first").await;
+    if client_frame_ack {
+        let lease = workers
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&principal, &first.id, 4)
+            .unwrap()
+            .expires_at;
+        let other_key = workers
+            .credentials
+            .issue(tests::BOOTSTRAP, principal.key.spec.clone(), 4)
+            .unwrap();
+        let other = workers
+            .credentials
+            .authenticate(&other_key.secret, 4)
+            .unwrap();
+        assert_eq!(
+            workers.first_frame(&other, &first.id, 4).await.err(),
+            Some("session_not_found")
+        );
+        let mut no_renew = principal.clone();
+        no_renew
+            .key
+            .spec
+            .scopes
+            .retain(|scope| *scope != Scope::Renew);
+        assert_eq!(
+            workers.first_frame(&no_renew, &first.id, 4).await.err(),
+            Some("forbidden")
+        );
+        assert_eq!(
+            held_source.fixture_stats().await["first_frame_reported"],
+            false
+        );
+        workers.first_frame(&principal, &first.id, 4).await.unwrap();
+        workers.first_frame(&principal, &first.id, 4).await.unwrap();
+        assert_eq!(
+            held_source.fixture_stats().await["first_frame_reported"],
+            true
+        );
+        assert_eq!(
+            workers
+                .sessions
+                .lock()
+                .unwrap()
+                .get(&principal, &first.id, 4)
+                .unwrap()
+                .expires_at,
+            lease
+        );
+    }
     request.position_seconds = 3.0;
     let sought = workers
         .create(&principal, &request, "seek", 5)

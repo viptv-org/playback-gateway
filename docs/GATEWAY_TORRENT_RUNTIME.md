@@ -31,6 +31,11 @@ startup budget through player opening and presentation; qualification must
 report actual client frames separately. The gateway's direct/copy/remux/transcode
 planner and public viewer authorization remain unchanged.
 
+The separate [torrent startup v2 routes](TORRENT_STARTUP_V2.md) retain the Go
+watchdog through decoder acknowledgement. V1 keeps its compatibility behavior.
+Backend/web/Roku adoption is pending; the v2 Go/FFmpeg fixture verifies that
+output readiness and a legacy acknowledgement leave its handle awaiting a frame.
+
 ## Local qualification
 
 Run `cargo test --workspace`, then

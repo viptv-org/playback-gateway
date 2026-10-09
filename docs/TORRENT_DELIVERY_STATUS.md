@@ -23,7 +23,8 @@ Fresh installer jobs are
 and [Android 38004862330](https://github.com/viptv-org/android/actions/runs/38004862330).
 The desktop run passed on both platforms; Windows passed seven release tests
 with one LAN fixture ignored, including actual pinned worker control/settlement.
-Android's final result must still be inspected; a dispatched job is not a passing build.
+Android also passed its replacement hosted run at `54323de`: unit tests,
+three-ABI compilation, optimized APK/lint and real APK integrity checks passed.
 The first Android hosted attempt exposed a loopback fixture shutdown race. Its
 released latch wait could still be interrupted; a smaller regression reproduced
 it. Graceful fixture joining fixes it without changing native cancellation or
@@ -36,10 +37,11 @@ The gateway currently sends the same private `first_frame` operation when
 FFmpeg output preparation succeeds (`RuntimeSource::output_ready`). Public
 clients preserve their original 120-second budget through presentation, but
 that internal acknowledgement retires the Go startup/progress watchdog before
-the web/Roku first frame. The decoder acknowledgement boundary still needs
-alignment, with legacy control compatibility, scoped authority and simultaneous
-viewer coverage retained. This is a lifecycle qualification gap, distinct from
-the owner-deferred acquisition/seek performance work.
+the web/Roku first frame. [Gateway startup v2](TORRENT_STARTUP_V2.md) adds a
+separate opt-in route that waits for a scoped decoder acknowledgement, preserves
+lease expiry and isolates legacy/v2 source handles. Backend brokering and
+web/Roku actual-frame callbacks still need adoption and end-to-end qualification.
+This lifecycle work is distinct from the owner-deferred acquisition/seek performance.
 
 This ledger does not establish universal public-swarm reliability or completion
 of the remaining Windows/Roku/device qualification. Detailed measurements and

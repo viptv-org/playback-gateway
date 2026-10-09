@@ -62,6 +62,8 @@ struct OwnedViewer {
     view: Viewer,
     owner: String,
     request_hash: [u8; 32],
+    client_frame_ack: bool,
+    namespace: String,
     idempotency: String,
     media_hash: Option<[u8; 32]>,
     media_token: Option<String>,
@@ -165,7 +167,10 @@ impl Sessions {
             PendingSource {
                 owner: principal.key.id.clone(),
                 source: source_identity(request),
-                request: hash(&serde_json::to_string(request).map_err(|_| "invalid_request")?),
+                request: hash(
+                    &serde_json::to_string(&(request, request.client_frame_ack))
+                        .map_err(|_| "invalid_request")?,
+                ),
             },
         );
         Ok(id)
@@ -288,7 +293,10 @@ impl Sessions {
         {
             return Err("invalid_idempotency_key");
         }
-        let request_hash = hash(&serde_json::to_string(request).map_err(|_| "invalid_request")?);
+        let request_hash = hash(
+            &serde_json::to_string(&(request, request.client_frame_ack))
+                .map_err(|_| "invalid_request")?,
+        );
         let Some(existing) = self
             .viewers
             .values()
@@ -323,7 +331,8 @@ impl Sessions {
         if !plan.shareable && !(single && request.input.live) {
             return Err("unsupported_output");
         }
-        let body = serde_json::to_string(request).map_err(|_| "invalid_request")?;
+        let body = serde_json::to_string(&(request, request.client_frame_ack))
+            .map_err(|_| "invalid_request")?;
         let request_hash = hash(&body);
         if self.viewers.len() >= self.max_records {
             return Err("session_capacity");
@@ -359,6 +368,7 @@ impl Sessions {
             headers,
             request.input.live,
             request.input.file_index,
+            request.client_frame_ack,
             // A seek starts another provider pipeline. Only live outputs have
             // a common realtime origin independent of the output plan.
             if request.input.live {
@@ -450,6 +460,8 @@ impl Sessions {
                 view: view.clone(),
                 owner: principal.key.id.clone(),
                 request_hash,
+                client_frame_ack: request.client_frame_ack,
+                namespace: request.namespace.clone(),
                 idempotency: idempotency.into(),
                 media_hash: None,
                 media_token: None,
@@ -496,6 +508,38 @@ impl Sessions {
         let mut view = viewer.view.clone();
         if matches!(view.status, Status::Starting | Status::Ready) && view.expires_at <= now {
             view.status = Status::Expired;
+        }
+        Ok(view)
+    }
+    pub fn first_frame_viewer(
+        &self,
+        principal: &Principal,
+        id: &str,
+        now: u64,
+    ) -> Result<Viewer, &'static str> {
+        if !principal.key.spec.scopes.contains(&Scope::Renew) {
+            return Err("forbidden");
+        }
+        let view = self.get(principal, id, now)?;
+        if !self
+            .viewers
+            .get(id)
+            .is_some_and(|viewer| viewer.client_frame_ack)
+        {
+            return Err("unsupported_output");
+        }
+        if matches!(
+            view.status,
+            Status::Expired | Status::Released | Status::Failed
+        ) {
+            return Err("session_expired");
+        }
+        principal.require(
+            &self.viewers.get(id).ok_or("session_not_found")?.namespace,
+            Scope::Renew,
+        )?;
+        if view.status != Status::Ready {
+            return Err("session_not_ready");
         }
         Ok(view)
     }
@@ -792,6 +836,7 @@ fn source_identity(request: &CreateSession) -> [u8; 32] {
             headers,
             request.input.live,
             request.input.file_index,
+            request.client_frame_ack,
             request.input.archive_index,
             request.input.expected_file_size,
             request.input.trackers,
@@ -807,6 +852,87 @@ fn hex(value: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decoder_ack_mode_fences_sharing_replay_scope_and_expiry() {
+        let principal = principal("owner", "fixture");
+        let mut legacy = request("fixture");
+        legacy.input.url = "magnet:?xt=urn:btih:1111111111111111111111111111111111111111".into();
+        legacy.input.live = false;
+        let mut modern = legacy.clone();
+        modern.client_frame_ack = true;
+        let mut sessions = Sessions::default();
+        let old = sessions
+            .reserve(&principal, &legacy, &plan(), "legacy", 0)
+            .unwrap();
+        let new = sessions
+            .reserve(&principal, &modern, &plan(), "modern", 0)
+            .unwrap();
+        assert_ne!(old.viewer.job_id, new.viewer.job_id);
+        assert_eq!(
+            sessions.replay(&principal, &modern, "legacy", 0).err(),
+            Some("idempotency_conflict")
+        );
+        assert_eq!(
+            sessions
+                .first_frame_viewer(&principal, &old.viewer.id, 0)
+                .err(),
+            Some("unsupported_output")
+        );
+        assert_eq!(
+            sessions
+                .first_frame_viewer(&principal, &new.viewer.id, 0)
+                .err(),
+            Some("session_not_ready")
+        );
+        sessions.ready(&new.viewer.job_id, 1);
+        let before = sessions
+            .get(&principal, &new.viewer.id, 1)
+            .unwrap()
+            .expires_at;
+        assert!(sessions
+            .first_frame_viewer(&principal, &new.viewer.id, 1)
+            .is_ok());
+        assert_eq!(
+            sessions
+                .get(&principal, &new.viewer.id, 1)
+                .unwrap()
+                .expires_at,
+            before
+        );
+        let other = self::principal("other", "fixture");
+        assert_eq!(
+            sessions.first_frame_viewer(&other, &new.viewer.id, 1).err(),
+            Some("session_not_found")
+        );
+        let mut denied_namespace = principal.clone();
+        denied_namespace.key.spec.namespaces = vec!["different".into()];
+        assert_eq!(
+            sessions
+                .first_frame_viewer(&denied_namespace, &new.viewer.id, 1)
+                .err(),
+            Some("forbidden")
+        );
+        assert_eq!(
+            sessions
+                .first_frame_viewer(&principal, &new.viewer.id, before)
+                .err(),
+            Some("session_expired")
+        );
+        sessions.release(&principal, &new.viewer.id, 2).unwrap();
+        assert_eq!(
+            sessions
+                .first_frame_viewer(&principal, &new.viewer.id, 2)
+                .err(),
+            Some("session_expired")
+        );
+        let mut wire = serde_json::to_value(&legacy).unwrap();
+        wire["client_frame_ack"] = serde_json::json!(true);
+        assert!(
+            serde_json::from_value::<CreateSession>(wire).is_err(),
+            "v1 must not accept the private route-selected mode"
+        );
+    }
     #[test]
     fn pending_source_admission_blocks_another_input_and_can_promote_shared_viewers() {
         let mut sessions = Sessions::default();
@@ -865,6 +991,7 @@ mod tests {
     }
     fn request(namespace: &str) -> CreateSession {
         CreateSession {
+            client_frame_ack: false,
             namespace: namespace.into(),
             input: Input {
                 url: "https://provider.invalid/channel".into(),

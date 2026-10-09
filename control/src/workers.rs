@@ -238,6 +238,7 @@ impl Workers {
                     PreparationRecord {
                         namespace: request.namespace.clone(),
                         input: request.input.clone(),
+                        client_frame_ack: request.client_frame_ack,
                         cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     },
                 );
@@ -277,8 +278,12 @@ impl Workers {
             Some(
                 tokio::time::timeout(
                     deadline,
-                    self.sources
-                        .resolve(&request.namespace, &request.input, Some(pending.clone())),
+                    self.sources.resolve_with_ack(
+                        &request.namespace,
+                        &request.input,
+                        Some(pending.clone()),
+                        request.client_frame_ack,
+                    ),
                 )
                 .await
                 .map_err(|_| "startup_timeout")??,
@@ -465,7 +470,7 @@ impl Workers {
             .map_err(|_| "session_store_unavailable")?
             .get(&job)
             .cloned();
-        if let Some(source) = source {
+        if let Some(source) = source.filter(|source| !source.client_frame_ack) {
             self.sources.output_ready(&source).await?;
         }
         if self.require_active(principal, timestamp).await.is_err() {
@@ -490,6 +495,31 @@ impl Workers {
             .get(principal, &reservation.viewer.id, timestamp)
     }
 
+    pub async fn first_frame(
+        &self,
+        principal: &Principal,
+        id: &str,
+        now: u64,
+    ) -> Result<(), &'static str> {
+        self.require_active(principal, now).await?;
+        let viewer = self
+            .sessions
+            .lock()
+            .map_err(|_| "session_store_unavailable")?
+            .first_frame_viewer(principal, id, now)?;
+        let source = self
+            .input_sources
+            .lock()
+            .map_err(|_| "session_store_unavailable")?
+            .get(&viewer.job_id)
+            .cloned()
+            .ok_or("session_not_found")?;
+        if !source.client_frame_ack {
+            return Err("unsupported_output");
+        }
+        self.sources.report_first_frame(&source).await
+    }
+
     pub async fn preparation_stage(
         &self,
         principal: &Principal,
@@ -506,7 +536,10 @@ impl Workers {
             .cloned()
             .ok_or("session_not_found")?;
         principal.require(&record.namespace, Scope::Read)?;
-        Ok(self.sources.stage(&record.namespace, &record.input).await)
+        Ok(self
+            .sources
+            .stage(&record.namespace, &record.input, record.client_frame_ack)
+            .await)
     }
     fn cancelled_preparation_id(&self, principal: &Principal, id: &str, namespace: &str) -> bool {
         let Ok(mut records) = self.cancelled_preparations.lock() else {
@@ -786,6 +819,7 @@ impl Workers {
 
 #[derive(Clone)]
 struct PreparationRecord {
+    client_frame_ack: bool,
     namespace: String,
     input: crate::protocol::Input,
     cancelled: Arc<std::sync::atomic::AtomicBool>,
@@ -2705,6 +2739,7 @@ printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","wi
     }
     pub(crate) fn request(width: u32) -> CreateSession {
         CreateSession {
+            client_frame_ack: false,
             namespace: "fixture".into(),
             input: Input {
                 url: "https://fixture.invalid/source".into(),
