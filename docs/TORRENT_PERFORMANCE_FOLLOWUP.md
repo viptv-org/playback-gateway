@@ -57,3 +57,22 @@ short samples do not establish sustained memory/storage behavior.
 Upstream issues and public swarm variability remain follow-up evidence, not
 permission to remove verification, relax disk bounds or add native gateway
 fallback. Physical-device testing and rollout remain separately coordinated.
+
+## Android integration observations, 2026-10-09
+
+An owned API 36 x86_64 Android TV emulator decoded a privately recorded failing
+H.264 source through the shared Go/JNI worker and Media3. The selected 2.05 GB
+file used a 128 MiB rolling cache. A single cold run reached the local endpoint
+in 11.0 s and its first decoded frame in 14.0 s. A process restart with retained
+verified content reached a decoded frame in 1.74 s. A 120-second forward seek
+completed in 15.3 s, followed by a successful backward seek and worker retirement.
+The first seek timer observed position alone; it is excluded from seek evidence.
+
+Priorities: reduce cold discovery/startup and seek recovery, then repeat matched
+cold/warm/resume trials across sources and devices. This source and emulator
+configuration differ from the Stremio comparison trials above. These observations
+establish a working Android byte/player path and do not establish latency parity,
+physical-device qualification, general swarm reliability or production rollout.
+
+The Android integration and qualification details are recorded in
+`android/docs/TORRENT_RUNTIME_V2.md` in the organization workspace.
