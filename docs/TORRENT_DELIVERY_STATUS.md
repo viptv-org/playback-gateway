@@ -1,10 +1,48 @@
 # Shared torrent delivery status — 2026-10-09
 
-Implementation is pushed on one `refactor/torrent-runtime` workstream per owning
+Implementation is merged and pushed to `main` in every affected owning
 repository. Header workstreams remain separate. The shared production Go code
 and all consumer artifact pins use
 `c7bb3f1f9a332c20aa8f81aa165d053c35fa7277`. Performance parity is deferred by the
-owner; production rollout and physical-device qualification remain separate.
+owner; production rollout remains separate. The owner accepts current emulated
+and controlled tests for this unreleased main promotion; physical-device checks
+are not an integration gate. Untested hardware is not claimed qualified.
+
+## Final main promotion
+
+The latest main changes were merged before promotion, preserving Android TV
+navigation/static-hero work, source-preview expiry, source ranking and explicit
+native Retry. Generated core bindings/WASM and client imports are aligned.
+
+| Repository | Promoted revision |
+| --- | --- |
+| Design | `9998da83ef42cfe1d1c46d76f7ee6d8a2e43242e` |
+| Core | `ace288131edb4c71fc9aa182bd74470b9f99cc2f` |
+| Video | `b39157181c06a4e8d5567b769010690dc1e27ebd` |
+| Backend | `fb42aa6b1069bb729d0f129e79b48867b338e1b1` |
+| TV-web | `78f09980ba296a9e9fcec403a4eede6617e241b6` |
+| Android | `02339827076d8896efabd11be66d4a30766bfc66` |
+| Desktop | `15303adac7a04f66904cbafa417f646418245c3c` |
+| Roku | `6cc8c7613c9ebd47a756f0227633cec3701fba66` |
+
+The gateway main contains its full shared-runtime integration and qualification
+history; this ledger is committed afterward. Production worker bytes remain at
+the immutable `c7bb3f1` revision across gateway, Android and desktop.
+
+Final merge checks pass: core locked workspace/Clippy/formatting and actual-WASM
+vectors (96 protocol, 477 native, 58 private runtime), 304 viewing-client tests
+and production build, five trusted-HTTPS UI cases, backend tests (292 library
+checks plus CLI/integration suites), Android's 53 library/334 app tests, all three
+native ABI products, optimized APK/lint/integrity/audio checks, twelve desktop
+Rust tests and local native-origin build, and 67 Roku checks. Main-triggered
+artifact jobs are build delivery, not production rollout. Existing actual media,
+Windows race fixtures and filesystem qualification remain scoped below.
+
+Continue acquisition/seek/stall measurements in
+[performance follow-up](TORRENT_PERFORMANCE_FOLLOWUP.md). Retained legacy code is
+development comparison only while those deferred measurements remain; normal
+gateway and Android products exclude its transport. No public-swarm speed or
+universal playback claim follows from this main promotion.
 
 | Requirement | Evidence and limits |
 | --- | --- |
