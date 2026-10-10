@@ -33,8 +33,14 @@ planner and public viewer authorization remain unchanged.
 
 The separate [torrent startup v2 routes](TORRENT_STARTUP_V2.md) retain the Go
 watchdog through decoder acknowledgement. V1 keeps its compatibility behavior.
-Backend/web/Roku adoption is pending; the v2 Go/FFmpeg fixture verifies that
+Backend/web/Roku adoption is integrated; the v2 Go/FFmpeg fixture verifies that
 output readiness and a legacy acknowledgement leave its handle awaiting a frame.
+
+The production backend/API/controller and Go worker also passed an owned HTTPS
+Mediabunny run: frame presentation preceded the scoped acknowledgement, and Stop
+changed media to 401. Five controlled HTTPS UI cases passed, including withholding
+frame evidence after metadata readiness. See [delivery status](TORRENT_DELIVERY_STATUS.md)
+for exact scope and the separately coordinated physical-device qualification.
 
 ## Local qualification
 

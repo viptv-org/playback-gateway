@@ -231,6 +231,27 @@ The production Go code and all consumer artifact pins remain at the same
 immutable `c7bb3f1f9a332c20aa8f81aa165d053c35fa7277` revision. These additional
 archive checks change tests and fixture bytes, not that transport implementation.
 
+## File larger than its cache filesystem, 2026-10-09
+
+The real Go seeder/runtime streamed an original generated 1 GiB sparse zero
+pattern through an owned 600 MiB tmpfs. The production 2 GiB default reduced to
+88 MiB to preserve the 512 MiB free-space reserve. Sixteen 8 MiB requests at
+widely separated offsets exceed cache capacity and force rolling reuse; head
+and EOF seeks also passed. Peak sampled charge was 92,119,040 bytes, below the
+92,274,688-byte limit. The complete file was not downloaded. Restart reused
+verified EOF bytes with the seeder stopped. The race-enabled test passed in
+1.92 s; the mount was removed afterward.
+
+```sh
+GO=/path/to/go python3 scripts/qualify-filesystem.py /tmp/fresh-filesystem-results
+```
+
+The runner requires Linux and noninteractive local mount authority, creates only
+its own temporary mount and always removes it. This qualifies filesystem bounds
+and actual verified byte streaming, not decoder memory, thermal behavior or a
+physical Android/Windows storage device. It adds test-only code and does not
+change the immutable production worker artifact revision.
+
 ## DHT fixture dependency observation
 
 The pinned anacrolix/dht in-memory peer store builds its key from IP alone,

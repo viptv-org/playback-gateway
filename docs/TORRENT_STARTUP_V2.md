@@ -36,5 +36,7 @@ Controlled checks cover mode isolation, legacy wire rejection, foreign-key and
 namespace refusal, expiry, duplicate acknowledgements and unchanged lease
 expiry. The real Go/FFmpeg fixture confirms output readiness leaves v2 awaiting
 a frame, independently from a legacy handle, then decodes output before reporting
-the frame. Backend/web/Roku adoption and actual client acknowledgement remain
-required; these gateway checks alone do not prove that client integration.
+the frame. Backend/web/Roku adoption is integrated. An actual authenticated
+HTTPS browser run presents frames before acknowledgement and revokes media on
+Stop. Physical Roku presentation remains separately coordinated; controlled
+gateway checks alone do not qualify its hardware decoder.
