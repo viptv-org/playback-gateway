@@ -13,7 +13,7 @@ owner; production rollout and physical-device qualification remain separate.
 | Backend/core v2, strict v1 compatibility | Separate v2 negotiation, exact selection, authority renewal/revocation, scoped progress and pending cancellation are implemented and tested. Native failures cannot fall back to the gateway. |
 | Android phone and TV | Three-ABI/API24/16-KiB artifacts and normal APK checks pass. Owned x86_64 phone/TV emulators rendered real media; the phone backend/core/coordinator path rendered in 25.9 s and joined retirement. ARM/API24/16-KiB-page execution remains unverified. |
 | Linux desktop | Actual backend/TvApi/core/native-worker/GStreamer playback, automatic renewal, seeks, Stop and a saved-position restart passed in an owned window. Ordinary login/catalog navigation remains outside the harness. Earlier cold/seek failures remain recorded. |
-| Windows desktop | Hosted builds and actual pinned worker startup/refusal/shutdown checks exist. Native TextureStream video presentation remains unverified. |
+| Windows desktop | Both installers and 45 race-enabled runtime fixtures pass on Windows 2022, including verified rolling reads, discovery, eviction and killed-process reuse. Native TextureStream video presentation remains unverified. |
 | Gateway and web | Real Go/FFmpeg fixtures and authenticated HTTPS browser presentation pass. A complete backend/API/controller probe reached frames in 18.37 s and revoked media on Stop. |
 | Roku | Scoped startup stages, renewal, cancellation, remaining startup budget and packaging checks pass. Actual physical Roku delivery remains unverified. |
 | Production dependency cleanup | Normal Android APKs and the Rust gateway dependency graph exclude rqbit. Explicit comparison artifacts and inherited tests remain available. Inactive legacy gateway cache is reclaimed under its ownership lock; Go records are preserved. |
@@ -38,9 +38,12 @@ Roku `c331db4` passed compilation and ZIP packaging in
 Desktop `b729368` is being checked by
 [run 38013967354](https://github.com/viptv-org/desktop/actions/runs/38013967354);
 Both platforms passed. The subsequent native heartbeat fix
-is adopted by desktop `372c585` and is being checked by
+is adopted by desktop `372c585` and passed both platforms in
 [run 38015306679](https://github.com/viptv-org/desktop/actions/runs/38015306679).
-The later installer results are not yet recorded as passed.
+The pinned race-test capsule also passed 45 top-level Windows runtime tests in
+[run 38016897210](https://github.com/viptv-org/desktop/actions/runs/38016897210).
+Earlier capsule setup failures occurred before fixtures ran (cross-repository
+token scope, then PowerShell argument quoting); they are not engine failures.
 
 ## Desktop heartbeat regression
 
