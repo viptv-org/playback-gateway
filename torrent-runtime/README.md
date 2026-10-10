@@ -25,8 +25,8 @@ those. The controller enforces the worker settlement deadline during this wait. 
 The private version-2 JSON controller exposes `open`, `prepare`, `observe`,
 `renew`, `first_frame`, `close` and `shutdown` over worker stdin/stdout or JNI.
 It is not an HTTP administrative endpoint or the backend's public negotiation
-route. Consumer-side protocol negotiation and worker supervision still need
-integration. A `terminate` response requires the parent to kill its owned worker;
+route. Consumer-side protocol negotiation and worker supervision are integrated
+in Android, desktop and gateway. A `terminate` response requires the parent to kill its owned worker;
 the executable exits with status 3 when settlement exceeds two seconds.
 
 `prepare` takes a magnet or metainfo, optional tracker hints and file index,

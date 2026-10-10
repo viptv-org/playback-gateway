@@ -17,9 +17,15 @@ bundle, Nuvio binary, private torrent metadata or downloaded media is committed
 or included in the platform build script. Source inspection and measurements
 are documented in `docs/TORRENT_RUNTIME_RESEARCH.md`,
 `docs/STREMIO_GO_REFERENCE.md` and `torrent-runtime/QUALIFICATION.md`.
-Local generated artifacts are dirty-tree qualification builds. Release-time
-dependency notices and immutable multi-platform artifact inventory remain
-required before distribution; current builds do not establish release readiness.
+Early prototype artifacts were dirty-tree qualification builds. Current Android
+and Linux/Windows desktop products and the gateway worker share clean immutable
+source `c7bb3f1f9a332c20aa8f81aa165d053c35fa7277`, with checksummed import
+inventories and dependency notices. Importers reject dirty build inventories;
+the Android APK and desktop installer checks verify packaged content.
+See [delivery evidence](docs/TORRENT_DELIVERY_STATUS.md) for exact consumer pins
+and hosted build results. These inventories do not establish device qualification
+or authorize production rollout; the independent inherited archive distribution
+finding below remains unresolved.
 
 ## Original engine
 

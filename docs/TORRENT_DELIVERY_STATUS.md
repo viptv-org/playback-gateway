@@ -12,7 +12,7 @@ owner; production rollout and physical-device qualification remain separate.
 | Stored RAR4/RAR5 and multipart seeking | Stored ranges, seven-volume multi-member selection, largest-member ties, missing/malformed/compressed/encrypted refusals pass with original byte fixtures. |
 | Backend/core v2, strict v1 compatibility | Separate v2 negotiation, exact selection, authority renewal/revocation, scoped progress and pending cancellation are implemented and tested. Native failures cannot fall back to the gateway. |
 | Android phone and TV | Three-ABI/API24/16-KiB artifacts and normal APK checks pass. Owned x86_64 phone/TV emulators rendered real media; the phone backend/core/coordinator path rendered in 25.9 s and joined retirement. ARM/API24/16-KiB-page execution remains unverified. |
-| Linux desktop | Real worker/native decoder presentation and seeks were exercised in an owned app window. Cold and seek results remain variable; full account/source-screen navigation was outside this harness. |
+| Linux desktop | Actual backend/TvApi/core/native-worker/GStreamer playback, automatic renewal, seeks, Stop and a saved-position restart passed in an owned window. Ordinary login/catalog navigation remains outside the harness. Earlier cold/seek failures remain recorded. |
 | Windows desktop | Hosted builds and actual pinned worker startup/refusal/shutdown checks exist. Native TextureStream video presentation remains unverified. |
 | Gateway and web | Real Go/FFmpeg fixtures and authenticated HTTPS browser presentation pass. A complete backend/API/controller probe reached frames in 18.37 s and revoked media on Stop. |
 | Roku | Scoped startup stages, renewal, cancellation, remaining startup budget and packaging checks pass. Actual physical Roku delivery remains unverified. |
@@ -37,10 +37,10 @@ Roku `c331db4` passed compilation and ZIP packaging in
 [run 38013970325](https://github.com/viptv-org/roku/actions/runs/38013970325).
 Desktop `b729368` is being checked by
 [run 38013967354](https://github.com/viptv-org/desktop/actions/runs/38013967354);
-Linux has passed; Windows is still running. The subsequent native heartbeat fix
+Both platforms passed. The subsequent native heartbeat fix
 is adopted by desktop `372c585` and is being checked by
 [run 38015306679](https://github.com/viptv-org/desktop/actions/runs/38015306679).
-Neither pending Windows result is recorded as passed.
+The later installer results are not yet recorded as passed.
 
 ## Desktop heartbeat regression
 
@@ -55,6 +55,14 @@ backend-platform renewal test and twelve desktop Rust tests pass (one unrelated
 LAN fixture remains ignored). The rebuilt local desktop app is running for owner
 testing. This addresses control renewal; variable decoder seek performance
 remains recorded separately.
+
+The subsequent actual backend/core/Tauri HTTP/Go/GStreamer run passed three
+automatic renewals with 200, measured forward/backward seek frames, Stop and a
+new authorized saved-position start. Cold frames took 15.90 s; forward/backward
+seeks took 3.95/0.77 s in this one source observation. The owned Xvfb app and
+ephemeral account/cache stack were retired; the owner's manual app remained
+running. This closes the desktop backend-heartbeat qualification gap without
+claiming ordinary login/catalog coverage or general seek reliability.
 
 ## Decoder acknowledgement qualification
 

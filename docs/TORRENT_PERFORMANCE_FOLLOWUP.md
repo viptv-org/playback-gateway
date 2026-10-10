@@ -99,6 +99,15 @@ The Linux check also caught and fixed a Rust host startup-protocol defect:
 the production worker's readiness banner must be consumed before the first
 control reply. Shared-host regression and gateway fixtures now include it.
 
+A later actual backend/core/Tauri HTTP/Go/GStreamer run reached rendered frames
+in 15.90 s. Two automatic renewals succeeded before seeking; forward/backward
+seeks required 3.95/0.77 s with new rendered-frame confirmation. A new authorized
+start at the saved 120 s position rendered and passed another automatic renewal.
+These are one-source integration observations, not a matched comparison. Earlier
+slow/failed seeks remain open evidence. Manual testing had exposed an unrelated
+HTTP 400: the desktop native heartbeat carried `{}` rather than no body. The
+corrected transport and actual backend run now cover that authority boundary.
+
 ## Gateway/browser integration observations, 2026-10-09
 
 A production-worker gateway run reached HLS output in 21.9 seconds cold. Retained
