@@ -100,6 +100,22 @@ checksums. Dirty artifacts are qualification-only. Release artifacts must all
 come from one clean immutable revision; this module alone does not enforce a
 consumer's release inventory.
 
+The Windows storage/peer/process fixtures can run without giving a consumer's
+workflow access to this repository. Build their race-enabled capsule from an
+immutable commit, with the dependency inventory at that same revision:
+
+```sh
+GO=/path/to/go python3 scripts/build-windows-qualification.py /tmp/fresh-windows-tests --revision FULL_GIT_COMMIT
+```
+
+The builder archives committed source into a temporary directory, compiles a
+Windows x64 test executable, rejects unpackaged DLLs and packages original
+fixtures and dependency notices. The capsule carries archive/content hashes and
+its source/toolchain identity. It includes no runtime source copy, provider corpus
+or account configuration. Desktop verifies the capsule against its production
+runtime pin before executing it on Windows. These checks qualify transport and
+storage; they do not launch the product or qualify TextureStream presentation.
+
 Public swarm probes are explicit opt-ins using a private JSON corpus. Never
 commit corpus identities, media URLs, decoded output or raw peer logs. The
 ordinary test suite uses locally owned data and peers. See
