@@ -37,7 +37,24 @@ Roku `c331db4` passed compilation and ZIP packaging in
 [run 38013970325](https://github.com/viptv-org/roku/actions/runs/38013970325).
 Desktop `b729368` is being checked by
 [run 38013967354](https://github.com/viptv-org/desktop/actions/runs/38013967354);
-its installer checks are not yet recorded as passed.
+Linux has passed; Windows is still running. The subsequent native heartbeat fix
+is adopted by desktop `372c585` and is being checked by
+[run 38015306679](https://github.com/viptv-org/desktop/actions/runs/38015306679).
+Neither pending Windows result is recorded as passed.
+
+## Desktop heartbeat regression
+
+Manual desktop testing caught native renewals sending `{}` to the backend's
+bodyless control route. The resulting HTTP 400 occurred about twenty seconds
+after a zero-position admission, including without a seek. TV-web `11329bd`
+corrects private native HTTP serialization; ordinary gateway renewal retains its
+existing JSON request. Regression cases at zero and saved positions reproduce
+the exact error before the fix and pass afterward through the real TvApi and
+actual WASM holder. All 304 frontend tests, five trusted-HTTPS UI cases, the native
+backend-platform renewal test and twelve desktop Rust tests pass (one unrelated
+LAN fixture remains ignored). The rebuilt local desktop app is running for owner
+testing. This addresses control renewal; variable decoder seek performance
+remains recorded separately.
 
 ## Decoder acknowledgement qualification
 
