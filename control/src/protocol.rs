@@ -144,6 +144,8 @@ fn source_extension(source: &str) -> Option<String> {
 pub enum OutputProtocol {
     Hls,
     Progressive,
+    /// Prefer verified original H264/AAC MP4; otherwise prepare ordinary HLS.
+    NativeMp4,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -231,6 +233,11 @@ impl CreateSession {
         validate_namespace(&self.namespace)?;
         self.input.validate()?;
         self.output.validate()?;
+        if self.output.protocol == OutputProtocol::NativeMp4
+            && (self.input.live || self.input.torrent() || self.input.archive())
+        {
+            return Err("unsupported_output");
+        }
         if !self.position_seconds.is_finite()
             || !(0.0..=604800.0).contains(&self.position_seconds)
             || (self.input.live && self.position_seconds != 0.0)

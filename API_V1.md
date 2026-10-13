@@ -302,3 +302,17 @@ IO/worker cleanup settles. A cancelled create returns
 `source_preparation_cancelled`. Completed viewer release remains the session
 DELETE route. Legacy gateways without preparation cancellation retain their
 late-viewer reconciliation behavior in compatible backend consumers.
+
+
+### Native MP4 preference
+
+The additive `native_mp4` output protocol prefers gateway-owned, seekable original
+MP4 only after FFprobe verifies conservative H264/AAC (or no audio), compatible
+dimensions/tracks, progressive SDR video and exact ranged delivery. It returns
+`format: "mp4"`, `mode: "direct"`, and the requested native start seek position,
+with full source duration. Provider URLs/headers remain private and every viewer
+retains scoped media authorization. Nonlive ordinary HTTP inputs only are
+accepted; other containers/codecs/track preferences fall back internally to
+ordinary managed HLS before reserving a viewer/output. HLS keeps its applied
+source-cut clock. Capabilities explicitly advertise `native_mp4`; integrators
+must retain HLS when this preference is absent or the source does not qualify.

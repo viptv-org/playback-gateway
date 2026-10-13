@@ -296,7 +296,7 @@ async fn capabilities(
         .available(&principal, now()?)
         .map_err(ApiError)?;
     Ok(Json(
-        serde_json::json!({"version":API_VERSION, "ready":state.ready.load(Ordering::Acquire) && state.workers.media_storage_available(), "protocols":["hls","progressive"], "torrent":state.workers.torrent_enabled(), "viewer_lease_seconds":VIEWER_LEASE_SECONDS, "renew_after_seconds":RENEW_AFTER_SECONDS, "namespaces":principal.key.spec.namespaces, "scopes":principal.key.spec.scopes,"limits":principal.key.spec.quotas,"available":available}),
+        serde_json::json!({"version":API_VERSION, "ready":state.ready.load(Ordering::Acquire) && state.workers.media_storage_available(), "protocols":["hls","progressive","native_mp4"], "torrent":state.workers.torrent_enabled(), "viewer_lease_seconds":VIEWER_LEASE_SECONDS, "renew_after_seconds":RENEW_AFTER_SECONDS, "namespaces":principal.key.spec.namespaces, "scopes":principal.key.spec.scopes,"limits":principal.key.spec.quotas,"available":available}),
     ))
 }
 async fn ready(State(state): State<Api>) -> Response {

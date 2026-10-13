@@ -258,7 +258,8 @@ impl Workers {
         let _observation = observation;
         let started = Instant::now();
         let deadline = Duration::from_secs(request.input.startup_seconds());
-        let pending = if request.input.owned_source() {
+        let mediate_http = request.output.protocol == OutputProtocol::NativeMp4;
+        let pending = if request.input.owned_source() || mediate_http {
             if (request.input.torrent() || request.input.archive()) && !self.sources.enabled() {
                 return Err("unsupported_output");
             }
@@ -280,35 +281,44 @@ impl Workers {
             None
         };
         let resolved = if let Some(pending) = &pending {
-            Some(
-                tokio::time::timeout(
-                    deadline,
-                    self.sources.resolve_with_ack(
-                        &request.namespace,
-                        &request.input,
-                        Some(pending.clone()),
-                        request.client_frame_ack,
-                    ),
-                )
-                .await
-                .map_err(|_| "startup_timeout")??,
+            let result = tokio::time::timeout(
+                deadline,
+                self.sources.resolve_with_http(
+                    &request.namespace,
+                    &request.input,
+                    Some(pending.clone()),
+                    request.client_frame_ack,
+                    mediate_http,
+                ),
             )
+            .await
+            .map_err(|_| "startup_timeout")?;
+            match result {
+                Ok(source) => Some(source),
+                Err("unsupported_output" | "source_preparation_failed")
+                    if mediate_http && request.input.headers.is_empty() =>
+                {
+                    None
+                }
+                Err(code) => return Err(code),
+            }
         } else {
             None
         };
         let has = |codecs: &[String], name: &str| codecs.iter().any(|codec| codec == name);
         let progressive = request.output.protocol == OutputProtocol::Progressive;
+        let native_mp4 = request.output.protocol == OutputProtocol::NativeMp4;
         let caps = Capabilities {
             h264: has(&request.output.video_codecs, "h264"),
             aac: has(&request.output.audio_codecs, "aac"),
-            hevc: has(&request.output.video_codecs, "hevc"),
-            hevc_sdr: has(&request.output.video_codecs, "hevc"),
+            hevc: !native_mp4 && has(&request.output.video_codecs, "hevc"),
+            hevc_sdr: !native_mp4 && has(&request.output.video_codecs, "hevc"),
             max_width: request.output.max_width,
             max_height: request.output.max_height,
             direct_play: true,
             direct_files: Some(progressive),
-            direct_mp4: Some(progressive),
-            direct_hls: Some(!progressive),
+            direct_mp4: Some(progressive || native_mp4),
+            direct_hls: Some(!progressive && !native_mp4),
             direct_video_codecs: Some(request.output.video_codecs.clone()),
             direct_audio_codecs: Some(request.output.audio_codecs.clone()),
             ..Capabilities::default()
@@ -373,7 +383,17 @@ impl Workers {
         let plan = prepared.plan.as_ref().ok_or("unsupported_output")?;
         // Live progressive is the same-container remux subset only. On-demand
         // progressive keeps its pre-existing original-file transport.
-        let accepted = if progressive && request.input.live {
+        let accepted = if native_mp4 {
+            (plan.mode == "direct"
+                && plan.format == "mp4"
+                && plan.video_codec == "h264"
+                && plan
+                    .audio_codec
+                    .as_deref()
+                    .is_none_or(|codec| codec == "aac")
+                && plan.shareable)
+                || (plan.format == "hls" && plan.shareable)
+        } else if progressive && request.input.live {
             crate::sessions::single_consumer(plan)
         } else if progressive {
             plan.format != "hls" && plan.shareable

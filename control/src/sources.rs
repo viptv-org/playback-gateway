@@ -166,7 +166,7 @@ impl Sources {
         input: &Input,
         client_frame_ack: bool,
     ) -> Option<&'static str> {
-        let identity = serde_json::to_vec(&(namespace, input, client_frame_ack)).ok()?;
+        let identity = serde_json::to_vec(&(namespace, input, client_frame_ack, false)).ok()?;
         let key: [u8; 32] = Sha256::digest(identity).into();
         let observed = self
             .acquiring
@@ -206,13 +206,24 @@ impl Sources {
         pending: Option<Arc<dyn Send + Sync>>,
         client_frame_ack: bool,
     ) -> Result<Arc<ResolvedSource>, &'static str> {
-        if !self.enabled && !input.mediated_http() {
+        self.resolve_with_http(namespace, input, pending, client_frame_ack, false)
+            .await
+    }
+    pub async fn resolve_with_http(
+        &self,
+        namespace: &str,
+        input: &Input,
+        pending: Option<Arc<dyn Send + Sync>>,
+        client_frame_ack: bool,
+        force_http: bool,
+    ) -> Result<Arc<ResolvedSource>, &'static str> {
+        if !self.enabled && !input.mediated_http() && !force_http {
             return Err("unsupported_output");
         }
-        if input.mediated_http() && input.live {
+        if (input.mediated_http() || force_http) && input.live {
             return Err("unsupported_output");
         }
-        let identity = serde_json::to_vec(&(namespace, input, client_frame_ack))
+        let identity = serde_json::to_vec(&(namespace, input, client_frame_ack, force_http))
             .map_err(|_| "invalid_input")?;
         let key: [u8; 32] = Sha256::digest(identity).into();
         if input.torrent() {
@@ -323,7 +334,7 @@ impl Sources {
         }
         let headers = input_headers(input)?;
         let volume = HttpVolume::new(self.client.clone(), input.url.clone(), headers).await?;
-        if input.mediated_http() {
+        if input.mediated_http() || force_http {
             // Admit binary media only. Header-bearing manifests and nonranged
             // sources require their own nested-resource mediator and fail closed.
             let prefix = volume
