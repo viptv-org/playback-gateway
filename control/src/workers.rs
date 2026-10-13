@@ -25,6 +25,10 @@ mod archive_tests;
 mod torrent_tests;
 
 #[cfg(all(test, unix))]
+#[path = "workers_header_tests.rs"]
+mod header_tests;
+
+#[cfg(all(test, unix))]
 #[path = "workers_security_tests.rs"]
 mod security_tests;
 
@@ -55,6 +59,7 @@ impl Workers {
             .lock()
             .ok()?
             .get(&viewer.job_id)
+            .filter(|source| source.file_metadata)
             .map(|source| source.file.clone())
     }
     pub fn available(
@@ -253,8 +258,8 @@ impl Workers {
         let _observation = observation;
         let started = Instant::now();
         let deadline = Duration::from_secs(request.input.startup_seconds());
-        let pending = if request.input.torrent() || request.input.archive() {
-            if !self.sources.enabled() {
+        let pending = if request.input.owned_source() {
+            if (request.input.torrent() || request.input.archive()) && !self.sources.enabled() {
                 return Err("unsupported_output");
             }
             let id = self

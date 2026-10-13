@@ -35,6 +35,12 @@ impl Input {
     pub fn torrent(&self) -> bool {
         self.url.starts_with("magnet:") || source_extension(&self.url) == Some("torrent".into())
     }
+    pub fn mediated_http(&self) -> bool {
+        !self.headers.is_empty() && !self.torrent() && !self.archive()
+    }
+    pub fn owned_source(&self) -> bool {
+        self.torrent() || self.archive() || self.mediated_http()
+    }
     pub fn startup_seconds(&self) -> u64 {
         if self.torrent() {
             STARTUP_DEADLINE_SECONDS

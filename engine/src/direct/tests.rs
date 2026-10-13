@@ -128,6 +128,55 @@ async fn redirects_stay_server_side_and_reject_private_cross_origin() {
     assert!(matches!(unsafe_result, Err(error) if error == "Unsafe media destination"));
     task.abort();
 }
+#[tokio::test]
+async fn cross_origin_resources_strip_arbitrary_provider_credentials() {
+    let (base, _, origin) = fixture().await;
+    let direct = Direct::prepare(
+        base.join("/live.m3u8").unwrap(),
+        &HashMap::from([
+            ("Authorization".into(), "Bearer fixture".into()),
+            ("X-api-key".into(), "fixture-key".into()),
+            ("X-csrf-token".into(), "fixture-csrf".into()),
+        ]),
+        "hls",
+        permits(),
+    )
+    .await
+    .unwrap();
+    let app = Router::new().route(
+        "/child.ts",
+        get(|headers: HeaderMap| async move {
+            assert!(!headers.contains_key("authorization"));
+            assert!(!headers.contains_key("x-api-key"));
+            assert!(!headers.contains_key("x-csrf-token"));
+            assert_eq!(headers[header::RANGE], "bytes=1-3");
+            assert_eq!(headers[header::ACCEPT_ENCODING], "identity");
+            b"123".to_vec()
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let url = Url::parse(&format!(
+        "http://credential-fixture.example:{}/child.ts",
+        address.port()
+    ))
+    .unwrap();
+    // An explicit test-only pinned transport avoids external DNS/IO while
+    // exercising the same recipient-origin header filter as production.
+    direct.destinations.lock().await.insert(
+        url.origin().ascii_serialization(),
+        reqwest::Client::builder()
+            .no_proxy()
+            .resolve("credential-fixture.example", address)
+            .build()
+            .unwrap(),
+    );
+    let response = direct.request(url, Some("bytes=1-3")).await.unwrap();
+    assert_eq!(response.bytes().await.unwrap().as_ref(), b"123");
+    origin.abort();
+    server.abort();
+}
 async fn bytes(response: Response) -> Bytes {
     axum::body::to_bytes(response.into_body(), 2 * 1024 * 1024)
         .await

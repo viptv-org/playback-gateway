@@ -108,6 +108,21 @@ Live sessions start at zero. Source URLs cannot contain embedded userinfo or
 fragments. At most 32 upstream headers, with 4096 bytes per value, are accepted;
 transport-control headers and ambiguous duplicate names are rejected.
 
+Nonempty declared headers are confidential provider authority. For ordinary HTTP
+media the gateway mediates them through an owned loopback byte capability;
+FFprobe and FFmpeg receive no source headers or original URL. Every range request
+validates status, exact Content-Range and body length behind vetted egress, and
+cross-origin redirects drop every declared header. Header-bearing media currently
+requires nonlive byte-range support and a recognized binary signature (MP4,
+Matroska/WebM, MPEG-TS, Ogg, FLAC, MP3/ADTS, AVI/WAVE). Playlists, other containers,
+live sources and nonranged bodies fail closed; required headers are never silently
+ignored. Torrent/metainfo and RAR headers retain their existing vetted resolver.
+The relay is independent of TORRENT_ENABLED, shared only for the exact namespace
+and input identity, and revoked when its final output owner closes. Its private
+capability suffix and size are transport details; HTTP responses do not invent an
+input_file name, selected file index or file metadata.
+
+
 The response contains `id` (viewer ID), `job_id`, `status`, `expires_at`,
 `error_code`, `renew_after_seconds`, and `playback` when ready. Playback contains
 the viewer-scoped relative media URL and format/track metadata, never an upstream
@@ -139,7 +154,7 @@ Independent fallback or VOD output pipelines each consume an input reservation;
 viewers joining an identical existing job do not reserve another input. This
 accounting does not promise universal single-ingest for every source/transport.
 
-Disguised HLS inputs (segments named or typed as images/stylesheets, or with
+Header-free disguised HLS inputs (segments named or typed as images/stylesheets, or with
 an image/CSS prefix before the media) need no integration change: the engine
 reads them through a private loopback sanitizer that applies the input's
 headers and egress route itself. A disguised input whose segments are on

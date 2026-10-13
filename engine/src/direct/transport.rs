@@ -59,8 +59,7 @@ impl Direct {
             let client = self.destination_client(&url).await?;
             let mut headers = self.headers.clone();
             if url.origin() != self.root.origin() {
-                headers.remove(header::AUTHORIZATION);
-                headers.remove(header::COOKIE);
+                headers.clear();
             }
             let mut request = client
                 .get(url.clone())

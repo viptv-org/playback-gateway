@@ -1,4 +1,4 @@
-//! Converts opt-in torrent/archive inputs to owned private byte-range sources.
+//! Converts torrent/archive and header-bearing HTTP inputs to owned byte-range sources.
 //! HTTP metainfo and archive ranges always traverse the vetted egress proxy.
 use crate::protocol::Input;
 use playback_engine::{
@@ -41,6 +41,8 @@ struct CachedSource {
 pub struct ResolvedSource {
     pub url: String,
     pub file: TorrentFile,
+    // HTTP relay sizing is transport metadata, never an invented source file.
+    pub file_metadata: bool,
     pub client_frame_ack: bool,
     _archive: Option<LoopbackStream>,
     reads: Arc<ArchiveReads>,
@@ -204,7 +206,10 @@ impl Sources {
         pending: Option<Arc<dyn Send + Sync>>,
         client_frame_ack: bool,
     ) -> Result<Arc<ResolvedSource>, &'static str> {
-        if !self.enabled {
+        if !self.enabled && !input.mediated_http() {
+            return Err("unsupported_output");
+        }
+        if input.mediated_http() && input.live {
             return Err("unsupported_output");
         }
         let identity = serde_json::to_vec(&(namespace, input, client_frame_ack))
@@ -275,6 +280,7 @@ impl Sources {
             let source = Arc::new(ResolvedSource {
                 client_frame_ack,
                 url: runtime.url.clone(),
+                file_metadata: true,
                 file: TorrentFile {
                     index: runtime.file_index,
                     name: "media".into(),
@@ -316,9 +322,48 @@ impl Sources {
             return Err("input_capacity");
         }
         let headers = input_headers(input)?;
-        let volumes: Vec<Arc<dyn RarVolume>> = vec![Arc::new(
-            HttpVolume::new(self.client.clone(), input.url.clone(), headers).await?,
-        )];
+        let volume = HttpVolume::new(self.client.clone(), input.url.clone(), headers).await?;
+        if input.mediated_http() {
+            // Admit binary media only. Header-bearing manifests and nonranged
+            // sources require their own nested-resource mediator and fail closed.
+            let prefix = volume
+                .read(0, 512)
+                .await
+                .map_err(|_| "source_preparation_failed")?;
+            if !binary_media(&prefix) {
+                return Err("unsupported_output");
+            }
+            let reads = Arc::new(ArchiveReads::default());
+            let size = volume.size;
+            let stream = LoopbackStream::from_source(Arc::new(HttpSource {
+                volume,
+                reads: reads.clone(),
+            }))
+            .await
+            .map_err(torrent_error)?;
+            let source = Arc::new(ResolvedSource {
+                client_frame_ack,
+                url: stream.url(0),
+                file: TorrentFile {
+                    index: 0,
+                    name: String::new(),
+                    size,
+                },
+                file_metadata: false,
+                _archive: Some(stream),
+                runtime: None,
+                reads,
+            });
+            resolved.insert(
+                key,
+                CachedSource {
+                    source: Arc::downgrade(&source),
+                    reads: source.reads.clone(),
+                },
+            );
+            return Ok(source);
+        }
+        let volumes: Vec<Arc<dyn RarVolume>> = vec![Arc::new(volume)];
         let inspected = tokio::task::spawn_blocking({
             let volumes = volumes.clone();
             let pending = pending.clone();
@@ -355,6 +400,7 @@ impl Sources {
             client_frame_ack,
             url: stream.url(0),
             file,
+            file_metadata: true,
             _archive: Some(stream),
             runtime: None,
             reads,
@@ -574,6 +620,44 @@ impl TorrentRangeSource for ArchiveSource {
         })
     }
 }
+// Conservative signatures keep manifest bytes out of FFprobe/FFmpeg. The
+// capability suffix is private transport detail; source file metadata is absent.
+fn binary_media(prefix: &[u8]) -> bool {
+    prefix.get(4..8) == Some(b"ftyp")
+        || prefix.starts_with(&[0x1a, 0x45, 0xdf, 0xa3])
+        || prefix.starts_with(b"OggS")
+        || prefix.starts_with(b"fLaC")
+        || prefix.starts_with(b"ID3")
+        || (prefix.starts_with(b"RIFF") && matches!(prefix.get(8..12), Some(b"AVI " | b"WAVE")))
+        || (prefix.len() > 376 && prefix[0] == 0x47 && prefix[188] == 0x47 && prefix[376] == 0x47)
+        || (prefix.len() > 1 && prefix[0] == 0xff && prefix[1] & 0xe0 == 0xe0)
+}
+struct HttpSource {
+    volume: HttpVolume,
+    reads: Arc<ArchiveReads>,
+}
+impl TorrentRangeSource for HttpSource {
+    fn file_size(&self, index: u32) -> Option<u64> {
+        (index == 0).then_some(self.volume.size)
+    }
+    fn is_closed(&self) -> bool {
+        self.reads.closed.load(Ordering::Acquire)
+    }
+    fn read_range(
+        &self,
+        _: u32,
+        offset: u64,
+        length: u32,
+    ) -> futures::future::BoxFuture<'_, Result<Vec<u8>, String>> {
+        Box::pin(async move {
+            let _guard = self.reads.begin()?;
+            self.volume
+                .read(offset, length)
+                .await
+                .map_err(|_| "Media range failed".to_owned())
+        })
+    }
+}
 #[derive(Clone)]
 struct HttpVolume {
     client: Client,
@@ -604,7 +688,7 @@ impl HttpVolume {
         })
     }
     async fn read(&self, offset: u64, length: u32) -> Result<Vec<u8>, std::io::Error> {
-        if offset >= self.size {
+        if length == 0 || offset >= self.size {
             return Ok(Vec::new());
         }
         let end = offset.saturating_add(u64::from(length)).min(self.size) - 1;
@@ -710,6 +794,220 @@ mod tests {
         routing::get,
         Router,
     };
+    fn fixture_input(url: &str) -> Input {
+        serde_json::from_value(serde_json::json!({
+            "url": url, "live": false,
+            "headers": {"Authorization":"Bearer fixture", "X-api-key":"private-fixture", "X-csrf-token":"csrf-fixture"}
+        })).unwrap()
+    }
+    async fn fixture_sources(proxy: &str) -> Sources {
+        Sources::new(TorrentConfig::default(), proxy).unwrap()
+    }
+    fn fixture_range(headers: &HttpHeaders, bytes: &[u8]) -> Response<Body> {
+        let range = headers
+            .get("range")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .strip_prefix("bytes=")
+            .unwrap();
+        let (start, end) = range.split_once('-').unwrap();
+        let (start, end) = (
+            start.parse::<usize>().unwrap(),
+            end.parse::<usize>().unwrap(),
+        );
+        Response::builder()
+            .status(206)
+            .header(
+                "content-range",
+                format!("bytes {start}-{end}/{}", bytes.len()),
+            )
+            .body(Body::from(bytes[start..=end].to_vec()))
+            .unwrap()
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn header_media_relay_coalesces_scopes_ranges_and_revokes_last_owner() {
+        let contacts = Arc::new(AtomicUsize::new(0));
+        let bytes = Arc::new([b"\x00\x00\x00\x18ftypisom".as_slice(), &[7; 1012]].concat());
+        let router = Router::new().route(
+            "/media",
+            get({
+                let bytes = bytes.clone();
+                let contacts = contacts.clone();
+                move |headers: HttpHeaders| {
+                    let bytes = bytes.clone();
+                    let contacts = contacts.clone();
+                    async move {
+                        assert_eq!(headers.get("x-api-key").unwrap(), "private-fixture");
+                        assert_eq!(headers.get("x-csrf-token").unwrap(), "csrf-fixture");
+                        contacts.fetch_add(1, Ordering::SeqCst);
+                        fixture_range(&headers, &bytes)
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let input = fixture_input(&format!("http://{}/media", listener.local_addr().unwrap()));
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let proxy = EgressProxy::start(NetworkPolicy::loopback_fixture())
+            .await
+            .unwrap();
+        let sources = fixture_sources(&proxy.url()).await;
+        let (first, second) = tokio::join!(
+            sources.resolve("a", &input, None),
+            sources.resolve("a", &input, None)
+        );
+        let (first, second) = (first.unwrap(), second.unwrap());
+        assert!(Arc::ptr_eq(&first, &second));
+        assert_eq!(
+            contacts.load(Ordering::SeqCst),
+            2,
+            "one size probe and one media signature probe"
+        );
+        assert!(!first.file_metadata);
+        let other_scope = sources.resolve("b", &input, None).await.unwrap();
+        assert_ne!(first.url, other_scope.url);
+        let client = Client::builder().no_proxy().build().unwrap();
+        let response = client
+            .get(&first.url)
+            .header("Range", "bytes=511-519")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(response.bytes().await.unwrap().as_ref(), &bytes[511..520]);
+        let url = first.url.clone();
+        let map_owner = first.clone();
+        sources.close_if_unused(&first).await.unwrap();
+        assert!(client
+            .head(&url)
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .is_success());
+        drop(map_owner);
+        drop(first);
+        sources.close_if_unused(&second).await.unwrap();
+        assert!(client.get(&url).send().await.is_err());
+        assert!(client
+            .head(&other_scope.url)
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .is_success());
+        drop(second);
+        drop(other_scope);
+        sources.reap().await.unwrap();
+        server.abort();
+    }
+    #[tokio::test]
+    async fn header_media_redirect_strips_all_provider_headers_on_every_range() {
+        let contacts = Arc::new(AtomicUsize::new(0));
+        let bytes = Arc::new([b"\x00\x00\x00\x18ftypisom".as_slice(), &[7; 1012]].concat());
+        let target = Router::new().route(
+            "/media",
+            get({
+                let contacts = contacts.clone();
+                move |headers: HttpHeaders| {
+                    let contacts = contacts.clone();
+                    let bytes = bytes.clone();
+                    async move {
+                        assert!(!headers.contains_key("authorization"));
+                        assert!(!headers.contains_key("x-api-key"));
+                        assert!(!headers.contains_key("x-csrf-token"));
+                        assert_eq!(headers.get("accept-encoding").unwrap(), "identity");
+                        contacts.fetch_add(1, Ordering::SeqCst);
+                        fixture_range(&headers, &bytes)
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let location = format!("http://{}/media", listener.local_addr().unwrap());
+        let target = tokio::spawn(async move { axum::serve(listener, target).await.unwrap() });
+        let origin = Router::new().route(
+            "/start",
+            get(move |headers: HttpHeaders| {
+                let location = location.clone();
+                async move {
+                    assert_eq!(headers.get("x-api-key").unwrap(), "private-fixture");
+                    Response::builder()
+                        .status(307)
+                        .header("Location", location)
+                        .body(Body::empty())
+                        .unwrap()
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let input = fixture_input(&format!("http://{}/start", listener.local_addr().unwrap()));
+        let origin = tokio::spawn(async move { axum::serve(listener, origin).await.unwrap() });
+        let proxy = EgressProxy::start(NetworkPolicy::loopback_fixture())
+            .await
+            .unwrap();
+        let sources = fixture_sources(&proxy.url()).await;
+        let source = sources.resolve("a", &input, None).await.unwrap();
+        let response = Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap()
+            .get(&source.url)
+            .header("Range", "bytes=40-47")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.bytes().await.unwrap().len(), 8);
+        assert_eq!(contacts.load(Ordering::SeqCst), 3);
+        drop(source);
+        sources.reap().await.unwrap();
+        origin.abort();
+        target.abort();
+    }
+    #[tokio::test]
+    async fn header_media_nonrange_and_disguised_manifest_fail_closed() {
+        let router = Router::new()
+            .route("/nonrange", get(|| async { "binary without range" }))
+            .route(
+                "/fake.mp4",
+                get(|headers: HttpHeaders| async move {
+                    fixture_range(
+                        &headers,
+                        b"#EXTM3U\n#EXT-X-VERSION:3\nhttp://example.org/secret.ts\n",
+                    )
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let proxy = EgressProxy::start(NetworkPolicy::loopback_fixture())
+            .await
+            .unwrap();
+        let sources = fixture_sources(&proxy.url()).await;
+        assert_eq!(
+            sources
+                .resolve("a", &fixture_input(&format!("{origin}/nonrange")), None)
+                .await
+                .err(),
+            Some("source_preparation_failed")
+        );
+        assert_eq!(
+            sources
+                .resolve("a", &fixture_input(&format!("{origin}/fake.mp4")), None)
+                .await
+                .err(),
+            Some("unsupported_output")
+        );
+        let mut live = fixture_input(&format!("{origin}/nonrange"));
+        live.live = true;
+        assert_eq!(
+            sources.resolve("a", &live, None).await.err(),
+            Some("unsupported_output")
+        );
+        assert!(sources.resolved.lock().await.is_empty());
+        server.abort();
+    }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn canceled_blocking_archive_keeps_budget_until_reader_and_spool_close() {
         struct GatedVolume {
@@ -859,6 +1157,7 @@ mod tests {
         let source = Arc::new(ResolvedSource {
             client_frame_ack: false,
             url: url.clone(),
+            file_metadata: true,
             file: TorrentFile {
                 index: 0,
                 name: "clip.mp4".into(),
