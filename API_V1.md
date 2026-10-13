@@ -316,3 +316,14 @@ accepted; other containers/codecs/track preferences fall back internally to
 ordinary managed HLS before reserving a viewer/output. HLS keeps its applied
 source-cut clock. Capabilities explicitly advertise `native_mp4`; integrators
 must retain HLS when this preference is absent or the source does not qualify.
+
+
+Owned HTTP media range readers align fetches to 1 MiB chunks and coalesce
+concurrent overlapping reads. Each source retains at most four chunk entries;
+active reads remain independently owned and bounded by the private loopback
+listener's connection limit. Source closure still waits for active readers.
+After initial redirect validation, ranges reuse only the final vetted recipient
+and its effective headers (all provider headers already stripped if any hop
+changed origin). Every network fetch still traverses ordinary egress policy and
+validates exact range, source size and body length. A stale/failed recipient is
+refreshed through the original URL with original headers applied only there.

@@ -349,6 +349,7 @@ impl Sources {
             let stream = LoopbackStream::from_source(Arc::new(HttpSource {
                 volume,
                 reads: reads.clone(),
+                chunks: Mutex::new(HashMap::new()),
             }))
             .await
             .map_err(torrent_error)?;
@@ -476,6 +477,16 @@ async fn fetch(
     method: Method,
     headers: &HeaderMap,
 ) -> Result<reqwest::Response, &'static str> {
+    Ok(fetch_recipient(client, source, method, headers)
+        .await?
+        .response)
+}
+async fn fetch_recipient(
+    client: &Client,
+    source: &str,
+    method: Method,
+    headers: &HeaderMap,
+) -> Result<Fetched, &'static str> {
     let mut url = url::Url::parse(source).map_err(|_| "invalid_input")?;
     let mut headers = headers.clone();
     for _ in 0..=5 {
@@ -494,7 +505,13 @@ async fn fetch(
             .await
             .map_err(|_| "source_preparation_failed")?;
         if !response.status().is_redirection() {
-            return Ok(response);
+            return Ok(Fetched {
+                response,
+                recipient: HttpRecipient {
+                    url: url.to_string(),
+                    headers,
+                },
+            });
         }
         let location = response
             .headers()
@@ -643,9 +660,50 @@ fn binary_media(prefix: &[u8]) -> bool {
         || (prefix.len() > 376 && prefix[0] == 0x47 && prefix[188] == 0x47 && prefix[376] == 0x47)
         || (prefix.len() > 1 && prefix[0] == 0xff && prefix[1] & 0xe0 == 0xe0)
 }
+const HTTP_CHUNK: u64 = 1024 * 1024;
+struct HttpChunk {
+    bytes: Mutex<Option<Arc<Vec<u8>>>>,
+}
 struct HttpSource {
     volume: HttpVolume,
     reads: Arc<ArchiveReads>,
+    chunks: Mutex<HashMap<u64, Arc<HttpChunk>>>,
+}
+impl HttpSource {
+    async fn chunk(&self, offset: u64) -> Result<Arc<Vec<u8>>, String> {
+        let chunk = {
+            let mut chunks = self.chunks.lock().await;
+            if !chunks.contains_key(&offset) && chunks.len() >= 4 {
+                let retire = chunks
+                    .iter()
+                    .map(|(key, _)| *key)
+                    .max_by_key(|key| key.abs_diff(offset));
+                if let Some(retire) = retire {
+                    chunks.remove(&retire);
+                }
+            }
+            chunks
+                .entry(offset)
+                .or_insert_with(|| {
+                    Arc::new(HttpChunk {
+                        bytes: Mutex::new(None),
+                    })
+                })
+                .clone()
+        };
+        let mut loaded = chunk.bytes.lock().await;
+        if let Some(bytes) = loaded.as_ref() {
+            return Ok(bytes.clone());
+        }
+        let bytes = Arc::new(
+            self.volume
+                .read(offset, HTTP_CHUNK as u32)
+                .await
+                .map_err(|_| "Media range failed".to_owned())?,
+        );
+        *loaded = Some(bytes.clone());
+        Ok(bytes)
+    }
 }
 impl TorrentRangeSource for HttpSource {
     fn file_size(&self, index: u32) -> Option<u64> {
@@ -662,10 +720,26 @@ impl TorrentRangeSource for HttpSource {
     ) -> futures::future::BoxFuture<'_, Result<Vec<u8>, String>> {
         Box::pin(async move {
             let _guard = self.reads.begin()?;
-            self.volume
-                .read(offset, length)
-                .await
-                .map_err(|_| "Media range failed".to_owned())
+            let end = offset
+                .saturating_add(u64::from(length))
+                .min(self.volume.size);
+            let mut position = offset;
+            let mut result = Vec::new();
+            while position < end {
+                if self.reads.closed.load(Ordering::Acquire) {
+                    return Err("Media source closed".into());
+                }
+                let base = position / HTTP_CHUNK * HTTP_CHUNK;
+                let bytes = self.chunk(base).await?;
+                let start = (position - base) as usize;
+                let count = (end - position).min(bytes.len().saturating_sub(start) as u64) as usize;
+                if count == 0 {
+                    return Err("Media range truncated".into());
+                }
+                result.extend_from_slice(&bytes[start..start + count]);
+                position += count as u64;
+            }
+            Ok(result)
         })
     }
 }
@@ -675,6 +749,16 @@ struct HttpVolume {
     url: String,
     headers: HeaderMap,
     size: u64,
+    target: Arc<Mutex<HttpRecipient>>,
+}
+#[derive(Clone)]
+struct HttpRecipient {
+    url: String,
+    headers: HeaderMap,
+}
+struct Fetched {
+    response: reqwest::Response,
+    recipient: HttpRecipient,
 }
 impl HttpVolume {
     async fn new(
@@ -686,7 +770,9 @@ impl HttpVolume {
             reqwest::header::RANGE,
             HeaderValue::from_static("bytes=0-0"),
         );
-        let response = fetch(&client, &url, Method::GET, &headers).await?;
+        let fetched = fetch_recipient(&client, &url, Method::GET, &headers).await?;
+        let response = fetched.response;
+        let recipient = fetched.recipient;
         let (start, end, size) = content_range(&response)?;
         if start != 0 || end != 0 || bounded_body(response, 1).await?.len() != 1 {
             return Err("source_preparation_failed");
@@ -696,6 +782,7 @@ impl HttpVolume {
             url,
             headers,
             size,
+            target: Arc::new(Mutex::new(recipient)),
         })
     }
     async fn read(&self, offset: u64, length: u32) -> Result<Vec<u8>, std::io::Error> {
@@ -703,15 +790,28 @@ impl HttpVolume {
             return Ok(Vec::new());
         }
         let end = offset.saturating_add(u64::from(length)).min(self.size) - 1;
-        let mut headers = self.headers.clone();
-        headers.insert(
-            reqwest::header::RANGE,
-            HeaderValue::from_str(&format!("bytes={offset}-{end}"))
-                .map_err(|_| std::io::Error::other("Archive range failed"))?,
-        );
-        let response = fetch(&self.client, &self.url, Method::GET, &headers)
-            .await
-            .map_err(std::io::Error::other)?;
+        let target = self.target.lock().await.clone();
+        let fetched = tokio::time::timeout(Duration::from_secs(20), async {
+            let range = HeaderValue::from_str(&format!("bytes={offset}-{end}"))
+                .map_err(|_| "source_preparation_failed")?;
+            let mut headers = target.headers.clone();
+            headers.insert(reqwest::header::RANGE, range.clone());
+            let first = fetch_recipient(&self.client, &target.url, Method::GET, &headers).await;
+            let fetched = match first {
+                Ok(fetched) if fetched.response.status() == StatusCode::PARTIAL_CONTENT => fetched,
+                _ => {
+                    let mut headers = self.headers.clone();
+                    headers.insert(reqwest::header::RANGE, range);
+                    fetch_recipient(&self.client, &self.url, Method::GET, &headers).await?
+                }
+            };
+            Ok::<_, &'static str>(fetched)
+        })
+        .await
+        .map_err(|_| std::io::Error::other("Media range timed out"))?
+        .map_err(std::io::Error::other)?;
+        let response = fetched.response;
+        let recipient = fetched.recipient;
         let observed = content_range(&response).map_err(std::io::Error::other)?;
         if observed != (offset, end, self.size) {
             return Err(std::io::Error::other("Archive range changed"));
@@ -722,6 +822,7 @@ impl HttpVolume {
         if bytes.len() as u64 != end - offset + 1 {
             return Err(std::io::Error::other("Archive range truncated"));
         }
+        *self.target.lock().await = recipient;
         Ok(bytes)
     }
 }
@@ -971,6 +1072,109 @@ mod tests {
             .unwrap();
         assert_eq!(response.bytes().await.unwrap().len(), 8);
         assert_eq!(contacts.load(Ordering::SeqCst), 3);
+        drop(source);
+        sources.reap().await.unwrap();
+        origin.abort();
+        target.abort();
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn header_media_chunk_cache_coalesces_overlaps_and_reuses_vetted_recipient() {
+        let bytes = Arc::new(
+            [
+                b"\x00\x00\x00\x18ftypisom".as_slice(),
+                &vec![7; 3 * HTTP_CHUNK as usize],
+            ]
+            .concat(),
+        );
+        let range_calls = Arc::new(AtomicUsize::new(0));
+        let original_calls = Arc::new(AtomicUsize::new(0));
+        let target = Router::new().route(
+            "/media",
+            get({
+                let bytes = bytes.clone();
+                let calls = range_calls.clone();
+                move |headers: HttpHeaders| {
+                    let bytes = bytes.clone();
+                    let calls = calls.clone();
+                    async move {
+                        assert!(!headers.contains_key("x-api-key"));
+                        assert!(!headers.contains_key("authorization"));
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        tokio::time::sleep(Duration::from_millis(25)).await;
+                        fixture_range(&headers, &bytes)
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let target_url = format!("http://{}/media", listener.local_addr().unwrap());
+        let target = tokio::spawn(async move { axum::serve(listener, target).await.unwrap() });
+        let origin = Router::new().route(
+            "/start",
+            get({
+                let calls = original_calls.clone();
+                move |headers: HttpHeaders| {
+                    let calls = calls.clone();
+                    let target_url = target_url.clone();
+                    async move {
+                        assert_eq!(headers.get("x-api-key").unwrap(), "private-fixture");
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        Response::builder()
+                            .status(307)
+                            .header("Location", target_url)
+                            .body(Body::empty())
+                            .unwrap()
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let input = fixture_input(&format!("http://{}/start", listener.local_addr().unwrap()));
+        let origin = tokio::spawn(async move { axum::serve(listener, origin).await.unwrap() });
+        let proxy = EgressProxy::start(NetworkPolicy::loopback_fixture())
+            .await
+            .unwrap();
+        let sources = fixture_sources(&proxy.url()).await;
+        let source = sources.resolve("fixture", &input, None).await.unwrap();
+        assert_eq!(range_calls.load(Ordering::SeqCst), 2);
+        let client = Client::builder().no_proxy().build().unwrap();
+        let read = |start: u64, end: u64| {
+            let client = client.clone();
+            let url = source.url.clone();
+            async move {
+                let response = client
+                    .get(url)
+                    .header("Range", format!("bytes={start}-{end}"))
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), 206);
+                response.bytes().await.unwrap()
+            }
+        };
+        let (first, overlap) = tokio::join!(read(0, 65535), read(32768, 98303));
+        assert_eq!(first.as_ref(), &bytes[..65536]);
+        assert_eq!(overlap.as_ref(), &bytes[32768..98304]);
+        assert_eq!(
+            range_calls.load(Ordering::SeqCst),
+            3,
+            "overlapping reads share one aligned 1 MiB upstream request"
+        );
+        for offset in (65536..HTTP_CHUNK).step_by(65536) {
+            assert_eq!(read(offset, offset + 65535).await.len(), 65536);
+        }
+        assert_eq!(
+            range_calls.load(Ordering::SeqCst),
+            3,
+            "later 64 KiB reads use the same chunk"
+        );
+        assert_eq!(read(HTTP_CHUNK, HTTP_CHUNK + 65535).await.len(), 65536);
+        assert_eq!(range_calls.load(Ordering::SeqCst), 4);
+        assert_eq!(
+            original_calls.load(Ordering::SeqCst),
+            1,
+            "later requests use only the vetted final recipient with stripped headers"
+        );
         drop(source);
         sources.reap().await.unwrap();
         origin.abort();
