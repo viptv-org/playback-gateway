@@ -5,6 +5,7 @@ use crate::{
     protocol::{CreateSession, IDLE_GRACE_SECONDS, VIEWER_LEASE_SECONDS},
 };
 use serde::Serialize;
+mod captions;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Use the engine's inspected plan, never a parallel control-layer approximation.
@@ -67,6 +68,7 @@ struct OwnedViewer {
     idempotency: String,
     media_hash: Option<[u8; 32]>,
     media_token: Option<String>,
+    captions: BTreeMap<String, std::sync::Arc<str>>,
 }
 
 /// Returned only on issuance. Never include this capability in logs or a
@@ -465,6 +467,7 @@ impl Sessions {
                 idempotency: idempotency.into(),
                 media_hash: None,
                 media_token: None,
+                captions: BTreeMap::new(),
             },
         );
         Ok(Reservation {
@@ -664,6 +667,7 @@ impl Sessions {
                     viewer.view.error_code = Some(failure.code().into());
                     viewer.view.expires_at = now;
                     viewer.media_hash = None;
+                    viewer.captions.clear();
                 }
             }
         }
@@ -721,6 +725,7 @@ impl Sessions {
         tracing::info!(session_tag = %crate::diagnostics::tag(id), status = ?status, expires_at = viewer.view.expires_at, now, "Viewer detached");
         viewer.media_token = None;
         viewer.media_hash = None;
+        viewer.captions.clear();
         viewer.view.expires_at = now;
         let job_id = viewer.view.job_id.clone();
         let owner = viewer.owner.clone();

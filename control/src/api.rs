@@ -31,6 +31,7 @@ struct SessionResponse {
     #[serde(flatten)]
     viewer: Viewer,
     renew_after_seconds: u64,
+    external_captions: Vec<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     playback: Option<playback_engine::PlaybackResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -53,6 +54,10 @@ pub fn router(state: Api) -> Router {
         )
         .route("/v1/sessions/:id", get(session).delete(release))
         .route("/v1/sessions/:id/renew", post(renew))
+        .route(
+            "/v1/sessions/:id/captions",
+            post(caption).layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
+        )
         .layer(DefaultBodyLimit::max(256 * 1024))
         .layer(middleware::from_fn_with_state(state.clone(), authenticate));
     let keys = key_api::router(key_api::KeyApi {
@@ -127,6 +132,7 @@ fn reply(
         input_file: state.workers.input_file(&viewer),
         viewer,
         renew_after_seconds: RENEW_AFTER_SECONDS,
+        external_captions: vec!["srt"],
         playback,
     })
 }
@@ -296,8 +302,21 @@ async fn capabilities(
         .available(&principal, now()?)
         .map_err(ApiError)?;
     Ok(Json(
-        serde_json::json!({"version":API_VERSION, "ready":state.ready.load(Ordering::Acquire) && state.workers.media_storage_available(), "protocols":["hls","progressive","native_mp4"], "torrent":state.workers.torrent_enabled(), "viewer_lease_seconds":VIEWER_LEASE_SECONDS, "renew_after_seconds":RENEW_AFTER_SECONDS, "namespaces":principal.key.spec.namespaces, "scopes":principal.key.spec.scopes,"limits":principal.key.spec.quotas,"available":available}),
+        serde_json::json!({"version":API_VERSION, "ready":state.ready.load(Ordering::Acquire) && state.workers.media_storage_available(), "protocols":["hls","progressive","native_mp4"],"external_captions":["srt"], "torrent":state.workers.torrent_enabled(), "viewer_lease_seconds":VIEWER_LEASE_SECONDS, "renew_after_seconds":RENEW_AFTER_SECONDS, "namespaces":principal.key.spec.namespaces, "scopes":principal.key.spec.scopes,"limits":principal.key.spec.quotas,"available":available}),
     ))
+}
+async fn caption(
+    State(state): State<Api>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+    body: Result<Json<crate::captions::Upload>, JsonRejection>,
+) -> Result<Json<crate::captions::Delivery>, ApiError> {
+    state
+        .workers
+        .attach_caption(&principal, &id, payload(body)?, now()?)
+        .await
+        .map(Json)
+        .map_err(ApiError)
 }
 async fn ready(State(state): State<Api>) -> Response {
     if state.ready.load(Ordering::Acquire) && state.workers.media_storage_available() {
@@ -352,6 +371,12 @@ async fn media_options() -> Response {
 
 #[cfg(all(test, unix))]
 mod tests {
+    mod captions {
+        include!("caption_http_tests.rs");
+    }
+    mod caption_capacity {
+        include!("caption_capacity_tests.rs");
+    }
     use super::*;
     use crate::workers::tests::{fixture, request, BOOTSTRAP};
     use axum::{

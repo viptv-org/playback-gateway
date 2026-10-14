@@ -327,3 +327,7 @@ and its effective headers (all provider headers already stripped if any hop
 changed origin). Every network fetch still traverses ordinary egress policy and
 validates exact range, source size and body length. A stale/failed recipient is
 refreshed through the original URL with original headers applied only there.
+
+## External viewer captions
+
+The additive `external_captions:["srt"]` capability and authenticated viewer-caption upload provide leased SRT sidecars without upstream URLs or application credentials. See [viewer-scoped external captions](docs/EXTERNAL_CAPTIONS.md) for the exact payload, timestamp rebasing, bounds and lifecycle. Existing embedded track selection remains available.

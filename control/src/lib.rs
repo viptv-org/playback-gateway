@@ -1,4 +1,5 @@
 pub mod api;
+mod captions;
 pub mod credentials;
 mod diagnostics;
 pub mod key_api;

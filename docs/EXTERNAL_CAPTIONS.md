@@ -1,0 +1,15 @@
+# Viewer-scoped external captions
+
+This generic gateway extension accepts caption **text** from an authenticated integration. It never accepts a subtitle URL, fetches a subtitle provider, or understands application accounts/catalogs. The application remains responsible for matching the selected subtitle to the exact media and fetching it with its own egress and credential policy.
+
+`GET /v1/capabilities` and session control responses advertise `external_captions:["srt"]`. Older gateways omit the field. Existing embedded subtitle selection, WebVTT HLS renditions, media workers, first-frame acknowledgement and renewal contracts remain unchanged.
+
+For a Ready viewer, POST `/v1/sessions/:id/captions` with a current integration key and `{ "content_vtt": "WEBVTT\n\n00:00:02.000 --> 00:00:04.000\nCaption\n" }`. The key must own that viewer and have Read/Create authority for its namespace. This operation and caption reads do not renew the viewer or acknowledge presentation. Its response is `{url,format:"srt",timeline_offset_seconds}`. `url` is a relative `/media/:viewer/:viewer-media-token/caption_<digest>.srt` reference. Resolve it under the configured gateway endpoint; it contains only the existing viewer media capability, never a control key or upstream URL.
+
+The gateway converts bounded UTF-8 WebVTT cues into UTF-8 SRT. VTT cue labels/settings and STYLE/REGION/NOTE metadata are not rendered as text. It uses the **actual prepared output's** timeline: HLS cues are shifted by the cut position, finished cues are omitted, and a cue crossing the cut begins at zero. Original progressive MP4 and Live have offset zero. Clients must not subtract the returned offset again. A new HLS cut creates another viewer and requires attaching that viewer's caption. The original viewer's URLs are never transferred to its successor.
+
+Uploads have a 4 MiB JSON envelope, 2 MiB text/output limit and 20,000-cue bound. Unknown fields, malformed text/timestamps, control bytes and oversized documents are rejected. Caption records are immutable/idempotent by the converted content digest, with at most eight tracks per viewer, 128 tracks globally and 32 MiB of total caption text. Capacity failure preserves existing tracks.
+
+GET/HEAD caption delivery uses exactly the existing viewer media authorization: Ready status, current media token, current integration-key authority, namespace/job and unexpired viewer lease. It requires no application credential. Reads return `application/x-subrip; charset=utf-8`, `no-store`, `nosniff`, `no-referrer` and the ordinary media CORS policy. Release, expiry, processing failure and key revocation deny subsequent reads; terminal lifecycle cleanup removes caption text. A caption for another viewer remains unavailable even if the underlying output job is shared.
+
+Focused tests cover UTF-8, cue overlap/cut timing, no renewal, foreign owners, control/media credential separation, per-viewer isolation and capacity, malformed/oversized uploads, expiry, release and revocation. Workspace tests retain embedded subtitle behavior. Host transport checks are distinct from actual device subtitle rendering.

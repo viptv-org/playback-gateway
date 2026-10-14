@@ -97,6 +97,7 @@ impl IntoResponse for ApiError {
             | "invalid_request"
             | "invalid_input"
             | "invalid_headers"
+            | "invalid_caption"
             | "invalid_output"
             | "invalid_position"
             | "invalid_namespace"
@@ -106,9 +107,11 @@ impl IntoResponse for ApiError {
             | "encrypted_archive_unsupported"
             | "archive_volume_missing"
             | "archive_metadata_invalid" => StatusCode::UNPROCESSABLE_ENTITY,
-            "viewer_capacity" | "input_capacity" | "output_capacity" | "torrent_cache_capacity" => {
-                StatusCode::TOO_MANY_REQUESTS
-            }
+            "caption_capacity"
+            | "viewer_capacity"
+            | "input_capacity"
+            | "output_capacity"
+            | "torrent_cache_capacity" => StatusCode::TOO_MANY_REQUESTS,
             "startup_timeout"
             | "torrent_no_peers"
             | "torrent_metadata_timeout"

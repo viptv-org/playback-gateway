@@ -32,6 +32,9 @@ mod header_tests;
 #[path = "workers_security_tests.rs"]
 mod security_tests;
 
+#[path = "workers_captions.rs"]
+mod captions;
+
 pub struct Workers {
     pub sessions: Arc<Mutex<Sessions>>,
     pub credentials: Arc<Credentials>,
@@ -797,6 +800,9 @@ impl Workers {
             return Err("method_not_allowed");
         }
         let target = self.media_target(viewer, token, now).await?;
+        if file.starts_with("caption_") {
+            return self.caption_media(viewer, token, file, now, method).await;
+        }
         if file.len() > 160
             || file.contains("..")
             || !file
