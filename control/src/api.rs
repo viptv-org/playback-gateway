@@ -302,7 +302,7 @@ async fn capabilities(
         .available(&principal, now()?)
         .map_err(ApiError)?;
     Ok(Json(
-        serde_json::json!({"version":API_VERSION, "ready":state.ready.load(Ordering::Acquire) && state.workers.media_storage_available(), "protocols":["hls","progressive","native_mp4"],"external_captions":["srt"], "torrent":state.workers.torrent_enabled(), "viewer_lease_seconds":VIEWER_LEASE_SECONDS, "renew_after_seconds":RENEW_AFTER_SECONDS, "namespaces":principal.key.spec.namespaces, "scopes":principal.key.spec.scopes,"limits":principal.key.spec.quotas,"available":available}),
+        serde_json::json!({"version":API_VERSION, "ready":state.ready.load(Ordering::Acquire) && state.workers.media_storage_available(), "protocols":["hls","progressive","native_mp4"],"external_captions":["srt"], "required_audio_index":true, "torrent":state.workers.torrent_enabled(), "viewer_lease_seconds":VIEWER_LEASE_SECONDS, "renew_after_seconds":RENEW_AFTER_SECONDS, "namespaces":principal.key.spec.namespaces, "scopes":principal.key.spec.scopes,"limits":principal.key.spec.quotas,"available":available}),
     ))
 }
 async fn caption(
@@ -438,6 +438,7 @@ mod tests {
         let (_, _, capabilities) =
             call(&app, "GET", "/v1/capabilities", key, None, String::new()).await;
         let capabilities: Value = serde_json::from_slice(&capabilities).unwrap();
+        assert_eq!(capabilities["required_audio_index"], true);
         for scope in ["capabilities", "create", "read", "renew", "release"] {
             assert!(capabilities["scopes"]
                 .as_array()

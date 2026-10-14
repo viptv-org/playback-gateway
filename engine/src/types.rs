@@ -106,13 +106,17 @@ impl BrowserCapabilities {
             })
     }
 }
-/// Absolute INPUT stream indices from ffprobe, never native/output audio indices.
+/// Explicit track indices address absolute ffprobe INPUT streams.
+/// The separate provider requirement is an audio ordinal, never an output ID.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrackSelection {
     /// Scoped browser failure; absent retains legacy forced-conversion behavior.
     pub conversion_reason: Option<String>,
     pub audio_track_index: Option<u32>,
+    /// Provider-required zero-based ordinal among input audio streams.
+    /// An explicit absolute audio_track_index takes precedence.
+    pub required_audio_index: Option<u32>,
     pub audio_language: Option<String>,
     pub subtitle_track_index: Option<u32>,
     pub preferred_audio_language: Option<String>,

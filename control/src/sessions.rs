@@ -1019,6 +1019,7 @@ mod tests {
                 max_width: 3840,
                 max_height: 2160,
                 audio_track: None,
+                required_audio_index: None,
                 subtitle_track: None,
             },
             position_seconds: 0.0,

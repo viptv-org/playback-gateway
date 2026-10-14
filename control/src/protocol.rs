@@ -169,6 +169,9 @@ pub struct Output {
     pub max_width: u32,
     pub max_height: u32,
     pub audio_track: Option<u32>,
+    /// Zero-based ordinal among input audio streams, distinct from audio_track.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub required_audio_index: Option<u32>,
     pub subtitle_track: Option<u32>,
     pub audio_language: Option<String>,
     pub preferred_audio_language: Option<String>,
@@ -180,6 +183,7 @@ impl Output {
     pub fn validate(&self) -> Result<(), &'static str> {
         if !(2..=16384).contains(&self.max_width)
             || self.audio_track.is_some_and(|index| index > 65535)
+            || self.required_audio_index.is_some_and(|index| index > 65535)
             || self.subtitle_track.is_some_and(|index| index > 65535)
             || (self.subtitles_off
                 && (self.subtitle_track.is_some() || self.preferred_subtitle_language.is_some()))
@@ -341,6 +345,7 @@ mod tests {
         }
         for (field, bad) in [
             ("audio_track", serde_json::json!(65536)),
+            ("required_audio_index", serde_json::json!(65536)),
             ("subtitle_track", serde_json::json!(65536)),
             ("audio_language", serde_json::json!("en\nsecret")),
             ("preferred_audio_language", serde_json::json!("")),

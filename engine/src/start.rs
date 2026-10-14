@@ -109,6 +109,7 @@ impl PlaybackManager {
         if selection
             .audio_track_index
             .is_some_and(|index| index > 65535)
+            || selection.required_audio_index.is_some_and(|index| index > 65535)
         {
             return Err("Requested input audio track index is out of range".into());
         }
@@ -148,6 +149,7 @@ impl PlaybackManager {
             && caps.browser.as_ref().is_some_and(|b| b.inspect_original)
             && std::env::var("PLAYBACK_BROWSER_PREPARATION").as_deref() == Ok("1")
             && selection.audio_track_index.is_none()
+            && selection.required_audio_index.is_none()
             && selection.subtitle_track_index.is_none()
         {
             let permit = self

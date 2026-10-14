@@ -588,3 +588,32 @@ fn cover_art_neither_fails_the_probe_nor_blocks_copy_or_direct_delivery() {
         "cover art is not a second programme video"
     );
 }
+
+#[test]
+fn provider_audio_ordinal_is_not_an_absolute_stream_id_and_never_falls_back() {
+    let probe: Probe = serde_json::from_value(serde_json::json!({"streams":[
+        {"index":0,"codec_type":"video","codec_name":"h264"},
+        {"index":3,"codec_type":"audio","codec_name":"unknown","tags":{"language":"ita"}},
+        {"index":5,"codec_type":"subtitle","codec_name":"subrip"},
+        {"index":17,"codec_type":"audio","codec_name":"aac","tags":{"language":"eng"}}
+    ]})).unwrap();
+    let mut selection = TrackSelection { required_audio_index: Some(1), ..Default::default() };
+    assert_eq!(probe.select_audio(&selection).unwrap().unwrap().index, Some(17));
+    selection.preferred_audio_language = Some("it".into());
+    assert_eq!(probe.select_audio(&selection).unwrap().unwrap().index, Some(17));
+    selection.audio_track_index = Some(3);
+    assert_eq!(probe.select_audio(&selection).unwrap().unwrap().index, Some(3), "manual absolute choice wins");
+    selection.audio_track_index = None;
+    selection.required_audio_index = Some(2);
+    assert!(probe.select_audio(&selection).is_err(), "missing required audio cannot select default");
+    selection.required_audio_index = Some(0);
+    assert_eq!(probe.select_audio(&selection).unwrap().unwrap().index, Some(3), "unsupported streams still count toward the ordinal");
+    let missing: Probe = serde_json::from_value(serde_json::json!({"streams":[
+        {"codec_type":"audio","codec_name":"aac"},
+        {"index":17,"codec_type":"audio","codec_name":"aac"}
+    ]})).unwrap();
+    assert!(missing.select_audio(&selection).is_err(), "invalid first audio cannot shift ordinal0 to second audio");
+    selection.required_audio_index = Some(1);
+    assert_eq!(missing.select_audio(&selection).unwrap().unwrap().index, Some(17));
+    assert!(direct_format(&probe, &Capabilities::default(), probe.select_audio(&selection).unwrap(), &selection).is_none());
+}

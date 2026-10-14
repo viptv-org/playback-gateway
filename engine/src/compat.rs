@@ -200,6 +200,16 @@ impl Probe {
                 .map(Some)
                 .ok_or_else(|| "Requested input audio track is unavailable".into());
         }
+        if let Some(index) = selection.required_audio_index {
+            // Count every input audio stream before checking whether it is usable.
+            // Filtering first would shift the provider's ordinal to another language.
+            return self.streams.iter()
+                .filter(|stream| stream.codec_type.as_deref() == Some("audio"))
+                .take(32).nth(index as usize)
+                .filter(|stream| stream.index.is_some_and(|index| index <= 65535))
+                .map(Some)
+                .ok_or_else(|| "Required source audio track is unavailable".into());
+        }
         if let Some(language) = selection.audio_language.as_deref() {
             let language = normalize_audio_language(language);
             let chosen = audio

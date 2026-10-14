@@ -91,7 +91,7 @@ pub(super) fn direct_format(
 ) -> Option<&'static str> {
     // Chosen subtitle tracks are delivered by a managed session, never by handing
     // the untouched file to the client.
-    if selection.subtitle_track_index.is_some() || selection.preferred_subtitle_language.is_some() {
+    if selection.required_audio_index.is_some() || selection.subtitle_track_index.is_some() || selection.preferred_subtitle_language.is_some() {
         return None;
     }
     // A WebCodecs client reads the original container itself, so it is not bound

@@ -11,6 +11,9 @@ async fn real_audio_selection_accepts_tagged_and_unknown_languages() {
         ("english", vec!["eng"]),
         ("italian", vec!["ita"]),
         ("unknown", vec!["und"]),
+        ("required_italian", vec!["ita", "eng"]),
+        ("required_english", vec!["ita", "eng"]),
+        ("required_override", vec!["ita", "eng"]),
     ] {
         let fixture = root.path().join(format!("{case}.mp4"));
         let mut command = Command::new(&ffmpeg);
@@ -98,12 +101,20 @@ async fn real_audio_selection_accepts_tagged_and_unknown_languages() {
                 false,
                 false,
                 None,
-                TrackSelection::default(),
+                TrackSelection {
+                    required_audio_index: match case {
+                        "required_italian" | "required_override" => Some(0),
+                        "required_english" => Some(1),
+                        _ => None,
+                    },
+                    audio_track_index: (case == "required_override").then_some(2),
+                    ..Default::default()
+                },
             )
             .await
             .unwrap();
         let selected = response.selected_audio.as_ref().unwrap();
-        assert_eq!(selected.input_index, if case == "dual" { 2 } else { 1 });
+        assert_eq!(selected.input_index, if matches!(case,"dual"|"required_english"|"required_override") { 2 } else { 1 });
         assert_eq!(selected.output_index, 0);
         assert_eq!(selected.output_audio_ordinal, 0);
         assert_eq!(selected.output_stream_index, 1);
@@ -111,8 +122,8 @@ async fn real_audio_selection_accepts_tagged_and_unknown_languages() {
         assert_eq!(
             selected.language_status,
             match case {
-                "italian" => "tagged_non_english",
-                "dual" | "english" => "tagged_english",
+                "italian" | "required_italian" => "tagged_non_english",
+                "dual" | "english" | "required_english" | "required_override" => "tagged_english",
                 "unknown" => "unknown",
                 _ => unreachable!(),
             }
@@ -156,7 +167,7 @@ async fn real_audio_selection_accepts_tagged_and_unknown_languages() {
         assert!(samples.len() > 4000);
         let crossings = samples.windows(2).filter(|s| s[0] <= 0 && s[1] > 0).count();
         let frequency = crossings as f64 * 8000.0 / samples.len() as f64;
-        let expected_frequency = if case == "italian" { 440.0 } else { 880.0 };
+        let expected_frequency = if matches!(case,"italian"|"required_italian") { 440.0 } else { 880.0 };
         assert!(
             ((expected_frequency - 40.0)..(expected_frequency + 40.0)).contains(&frequency),
             "Wrong selected audio frequency for {case}: {frequency}"
