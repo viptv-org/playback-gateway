@@ -1,4 +1,5 @@
 use super::*;
+use std::net::SocketAddr;
 use librqbit::{
     storage::{
         filesystem::{FilesystemStorage, FilesystemStorageFactory},
