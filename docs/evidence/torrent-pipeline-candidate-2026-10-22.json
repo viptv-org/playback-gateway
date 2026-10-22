@@ -1,5 +1,5 @@
 {
-  "status": "a388911 ordinary-worker cold gates passed for Safety Not Guaranteed and Certified Copy only; queue-time refinement remains separate screening candidate",
+  "status": "a388911 and e49dca8 pass two source-specific Linux cold gates; wider corpus, other platforms and consumer adoption remain unqualified",
   "controlled": {
     "120": {
       "baseline": {
@@ -587,5 +587,6 @@
   },
   "main_jar_sha256": "8a6594947ae403fda60e2bc7b2b5a0eaa17d56c0be6a036058545c4aad715634",
   "ordinary_worker_gates": "torrent-pipeline-linux-gates-2026-10-22.json",
-  "narrow_screen": "torrent-pipeline-narrow-screen-2026-10-22.json"
+  "narrow_screen": "torrent-pipeline-narrow-screen-2026-10-22.json",
+  "queue_time_gates": "torrent-queue-time-linux-gates-2026-10-22.json"
 }

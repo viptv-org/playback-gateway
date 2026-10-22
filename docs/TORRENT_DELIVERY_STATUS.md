@@ -1,4 +1,27 @@
-# Shared torrent delivery status — 2026-10-09
+# Shared torrent delivery status
+
+## Cold-start candidate — 2026-10-22
+
+The local `e49dca8024e74ea85a064f7a4eb94702cf9691c7` candidate passes 20-pair Linux
+software-rendered cold-start gates on Safety Not Guaranteed and Certified Copy:
+median and p90 latency and failure rate are no worse than stock Stremio 4.19.0
+on each source. Candidate starts were 38/40 versus 34/40, with both candidate
+timeouts preserved. [Source-specific results and limits](TORRENT_PIPELINE_CANDIDATE_2026_10_22.md)
+include controlled scheduler tests, full runtime race checks and an isolated
+desktop worker packaging/control smoke.
+
+| Delivery path | Current scope |
+| --- | --- |
+| Linux KMP cold startup | Two source-specific gates pass; the wider supplied and free-film corpora remain unqualified for this candidate. |
+| Android phone and TV | Earlier runtime functional evidence remains separate; this candidate has no Android execution or cold-parity qualification. |
+| Gateway, browser, Roku and iOS | Shared source changes are available; candidate delivery/playback is unqualified. |
+| Windows and macOS | Candidate native execution is unqualified. |
+
+The app and gateway consumer pins remain at `674b71523dff5a74fb339eae97ddcb6217ea9f8b`.
+No candidate artifact was installed or deployed by this phase. The record below
+describes the historical October 9 promotion, rather than this new candidate.
+
+## Historical promotion — 2026-10-09
 
 Implementation is merged and pushed to `main` in every affected owning
 repository. Header workstreams remain separate. The shared production Go code
