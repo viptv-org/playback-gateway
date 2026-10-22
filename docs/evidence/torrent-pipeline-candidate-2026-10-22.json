@@ -1,0 +1,589 @@
+{
+  "status": "candidate; ordinary-worker qualification pending",
+  "controlled": {
+    "120": {
+      "baseline": {
+        "trials": 3,
+        "median_ms": 2056.566,
+        "min_ms": 2052.865,
+        "max_ms": 2058.823,
+        "requests_before_first_response": [
+          1,
+          1,
+          1
+        ],
+        "all_bytes_equal_and_verified": true
+      },
+      "fixed16": {
+        "trials": 3,
+        "median_ms": 1588.433,
+        "min_ms": 1587.697,
+        "max_ms": 1588.523,
+        "requests_before_first_response": [
+          16,
+          16,
+          16
+        ],
+        "all_bytes_equal_and_verified": true
+      },
+      "adaptive": {
+        "trials": 3,
+        "median_ms": 1469.999,
+        "min_ms": 1469.974,
+        "max_ms": 1470.651,
+        "requests_before_first_response": [
+          1,
+          1,
+          1
+        ],
+        "all_bytes_equal_and_verified": true
+      }
+    },
+    "0": {
+      "baseline": {
+        "trials": 3,
+        "median_ms": 996.851,
+        "min_ms": 996.045,
+        "max_ms": 997.158,
+        "requests_before_first_response": [
+          1,
+          1,
+          1
+        ],
+        "all_bytes_equal_and_verified": true
+      },
+      "fixed16": {
+        "trials": 3,
+        "median_ms": 997.287,
+        "min_ms": 996.303,
+        "max_ms": 997.375,
+        "requests_before_first_response": [
+          16,
+          16,
+          16
+        ],
+        "all_bytes_equal_and_verified": true
+      },
+      "adaptive": {
+        "trials": 3,
+        "median_ms": 997.072,
+        "min_ms": 996.713,
+        "max_ms": 997.352,
+        "requests_before_first_response": [
+          1,
+          1,
+          1
+        ],
+        "all_bytes_equal_and_verified": true
+      }
+    }
+  },
+  "controlled_artifacts": {
+    "baseline": {
+      "source": "/mnt/ALPH/.viptv-qa/supplied-magnets-20261022/request-pipeline-controlled/source-baseline",
+      "elf_sha256": "bb3417cca79210eef37d171aec2a64538a17a13dcdc26628d6ada8ffc92b56d8"
+    },
+    "fixed16": {
+      "source": "/mnt/ALPH/.viptv-qa/supplied-magnets-20261022/request-pipeline-controlled/source-fixed16",
+      "elf_sha256": "8af5c4105a709e60527a233614febcd0eda695000656651c94fc6b703cce65a1"
+    },
+    "adaptive": {
+      "source": "/mnt/ALPH/.viptv-qa/supplied-magnets-20261022/request-window-adaptive/source",
+      "elf_sha256": "f6a6d25855855f8533a48879d2c373f3221a638220cfb1ffed63821fb7a75f64"
+    }
+  },
+  "metadata_probes": [
+    {
+      "trial": 0,
+      "profile": "discovery100",
+      "scope": "metadata-only diagnostic; not playback qualification",
+      "passed": true,
+      "endpoint_seconds": 0.660928616001911,
+      "cleanup": {
+        "stop_seconds": 2.002485025994247,
+        "forced_stop": true
+      },
+      "discovery": {
+        "known_peers": 206,
+        "pending_peers": 173,
+        "half_open_peers": 100,
+        "connected_peers": 4,
+        "metadata_chunks": 1,
+        "tracker_success": 0,
+        "tracker_errors": 0,
+        "first_tracker_ms": -1,
+        "first_handshake_ms": 363.837,
+        "first_metadata_ms": 572.436,
+        "first_handshake_network": "udp4",
+        "first_metadata_network": "udp4",
+        "known_ipv4": 277,
+        "known_ipv6": 0
+      }
+    },
+    {
+      "trial": 0,
+      "profile": "discovery200",
+      "scope": "metadata-only diagnostic; not playback qualification",
+      "passed": true,
+      "endpoint_seconds": 0.5099973420001334,
+      "cleanup": {
+        "stop_seconds": 2.001834119997511,
+        "forced_stop": true
+      },
+      "discovery": {
+        "known_peers": 201,
+        "pending_peers": 0,
+        "half_open_peers": 198,
+        "connected_peers": 3,
+        "metadata_chunks": 1,
+        "tracker_success": 0,
+        "tracker_errors": 0,
+        "first_tracker_ms": -1,
+        "first_handshake_ms": 352.174,
+        "first_metadata_ms": 489.01,
+        "first_handshake_network": "tcp4",
+        "first_metadata_network": "tcp4",
+        "known_ipv4": 201,
+        "known_ipv6": 0
+      }
+    },
+    {
+      "trial": 1,
+      "profile": "discovery100",
+      "scope": "metadata-only diagnostic; not playback qualification",
+      "passed": true,
+      "endpoint_seconds": 7.004977979995601,
+      "cleanup": {
+        "stop_seconds": 2.0020427870040294,
+        "forced_stop": true
+      },
+      "discovery": {
+        "known_peers": 204,
+        "pending_peers": 102,
+        "half_open_peers": 100,
+        "connected_peers": 2,
+        "metadata_chunks": 1,
+        "tracker_success": 0,
+        "tracker_errors": 0,
+        "first_tracker_ms": -1,
+        "first_handshake_ms": 6239.594,
+        "first_metadata_ms": 6972.562,
+        "first_handshake_network": "udp4",
+        "first_metadata_network": "udp4",
+        "known_ipv4": 204,
+        "known_ipv6": 0
+      }
+    },
+    {
+      "trial": 1,
+      "profile": "discovery200",
+      "scope": "metadata-only diagnostic; not playback qualification",
+      "passed": true,
+      "endpoint_seconds": 0.5845771609965595,
+      "cleanup": {
+        "stop_seconds": 2.00253583000449,
+        "forced_stop": true
+      },
+      "discovery": {
+        "known_peers": 200,
+        "pending_peers": 0,
+        "half_open_peers": 197,
+        "connected_peers": 3,
+        "metadata_chunks": 1,
+        "tracker_success": 0,
+        "tracker_errors": 0,
+        "first_tracker_ms": -1,
+        "first_handshake_ms": 423.023,
+        "first_metadata_ms": 552.572,
+        "first_handshake_network": "udp4",
+        "first_metadata_network": "tcp4",
+        "known_ipv4": 200,
+        "known_ipv6": 0
+      }
+    },
+    {
+      "trial": 2,
+      "profile": "discovery200",
+      "scope": "metadata-only diagnostic; not playback qualification",
+      "passed": true,
+      "endpoint_seconds": 0.4568815820020973,
+      "cleanup": {
+        "stop_seconds": 2.001591799002199,
+        "forced_stop": true
+      },
+      "discovery": {
+        "known_peers": 206,
+        "pending_peers": 22,
+        "half_open_peers": 200,
+        "connected_peers": 2,
+        "metadata_chunks": 1,
+        "tracker_success": 0,
+        "tracker_errors": 0,
+        "first_tracker_ms": -1,
+        "first_handshake_ms": 254.548,
+        "first_metadata_ms": 434.246,
+        "first_handshake_network": "tcp4",
+        "first_metadata_network": "tcp4",
+        "known_ipv4": 224,
+        "known_ipv6": 0
+      }
+    },
+    {
+      "trial": 2,
+      "profile": "discovery100",
+      "scope": "metadata-only diagnostic; not playback qualification",
+      "passed": true,
+      "endpoint_seconds": 4.534277186001418,
+      "cleanup": {
+        "stop_seconds": 2.0022025640064385,
+        "forced_stop": true
+      },
+      "discovery": {
+        "known_peers": 112,
+        "pending_peers": 9,
+        "half_open_peers": 99,
+        "connected_peers": 4,
+        "metadata_chunks": 1,
+        "tracker_success": 0,
+        "tracker_errors": 0,
+        "first_tracker_ms": -1,
+        "first_handshake_ms": 4366.263,
+        "first_metadata_ms": 4511.865,
+        "first_handshake_network": "tcp4",
+        "first_metadata_network": "tcp4",
+        "known_ipv4": 112,
+        "known_ipv6": 0
+      }
+    }
+  ],
+  "go_race": {
+    "passed_test_cases": 70,
+    "passed_top_level_tests": 54,
+    "skipped_test_cases": 11,
+    "failed": []
+  },
+  "vendor": {
+    "upstream_version": "torrent@v1.61.1-0.20260927071845-d913b30f520e",
+    "changed": [
+      "peerconn.go"
+    ],
+    "removed": [],
+    "added": [
+      "VIPTV_PATCH.md"
+    ],
+    "upstream_license_preserved": true,
+    "peerconn_sha256": "62d32cd466a91e73ffa8354e7099b3765a57571bb6fa68d6c68f9326356ee0a8"
+  },
+  "rendered_screens": {
+    "Safety Not Guaranteed": {
+      "cells": {
+        "candidate": {
+          "attempts": 3,
+          "successes": 3,
+          "failure_inclusive_median_seconds": 5.337476289,
+          "failure_inclusive_p90_seconds": 11.015924849
+        },
+        "stremio": {
+          "attempts": 3,
+          "successes": 3,
+          "failure_inclusive_median_seconds": 16.488971161,
+          "failure_inclusive_p90_seconds": 23.303231806
+        }
+      },
+      "rows": [
+        {
+          "trial": 0,
+          "case": 0,
+          "engine": "candidate",
+          "state": "cold",
+          "passed": true,
+          "sustained_seconds": 0,
+          "hash": "670308a6fbe4870caaaf3e437e059f8b7ac8f2d0",
+          "label": "Safety Not Guaranteed",
+          "dn": "Safety Not Guaranteed (2012) 1080p BrRip x264 - YIFY",
+          "popularity_label": "NOT POPULAR",
+          "measurement": "KMP DesktopDrawCompleted; cold first rendered image",
+          "startup_only": true,
+          "endpoint_seconds": 0.708523329,
+          "first_frame_seconds": 4.602031784,
+          "worker_exit_code": 0,
+          "worker_retirement": "joined",
+          "worker_process_exited": true,
+          "presented_frames": 1,
+          "clean_shutdown": true,
+          "peak_rss_bytes": 401539072,
+          "cpu_seconds": 2.46,
+          "peak_cache_allocation_bytes": 2125824
+        },
+        {
+          "trial": 0,
+          "case": 0,
+          "engine": "stremio",
+          "state": "cold",
+          "passed": true,
+          "sustained_seconds": 0,
+          "hash": "670308a6fbe4870caaaf3e437e059f8b7ac8f2d0",
+          "label": "Safety Not Guaranteed",
+          "dn": "Safety Not Guaranteed (2012) 1080p BrRip x264 - YIFY",
+          "popularity_label": "NOT POPULAR",
+          "measurement": "KMP DesktopDrawCompleted; cold first rendered image",
+          "startup_only": true,
+          "endpoint_seconds": 3.30451253,
+          "first_frame_seconds": 16.488971161,
+          "presented_frames": 1,
+          "clean_shutdown": true,
+          "peak_rss_bytes": 660516864,
+          "cpu_seconds": 2.9200000000000004,
+          "peak_cache_allocation_bytes": 6311936
+        },
+        {
+          "trial": 1,
+          "case": 0,
+          "engine": "candidate",
+          "state": "cold",
+          "passed": true,
+          "sustained_seconds": 0,
+          "hash": "670308a6fbe4870caaaf3e437e059f8b7ac8f2d0",
+          "label": "Safety Not Guaranteed",
+          "dn": "Safety Not Guaranteed (2012) 1080p BrRip x264 - YIFY",
+          "popularity_label": "NOT POPULAR",
+          "measurement": "KMP DesktopDrawCompleted; cold first rendered image",
+          "startup_only": true,
+          "endpoint_seconds": 0.455996087,
+          "first_frame_seconds": 11.015924849,
+          "worker_exit_code": 3,
+          "worker_retirement": "forced",
+          "worker_process_exited": true,
+          "presented_frames": 1,
+          "clean_shutdown": true,
+          "peak_rss_bytes": 458072064,
+          "cpu_seconds": 2.8600000000000003,
+          "peak_cache_allocation_bytes": 8876032
+        },
+        {
+          "trial": 1,
+          "case": 0,
+          "engine": "stremio",
+          "state": "cold",
+          "passed": true,
+          "sustained_seconds": 0,
+          "hash": "670308a6fbe4870caaaf3e437e059f8b7ac8f2d0",
+          "label": "Safety Not Guaranteed",
+          "dn": "Safety Not Guaranteed (2012) 1080p BrRip x264 - YIFY",
+          "popularity_label": "NOT POPULAR",
+          "measurement": "KMP DesktopDrawCompleted; cold first rendered image",
+          "startup_only": true,
+          "endpoint_seconds": 0.763803768,
+          "first_frame_seconds": 10.446930937,
+          "presented_frames": 1,
+          "clean_shutdown": true,
+          "peak_rss_bytes": 665251840,
+          "cpu_seconds": 2.77,
+          "peak_cache_allocation_bytes": 6311936
+        },
+        {
+          "trial": 2,
+          "case": 0,
+          "engine": "stremio",
+          "state": "cold",
+          "passed": true,
+          "sustained_seconds": 0,
+          "hash": "670308a6fbe4870caaaf3e437e059f8b7ac8f2d0",
+          "label": "Safety Not Guaranteed",
+          "dn": "Safety Not Guaranteed (2012) 1080p BrRip x264 - YIFY",
+          "popularity_label": "NOT POPULAR",
+          "measurement": "KMP DesktopDrawCompleted; cold first rendered image",
+          "startup_only": true,
+          "endpoint_seconds": 1.127036178,
+          "first_frame_seconds": 23.303231806,
+          "presented_frames": 1,
+          "clean_shutdown": true,
+          "peak_rss_bytes": 448487424,
+          "cpu_seconds": 2.89,
+          "peak_cache_allocation_bytes": 4214784
+        },
+        {
+          "trial": 2,
+          "case": 0,
+          "engine": "candidate",
+          "state": "cold",
+          "passed": true,
+          "sustained_seconds": 0,
+          "hash": "670308a6fbe4870caaaf3e437e059f8b7ac8f2d0",
+          "label": "Safety Not Guaranteed",
+          "dn": "Safety Not Guaranteed (2012) 1080p BrRip x264 - YIFY",
+          "popularity_label": "NOT POPULAR",
+          "measurement": "KMP DesktopDrawCompleted; cold first rendered image",
+          "startup_only": true,
+          "endpoint_seconds": 0.767687425,
+          "first_frame_seconds": 5.337476289,
+          "worker_exit_code": 3,
+          "worker_retirement": "forced",
+          "worker_process_exited": true,
+          "presented_frames": 1,
+          "clean_shutdown": true,
+          "peak_rss_bytes": 474968064,
+          "cpu_seconds": 2.75,
+          "peak_cache_allocation_bytes": 2486272
+        }
+      ],
+      "scope": "three paired diagnostic attempts; not qualification"
+    },
+    "Certified Copy": {
+      "cells": {
+        "candidate": {
+          "attempts": 3,
+          "successes": 3,
+          "failure_inclusive_median_seconds": 4.275460006,
+          "failure_inclusive_p90_seconds": 4.284461617
+        },
+        "stremio": {
+          "attempts": 3,
+          "successes": 2,
+          "failure_inclusive_median_seconds": 13.734814886,
+          "failure_inclusive_p90_seconds": null
+        }
+      },
+      "rows": [
+        {
+          "trial": 0,
+          "case": 0,
+          "engine": "candidate",
+          "state": "cold",
+          "passed": true,
+          "sustained_seconds": 0,
+          "hash": "1026d5cc97d074bc0c7ba8c32ddab3f4e93625d8",
+          "label": "Certified Copy",
+          "dn": "Certified Copy (2010) [1080p] [BluRay] [5.1] [YTS] [YIFY]",
+          "popularity_label": "NOT POPULAR",
+          "measurement": "KMP DesktopDrawCompleted; cold first rendered image",
+          "startup_only": true,
+          "endpoint_seconds": 0.608698471,
+          "first_frame_seconds": 4.100960977,
+          "worker_exit_code": 3,
+          "worker_retirement": "forced",
+          "worker_process_exited": true,
+          "presented_frames": 1,
+          "clean_shutdown": true,
+          "peak_rss_bytes": 562814976,
+          "cpu_seconds": 3.17,
+          "peak_cache_allocation_bytes": 6955008
+        },
+        {
+          "trial": 0,
+          "case": 0,
+          "engine": "stremio",
+          "state": "cold",
+          "passed": false,
+          "sustained_seconds": 0,
+          "hash": "1026d5cc97d074bc0c7ba8c32ddab3f4e93625d8",
+          "label": "Certified Copy",
+          "dn": "Certified Copy (2010) [1080p] [BluRay] [5.1] [YTS] [YIFY]",
+          "popularity_label": "NOT POPULAR",
+          "measurement": "KMP DesktopDrawCompleted; cold first rendered image",
+          "startup_only": true,
+          "endpoint_seconds": 0.822889922,
+          "error": "playback_measurement_failed",
+          "measurement_error_type": "TimeoutCancellationException",
+          "presented_frames": 0,
+          "clean_shutdown": true,
+          "peak_rss_bytes": 350773248,
+          "cpu_seconds": 2.58,
+          "peak_cache_allocation_bytes": 25776128
+        },
+        {
+          "trial": 1,
+          "case": 0,
+          "engine": "candidate",
+          "state": "cold",
+          "passed": true,
+          "sustained_seconds": 0,
+          "hash": "1026d5cc97d074bc0c7ba8c32ddab3f4e93625d8",
+          "label": "Certified Copy",
+          "dn": "Certified Copy (2010) [1080p] [BluRay] [5.1] [YTS] [YIFY]",
+          "popularity_label": "NOT POPULAR",
+          "measurement": "KMP DesktopDrawCompleted; cold first rendered image",
+          "startup_only": true,
+          "endpoint_seconds": 0.657415361,
+          "first_frame_seconds": 4.275460006,
+          "worker_exit_code": 3,
+          "worker_retirement": "forced",
+          "worker_process_exited": true,
+          "presented_frames": 1,
+          "clean_shutdown": true,
+          "peak_rss_bytes": 612442112,
+          "cpu_seconds": 2.93,
+          "peak_cache_allocation_bytes": 6426624
+        },
+        {
+          "trial": 1,
+          "case": 0,
+          "engine": "stremio",
+          "state": "cold",
+          "passed": true,
+          "sustained_seconds": 0,
+          "hash": "1026d5cc97d074bc0c7ba8c32ddab3f4e93625d8",
+          "label": "Certified Copy",
+          "dn": "Certified Copy (2010) [1080p] [BluRay] [5.1] [YTS] [YIFY]",
+          "popularity_label": "NOT POPULAR",
+          "measurement": "KMP DesktopDrawCompleted; cold first rendered image",
+          "startup_only": true,
+          "endpoint_seconds": 0.819517103,
+          "first_frame_seconds": 13.734814886,
+          "presented_frames": 1,
+          "clean_shutdown": true,
+          "peak_rss_bytes": 443699200,
+          "cpu_seconds": 2.38,
+          "peak_cache_allocation_bytes": 5853184
+        },
+        {
+          "trial": 2,
+          "case": 0,
+          "engine": "stremio",
+          "state": "cold",
+          "passed": true,
+          "sustained_seconds": 0,
+          "hash": "1026d5cc97d074bc0c7ba8c32ddab3f4e93625d8",
+          "label": "Certified Copy",
+          "dn": "Certified Copy (2010) [1080p] [BluRay] [5.1] [YTS] [YIFY]",
+          "popularity_label": "NOT POPULAR",
+          "measurement": "KMP DesktopDrawCompleted; cold first rendered image",
+          "startup_only": true,
+          "endpoint_seconds": 0.882785752,
+          "first_frame_seconds": 12.237431837,
+          "presented_frames": 1,
+          "clean_shutdown": true,
+          "peak_rss_bytes": 480940032,
+          "cpu_seconds": 2.32,
+          "peak_cache_allocation_bytes": 5328896
+        },
+        {
+          "trial": 2,
+          "case": 0,
+          "engine": "candidate",
+          "state": "cold",
+          "passed": true,
+          "sustained_seconds": 0,
+          "hash": "1026d5cc97d074bc0c7ba8c32ddab3f4e93625d8",
+          "label": "Certified Copy",
+          "dn": "Certified Copy (2010) [1080p] [BluRay] [5.1] [YTS] [YIFY]",
+          "popularity_label": "NOT POPULAR",
+          "measurement": "KMP DesktopDrawCompleted; cold first rendered image",
+          "startup_only": true,
+          "endpoint_seconds": 0.655860344,
+          "first_frame_seconds": 4.284461617,
+          "worker_exit_code": 3,
+          "worker_retirement": "forced",
+          "worker_process_exited": true,
+          "presented_frames": 1,
+          "clean_shutdown": true,
+          "peak_rss_bytes": 460587008,
+          "cpu_seconds": 2.95,
+          "peak_cache_allocation_bytes": 6955008
+        }
+      ],
+      "scope": "three paired diagnostic attempts; not qualification"
+    }
+  },
+  "main_jar_sha256": "8a6594947ae403fda60e2bc7b2b5a0eaa17d56c0be6a036058545c4aad715634"
+}

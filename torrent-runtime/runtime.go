@@ -85,6 +85,7 @@ type Runtime struct {
 	primeHeaders     bool
 	earlyPlayback    bool
 	primeHeadOnly    bool
+	playbackPeerCap  int
 	maxInputs        int
 	maxHandles       int
 }
@@ -176,8 +177,13 @@ func newRuntime(cfg Config, privateFixture bool) (*Runtime, error) {
 		// Keep TCP/uTP and encrypted fallback, but avoid the extra encryption
 		// handshake on peers which accept the ordinary BitTorrent handshake.
 		cc.HeaderObfuscationPolicy.Preferred = false
-		cc.DialRateLimiter = rate.NewLimiter(50, 50)
-		cc.HalfOpenConnsPerTorrent = 50
+		// Metadata discovery can otherwise queue the first useful peer behind
+		// stalled handshakes. The global cap bounds the burst across all inputs.
+		cc.DialRateLimiter = rate.NewLimiter(200, 200)
+		cc.HalfOpenConnsPerTorrent = 200
+		cc.TotalHalfOpenConns = 200
+		cc.EstablishedConnsPerTorrent = 200
+		r.playbackPeerCap = 55
 		cc.NominalDialTimeout = 4 * time.Second
 		cc.MinDialTimeout = time.Second
 		r.primeHeaders = true
@@ -440,6 +446,14 @@ func (h *Handle) prepare(index, archiveIndex *int, expectedSize *int64, selectio
 	case <-h.ctx.Done():
 		return
 	case <-h.t.GotInfo():
+	}
+	if h.r.playbackPeerCap > 0 {
+		if h.ctx.Err() != nil {
+			return
+		}
+		// Existing dials may finish; subsequent admission and established
+		// connections use the smaller playback budget.
+		h.t.SetMaxEstablishedConns(h.r.playbackPeerCap)
 	}
 	info := h.t.Info()
 	if info.Private != nil && *info.Private {
