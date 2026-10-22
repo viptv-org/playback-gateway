@@ -8,20 +8,26 @@ Stremio application. Its Go manifest pins anacrolix/torrent to upstream revision
 `v1.61.1-0.20260927071845-d913b30f520e`, and rardecode/v2 to `v2.4.1`.
 `go.sum` records module checksums. The initial `v1.61.0` prototype exposed a
 deterministically reproduced missed writer wake-up already fixed in that newer
-upstream revision. The candidate has no local engine patch. A custom demand
-reader retains verified bytes and cancellation because a separate upstream
-capped-reader cancellation issue remains.
+upstream revision. The cold-pipeline candidate includes that pinned MPL-2.0
+source under `torrent-runtime/third_party/torrent`, with a local change only to
+`PeerConn.nominalMaxRequests`: a larger adaptive pipeline is enabled after a peer
+supplies useful payload. The upstream license and attribution are retained;
+`VIPTV_PATCH.md` documents the delta. The local replacement is pinned by the
+runtime source revision; `go.sum` continues to record the upstream module checksums.
+A custom demand reader preserves bounded-cache cancellation because a separate
+upstream capped-reader cancellation issue remains. Persisted reusable data stays
+verified; live selected-file readers retain the approved contiguous-block behavior.
 
 anacrolix/torrent is MPL-2.0 and rardecode is BSD-2-Clause. No Stremio server
 bundle, Nuvio binary, private torrent metadata or downloaded media is committed
 or included in the platform build script. Source inspection and measurements
 are documented in `docs/TORRENT_RUNTIME_RESEARCH.md`,
 `docs/STREMIO_GO_REFERENCE.md` and `torrent-runtime/QUALIFICATION.md`.
-Early prototype artifacts were dirty-tree qualification builds. Current Android
-and Linux/Windows desktop products and the gateway worker share clean immutable
-source `c7bb3f1f9a332c20aa8f81aa165d053c35fa7277`, with checksummed import
-inventories and dependency notices. Importers reject dirty build inventories;
-the Android APK and desktop installer checks verify packaged content.
+Early prototype artifacts were dirty-tree qualification builds. Consumers select
+clean immutable runtime source through `TORRENT_RUNTIME_REF`, with checksummed
+import inventories and dependency notices. The cold-pipeline checkpoint remains a
+candidate until its performance and platform gates pass. Importers reject dirty
+build inventories; Android APK and desktop installer checks verify packaged content.
 See [delivery evidence](docs/TORRENT_DELIVERY_STATUS.md) for exact consumer pins
 and hosted build results. These inventories do not establish device qualification
 or authorize production rollout; the independent inherited archive distribution

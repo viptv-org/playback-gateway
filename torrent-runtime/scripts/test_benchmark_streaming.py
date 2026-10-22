@@ -63,5 +63,30 @@ class AcceptanceTest(unittest.TestCase):
         rows[0]['trial']=1
         self.assertFalse(benchmark.cold_start_gate(rows)['passed'])
 
+    def test_finite_candidate_beats_failure_censored_reference(self):
+        rows = self.rows()
+        for row in rows:
+            if row['engine'] == 'stremio' and row['trial'] < 3:
+                row['passed'] = False
+        self.assertTrue(benchmark.cold_start_gate(rows)['passed'])
+        cell = next(c for c in benchmark.summary(rows, 20)['cells'] if c['engine'] == 'stremio')
+        self.assertIsNone(cell['first_frame_seconds']['p90'])
+        self.assertEqual(cell['first_frame_seconds']['p90_status'], 'censored_failure')
+
+    def test_missing_successful_reference_measurement_cannot_pass(self):
+        rows = self.rows()
+        next(row for row in rows if row['engine'] == 'stremio').pop('first_frame_seconds')
+        self.assertFalse(benchmark.cold_start_gate(rows)['passed'])
+
+    def test_failed_candidate_timings_are_censored_even_if_recorded(self):
+        rows = self.rows()
+        for row in rows:
+            if row['engine'] == 'candidate' and row['trial'] < 3:
+                row['passed'] = False
+                row['first_frame_seconds'] = .001
+        cell = next(c for c in benchmark.summary(rows, 20)['cells'] if c['engine'] == 'candidate')
+        self.assertIsNone(cell['first_frame_seconds']['p90'])
+        self.assertFalse(benchmark.cold_start_gate(rows)['passed'])
+
 
 if __name__=='__main__':unittest.main()

@@ -31,6 +31,29 @@ The policy prototype was tested against unmodified Stremio server 4.19.0 through
 | Safety Not Guaranteed | 3/3 | 5.337 / 11.016 s | 3/3 | 16.489 / 23.303 s |
 | Certified Copy | 3/3 | 4.275 / 4.284 s | 2/3 | 13.735 s / failed |
 
-These are three-pair screens, not final qualification. Live swarms vary; a win on these screens does not establish parity for the other supplied sources or platforms. Safety sampled descriptor peaks were 236–239 for the candidate and 199–210 for Stremio; sampled peaks are lower bounds. The clean ordinary-worker build must reproduce the policy prototype before the required longer comparison.
+These initial three-pair screens selected the candidate for the ordinary-worker comparison below. Live swarms vary; they do not establish parity for other supplied sources or platforms. Safety sampled descriptor peaks were 236–239 for the candidate and 199–210 for Stremio; sampled peaks are lower bounds.
+
+## Ordinary-worker cold gates
+
+The clean `a388911a9e4c291d60f7fed7d6b5a93adc06f4d6` build produced worker SHA-256 `75500b252822828ec0d99fa16e503d48775eb21b6f62f683e37b23fccb7c7508`. It ran 20 alternating, randomized pairs per source through the same Linux software renderer. Each attempt had fresh caches and workers, identical magnet/trackers and observed largest-file selection. Metadata and rendering each had a 30-second deadline. Failures remain in the latency distribution as infinity.
+
+| Source | Candidate starts | Candidate median / p90 | Stremio starts | Stremio median / p90 |
+| --- | ---: | ---: | ---: | ---: |
+| Safety Not Guaranteed | 20/20 | 7.232 / 10.504 s | 18/20 | 8.970 / 23.670 s |
+| Certified Copy | 20/20 | 4.722 / 7.590 s | 13/20 | 13.784 s / failure-censored |
+
+Both source-specific cold gates pass. This is 40/40 candidate starts against 31/40 reference starts. Safety's candidate was faster in 14 of the 18 pairs where both rendered; it does not win every individual live-network trial. Certified Copy was faster in all 13 pairs where both rendered. The candidate used more sampled CPU/memory; the numeric receipts retain those costs and forced worker-retirement outcomes. Process death was checked, but these startup gates do not establish graceful worker shutdown, sustained playback or other platforms.
+
+The original evaluator incorrectly treated a reference p90 censored by failures as missing data and rejected Certified Copy. Its original decision and raw attempts are preserved. The corrected evaluator distinguishes failed attempts from genuinely missing successful measurements, rejects missing measurements, and allows a finite candidate latency to beat failure-censored reference latency. Regression tests cover these cases. [Ordinary-worker evidence](evidence/torrent-pipeline-linux-gates-2026-10-22.json) records both decisions and all 80 attempts.
+
+## Narrow development loop
+
+Use controlled transfers before public swarms. Build the baseline and candidate test binaries once with the same `pipeline_qualification_test.go`, Go version and fixture. Run `scripts/benchmark-pipeline.py` with `--baseline BASE.test --candidate CANDIDATE.test --output FRESH_DIRECTORY`. The default checks three pairs at 0 and 120 ms latency. Then run it into a second fresh directory with `--latency-ms 120 --mixed-peer`. The mixed fixture introduces a fast peer after a slow peer has supplied its first block. All bytes must match and both pieces must verify.
+
+The runner now exits unsuccessfully on failures, missing measurements or median regressions exceeding 5%. This tolerance only rejects development candidates quickly; final rendered-frame gates still require median and p90 no worse than Stremio, without a tolerance. Artifact identities and all failed attempts remain saved. `benchmark-desktop.py --trial-offset N --seed SEED` resumes the same randomized trial schedule into a fresh evidence directory; retain and combine earlier attempts rather than restarting them or excluding failures.
+
+The mixed fixture caught a 6.5% regression in the adaptive checkpoint: 2.194 s against upstream's 2.060 s. Delaying the large queue until four useful responses made it worse (2.413 s), so that experiment was rejected. Research of the pinned scheduler showed request stealing balanced queue counts rather than estimated delivery time. The [libtorrent streaming documentation](https://www.libtorrent.org/streaming.html) explains why peers should instead be assigned urgent work by estimated queue completion time.
+
+A separate refinement uses measured rates after both peers have supplied four useful blocks, requiring 25% estimated delivery headroom before reassignment. Existing request grace, cancellation guards and queue bounds remain authoritative. Its mixed median was 1.719 s against 2.060 s upstream; single-peer latency remained 1.471 s against 2.057 s, with 0 ms controls within 0.1%. All 18 transfers matched and verified. The refinement's full runtime race suite, with the mixed fixture enabled, passed. It remains a separate screening candidate; the two ordinary-worker gates above must not be attributed to this later change. [Narrow-screen evidence](evidence/torrent-pipeline-narrow-screen-2026-10-22.json) preserves the rejected variants and all numeric trials.
 
 [Numeric evidence](evidence/torrent-pipeline-candidate-2026-10-22.json) retains controlled results, metadata probes, test receipts, source identity and all focused playback attempts. Earlier unsuccessful experiments and the frozen 126-attempt baseline remain preserved. Runtime pins and deployment have not been changed by this candidate checkpoint.

@@ -1,5 +1,5 @@
 {
-  "status": "candidate; ordinary-worker qualification pending",
+  "status": "a388911 ordinary-worker cold gates passed for Safety Not Guaranteed and Certified Copy only; queue-time refinement remains separate screening candidate",
   "controlled": {
     "120": {
       "baseline": {
@@ -585,5 +585,7 @@
       "scope": "three paired diagnostic attempts; not qualification"
     }
   },
-  "main_jar_sha256": "8a6594947ae403fda60e2bc7b2b5a0eaa17d56c0be6a036058545c4aad715634"
+  "main_jar_sha256": "8a6594947ae403fda60e2bc7b2b5a0eaa17d56c0be6a036058545c4aad715634",
+  "ordinary_worker_gates": "torrent-pipeline-linux-gates-2026-10-22.json",
+  "narrow_screen": "torrent-pipeline-narrow-screen-2026-10-22.json"
 }

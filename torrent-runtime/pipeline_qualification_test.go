@@ -55,7 +55,11 @@ func TestPipelineQualification(t *testing.T) {
 			t.Fatal("invalid fixture latency")
 		}
 	}
-	peer := startPipelinePeer(t, data, mi.HashInfoBytes(), pieceBytes, time.Duration(delayMS)*time.Millisecond)
+	peer := startPipelinePeer(t, data, mi.HashInfoBytes(), pieceBytes, time.Duration(delayMS)*time.Millisecond, 4<<20)
+	var slow *pipelinePeer
+	if os.Getenv("TORRENT_PIPELINE_MIXED") == "1" {
+		slow = startPipelinePeer(t, data, mi.HashInfoBytes(), pieceBytes, time.Duration(delayMS)*time.Millisecond, 64<<10)
+	}
 	r, err := newRuntime(Config{CacheDir: t.TempDir(), CacheBytes: 32 << 20, ReadaheadBytes: 4 << 20,
 		clientTuning: func(c *torrent.ClientConfig) {
 			c.HeaderObfuscationPolicy.Preferred = false
@@ -68,8 +72,34 @@ func TestPipelineQualification(t *testing.T) {
 	}
 	t.Cleanup(func() { r.Close() })
 	h := readyHandle(t, r, raw.Bytes())
-	h.t.AddPeers([]torrent.PeerInfo{{Addr: peer.listener.Addr()}})
 	start := time.Now()
+	if slow == nil {
+		h.t.AddPeers([]torrent.PeerInfo{{Addr: peer.listener.Addr()}})
+	} else {
+		// Give the slow peer one valid response before introducing a fast peer.
+		// This makes critical-block reassignment, rather than address ordering,
+		// the variable under test.
+		h.t.AddPeers([]torrent.PeerInfo{{Addr: slow.listener.Addr()}})
+		added := make(chan struct{})
+		go func() {
+			defer close(added)
+			deadline := time.Now().Add(3 * time.Second)
+			for !slow.responseStarted.Load() && time.Now().Before(deadline) {
+				select {
+				case <-h.ctx.Done():
+					return
+				case <-time.After(time.Millisecond):
+				}
+			}
+			select {
+			case <-h.ctx.Done():
+				return
+			case <-time.After(20 * time.Millisecond):
+			}
+			h.t.AddPeers([]torrent.PeerInfo{{Addr: peer.listener.Addr()}})
+		}()
+		t.Cleanup(func() { h.cancel(); <-added })
+	}
 	body := fetchRange(t, h, 0, int64(len(data)-1))
 	elapsed := time.Since(start)
 	if !bytes.Equal(body, data) {
@@ -82,13 +112,21 @@ func TestPipelineQualification(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	result, _ := json.Marshal(map[string]any{
+	resultFields := map[string]any{
 		"elapsed_ms": float64(elapsed.Microseconds()) / 1000, "payload_bytes": len(body),
 		"request_latency_ms": delayMS, "upload_bytes_per_second": 4 << 20,
 		"requests": peer.requests.Load(), "peak_outstanding": peer.peak.Load(),
 		"requests_before_first_response_write": peer.beforeFirst.Load(),
 		"verified_pieces":                      h.t.Stats().PiecesComplete, "payload_equal": true,
-	})
+		"mixed_peer": slow != nil,
+	}
+	if slow != nil {
+		resultFields["slow_upload_bytes_per_second"] = 64 << 10
+		resultFields["slow_peer_requests"] = slow.requests.Load()
+		resultFields["slow_peer_peak_outstanding"] = slow.peak.Load()
+		resultFields["slow_peer_bytes_sent"] = slow.bytesSent.Load()
+	}
+	result, _ := json.Marshal(resultFields)
 	t.Log("PIPELINE " + string(result))
 }
 
@@ -99,9 +137,10 @@ type pipelinePeer struct {
 	peak            atomic.Int64
 	beforeFirst     atomic.Int64
 	responseStarted atomic.Bool
+	bytesSent       atomic.Int64
 }
 
-func startPipelinePeer(t *testing.T, data []byte, hash metainfo.Hash, pieceBytes int, latency time.Duration) *pipelinePeer {
+func startPipelinePeer(t *testing.T, data []byte, hash metainfo.Hash, pieceBytes int, latency time.Duration, upload int) *pipelinePeer {
 	t.Helper()
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
@@ -130,14 +169,15 @@ func startPipelinePeer(t *testing.T, data []byte, hash metainfo.Hash, pieceBytes
 					return
 				}
 				clear(handshake[20:28])
-				copy(handshake[48:], []byte("-VQ0001-controlled00"))
+				peerID := sha1.Sum([]byte(listener.Addr().String()))
+				copy(handshake[48:], peerID[:])
 				if _, err := conn.Write(handshake[:]); err != nil {
 					return
 				}
 				if wireMessage(conn, 5, []byte{0xc0}) != nil || wireMessage(conn, 1, nil) != nil {
 					return
 				}
-				limiter := rate.NewLimiter(4<<20, 16<<10)
+				limiter := rate.NewLimiter(rate.Limit(upload), 16<<10)
 				var writing sync.Mutex
 				var responses sync.WaitGroup
 				defer responses.Wait()
@@ -192,7 +232,9 @@ func startPipelinePeer(t *testing.T, data []byte, hash metainfo.Hash, pieceBytes
 						copy(payload[8:], data[index*pieceBytes+begin:index*pieceBytes+begin+count])
 						writing.Lock()
 						peer.responseStarted.Store(true)
-						_ = wireMessage(conn, 7, payload)
+						if wireMessage(conn, 7, payload) == nil {
+							peer.bytesSent.Add(int64(count))
+						}
 						writing.Unlock()
 					}(message, index, begin, count)
 				}

@@ -133,7 +133,12 @@ class Engine:
                 sources = ["dht:"+case["hash"]] + ["tracker:"+t for t in case["trackers"]]
                 stats = http("http://127.0.0.1:11470/"+case["hash"]+"/create", {"peerSearch": {"min": 40, "max": 200, "sources": sources}}, self.timeout)
             if not stats.get("files"): raise RuntimeError("reference_metadata_unavailable")
-            return f"http://127.0.0.1:11470/{case['hash']}/{case['index']}"
+            (self.directory / "resolved-metadata.json").write_text(json.dumps(stats, indent=2))
+            index = case.get("index")
+            if index is None:
+                index = max(range(len(stats["files"])), key=lambda i: stats["files"][i].get("length", 0))
+            (self.directory / "selected-file.json").write_text(json.dumps({"index":index,"file":stats["files"][index]},indent=2))
+            return f"http://127.0.0.1:11470/{case['hash']}/{index}"
         source = {"file_index": case["index"], "trackers": case["trackers"]}
         if case.get("mode", "magnet") == "metainfo": source["metainfo"] = base64.b64encode(case["torrent"].read_bytes()).decode()
         else: source["magnet"] = "magnet:?xt=urn:btih:"+case["hash"]
@@ -191,14 +196,44 @@ def summary(rows, repetitions):
     for (case, state, engine), trials in sorted(groups.items()):
         cell = {"case": case, "state": state, "engine": engine, "trials": len(trials), "failures": sum(not r["passed"] for r in trials)}
         for metric in ("first_frame_seconds", "forward_seconds", "backward_seconds"):
-            values = sorted(r.get(metric, math.inf) for r in trials)
+            values = []
+            missing = 0
+            for row in trials:
+                value = row.get(metric)
+                valid = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0
+                if not row['passed']:
+                    values.append(math.inf)
+                elif valid:
+                    values.append(value)
+                else:
+                    missing += 1
+                    values.append(math.inf)
+            values.sort()
             if values:
                 median = statistics.median(values); p90 = values[math.ceil(.9*len(values))-1]
+                def status(value):
+                    return 'measured' if math.isfinite(value) else 'missing' if missing else 'censored_failure'
                 cell[metric] = {"median": median if math.isfinite(median) else None,
-                                "p90": p90 if math.isfinite(p90) else None}
+                                "p90": p90 if math.isfinite(p90) else None,
+                                "missing_successful_measurements": missing,
+                                "median_status": status(median), "p90_status": status(p90)}
         out.append(cell)
     return {"qualification": False, "measurement": "FFmpeg decoded frame; application presentation and stalls unqualified",
             "screening_only": repetitions < 20, "cells": out}
+
+
+def compare_metric(candidate, reference, metric, stat):
+    """A finite candidate beats a failure-censored reference, never missing data."""
+    actual_cell = candidate.get(metric, {})
+    reference_cell = reference.get(metric, {})
+    if actual_cell.get('missing_successful_measurements', 0) or reference_cell.get('missing_successful_measurements', 0):
+        return 'unavailable'
+    actual, expected = actual_cell.get(stat), reference_cell.get(stat)
+    if actual is None:
+        return 'unavailable'
+    if expected is None:
+        return None if reference_cell.get(stat + '_status') == 'censored_failure' else 'unavailable'
+    return 'slower' if actual > expected else None
 
 
 def performance_gate(rows):
@@ -217,9 +252,8 @@ def performance_gate(rows):
             if candidate['failures']/candidate['trials'] > reference['failures']/reference['trials']: reasons.append('higher_failure_rate')
             for metric in ('first_frame_seconds','forward_seconds','backward_seconds'):
                 for stat in ('median','p90'):
-                    actual = candidate.get(metric,{}).get(stat); expected = reference.get(metric,{}).get(stat)
-                    if actual is None or expected is None: reasons.append(metric+'_'+stat+'_unavailable')
-                    elif actual>expected: reasons.append(metric+'_'+stat+'_slower')
+                    error = compare_metric(candidate, reference, metric, stat)
+                    if error: reasons.append(metric+'_'+stat+'_'+error)
             c_stalls=[r for r in rows if r['case']==case and r['state']==state and r['engine']=='candidate' and r.get('sustained_seconds',0)>=600]
             r_stalls=[r for r in rows if r['case']==case and r['state']==state and r['engine']=='stremio' and r.get('sustained_seconds',0)>=600]
             if not c_stalls or not r_stalls: reasons.append('ten_minute_playback_missing')
@@ -248,10 +282,8 @@ def cold_start_gate(rows):
             if candidate['failures']==candidate['trials'] or reference['failures']==reference['trials']: reasons.append('no_successful_comparison')
             if candidate['failures']/candidate['trials'] > reference['failures']/reference['trials']: reasons.append('higher_failure_rate')
             for stat in ('median','p90'):
-                actual = candidate.get('first_frame_seconds',{}).get(stat)
-                expected = reference.get('first_frame_seconds',{}).get(stat)
-                if actual is None or expected is None: reasons.append(stat+'_unavailable')
-                elif actual > expected: reasons.append(stat+'_slower')
+                error = compare_metric(candidate, reference, 'first_frame_seconds', stat)
+                if error: reasons.append(stat+'_'+error)
         decisions.append({'case':case,'passed':not reasons,'reasons':reasons})
     return {'passed':bool(decisions) and all(d['passed'] for d in decisions),'cases':decisions}
 
