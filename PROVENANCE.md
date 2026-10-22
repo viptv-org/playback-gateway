@@ -9,9 +9,10 @@ Stremio application. Its Go manifest pins anacrolix/torrent to upstream revision
 `go.sum` records module checksums. The initial `v1.61.0` prototype exposed a
 deterministically reproduced missed writer wake-up already fixed in that newer
 upstream revision. The cold-pipeline candidate includes that pinned MPL-2.0
-source under `torrent-runtime/third_party/torrent`, with a local change only to
-`PeerConn.nominalMaxRequests`: a larger adaptive pipeline is enabled after a peer
-supplies useful payload. The upstream license and attribution are retained;
+source under `torrent-runtime/third_party/torrent`, with local changes to
+`PeerConn.nominalMaxRequests` and `PeerConn.applyRequestState`: a larger adaptive
+pipeline is enabled after useful payload arrives, and sampled queue completion
+rates guide reassignment after both peers have supplied four useful chunks. The upstream license and attribution are retained;
 `VIPTV_PATCH.md` documents the delta. The local replacement is pinned by the
 runtime source revision; `go.sum` continues to record the upstream module checksums.
 A custom demand reader preserves bounded-cache cancellation because a separate

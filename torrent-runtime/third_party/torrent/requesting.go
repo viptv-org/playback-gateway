@@ -416,7 +416,18 @@ func (p *PeerConn) applyRequestState(next desiredRequestState) {
 			diff := int64(current.Requests.GetCardinality()) + 1 - (int64(existing.uncancelledRequests()) - 1)
 			// Steal a request that leaves us with one more request than the existing peer
 			// connection if the stealer more recently received a chunk.
-			if diff > 1 || (diff == 1 && !p.lastUsefulChunkReceived.After(existing.lastUsefulChunkReceived)) {
+			keepOwner := diff > 1 || (diff == 1 && !p.lastUsefulChunkReceived.After(existing.lastUsefulChunkReceived))
+			// Once both peers have a useful sample, balance expected delivery time
+			// rather than queue lengths. Require 25% headroom to avoid churn.
+			if p._stats.ChunksReadUseful.Int64() >= 4 && existing._stats.ChunksReadUseful.Int64() >= 4 {
+				ourRate, ownerRate := p.downloadRate(), existing.downloadRate()
+				if ourRate > 0 && ownerRate > 0 {
+					ourFinish := float64(current.Requests.GetCardinality()+1) / ourRate
+					ownerFinish := float64(existing.uncancelledRequests()) / ownerRate
+					keepOwner = ourFinish*1.25 >= ownerFinish
+				}
+			}
+			if keepOwner {
 				continue
 			}
 			// Don't steal a request the current holder has not had time to answer. The tests
