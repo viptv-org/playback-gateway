@@ -2,6 +2,11 @@
 
 This candidate targets two measured cold-start delays: a request queue that ramps up slowly on responsive peers, and a useful metadata peer queued behind stalled connection attempts. Public APIs, control protocol v2, C/JNI interfaces, persisted verification, cache budgets and authority semantics retain their existing behavior.
 
+The subsequent [all-21-movie retest](TORRENT_ALL_MOVIES_RETEST_2026_10_22.md) reports
+the wider diagnostic screen separately: 19 source medians favored ours, one
+favored Stremio, and one source failed in both engines. Its short sampling does
+not expand the two source-specific qualification gates below.
+
 The request scheduler makes its first data request with upstream slow-start behavior. After useful payload arrives, it permits a larger minimum pipeline when few peers are connected, while retaining the remote request limit, local request limit and storage admission limits. The pinned MPL 2.0 library source is included under `torrent-runtime/third_party/torrent`; the adaptive minimum and sampled queue-time ownership comparison differ from upstream. The license and exact source-difference receipt are retained.
 
 Discovery uses a global maximum of 200 half-open peer attempts, a 200-per-torrent initial cap and a matching bounded dial limiter. Once metadata arrives, the established-peer cap returns to 55. Existing in-flight attempts may finish. TCP/uTP and encrypted fallback remain supported. This is a bounded startup resource tradeoff and requires platform qualification.

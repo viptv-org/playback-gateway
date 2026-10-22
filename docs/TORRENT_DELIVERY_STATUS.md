@@ -10,6 +10,11 @@ timeouts preserved. [Source-specific results and limits](TORRENT_PIPELINE_CANDID
 include controlled scheduler tests, full runtime race checks and an isolated
 desktop worker packaging/control smoke.
 
+A subsequent [all-21-movie diagnostic retest](TORRENT_ALL_MOVIES_RETEST_2026_10_22.md)
+completed 66 automated cold attempts. Its one-to-three-pair screens favored ours
+on 19 sources and Stremio on Shawshank; Martha reached no frame in either engine
+across three pairs. This broad screen does not replace per-source qualification.
+
 | Delivery path | Current scope |
 | --- | --- |
 | Linux KMP cold startup | Two source-specific gates pass; the wider supplied and free-film corpora remain unqualified for this candidate. |
