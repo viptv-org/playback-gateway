@@ -73,7 +73,7 @@ not discarded startup failures.
 One-Hz full-trial resource sampling includes the JVM and worker/reference,
 including teardown. Public candidate median sampled peak RSS was 340–409 MiB
 versus 334–338 MiB for Stremio; median CPU usage was 2.44–2.53 versus 1.92–2.04
-CPU seconds. This is a latency improvement with additional sampled resource
+CPU seconds. Sampled peak values are lower bounds on actual peaks. This is a latency improvement with additional sampled resource
 cost, not a claim of lower memory/CPU. Short-lived disk allocations can be missed
 at this sampling rate; these measurements do not establish a peak-memory or
 peak-disk bound.
@@ -95,5 +95,23 @@ main-JAR SHA-256 is
 Raw private logs, inputs, caches and source snapshots remain under
 `/mnt/ALPH/.viptv-qa/torrent-cold-20261022/`; earlier results are preserved.
 
-Normal-build artifact adoption is recorded separately after the measured source
-is checkpointed. This report does not imply a production deployment.
+## Normal-build adoption
+
+Gateway and app source pins now select immutable checkpoint
+`674b71523dff5a74fb339eae97ddcb6217ea9f8b`. The gateway's vendored worker and
+checksum lock were rebuilt from a clean clone and validated. Read-only ELF
+comparison proves its machine-code section and all other allocated sections are
+identical to the measured executable except VCS metadata, its string header,
+build information and build-ID notes. A post-measurement section-extraction
+command initially rewrote the private measured file; the exact original bytes
+were reproducibly restored and match the original timed SHA-256. No timing
+receipt was changed.
+
+The app's ordinary pinned build, without a candidate override, also produced a
+`qualification_only: false` worker. The isolated normal-pin Linux distributable
+passed exact worker/renderer/native-resource inventory, launcher/JVM/SQLite and
+worker open/shutdown/reopen checks. See the separate
+[adoption receipt](evidence/torrent-cold-start-adoption-2026-10-22.json) for exact
+artifact hashes. Active unrelated main-app UI edits were not included in the
+isolated build. No production deployment or other-platform performance claim is
+implied.

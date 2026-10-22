@@ -1,0 +1,51 @@
+{
+  "source_revision": "674b71523dff5a74fb339eae97ddcb6217ea9f8b",
+  "gateway_code_equivalence": {
+    "measured_sha256": "bcb96f9fdf47cb236aec7d4824ed9c89a7016e710a2c771f53c7fe9871d78e47",
+    "pinned_gateway_sha256": "d949857f32e59e63668442b2a8dcd42c273ff353d4d793989cd1b0a1ef35a9ae",
+    "text_sha256": "5aad92d761dfab6d86df92b68d0c2688a125058bf1ba841770cfa0eb43151251",
+    "loadable_sections_identical_except": [
+      "VCS metadata in runtime.modinfo and its string header",
+      ".go.buildinfo",
+      "build-ID notes"
+    ],
+    "measured_artifact_restored_exactly": true,
+    "incident": "After timing, objcopy section extraction rewrote the private executable; exact original bytes were rebuilt and restored, matching the previously recorded SHA256. No timing receipt was changed."
+  },
+  "gateway_manifest_verified": true,
+  "gateway_private_cache_open_shutdown_reopen_passed": true,
+  "desktop_package": {
+    "image": "/mnt/ALPH/.viptv-qa/torrent-cold-20261022/app-source/composeApp/build/compose/binaries/main/app",
+    "launcher_sha256": "51bc95a8ead1e651eba4d5c15113597ef2ba9c989ad25d587132fcc8b60154d6",
+    "bundled_java_version": "21.0.12.1",
+    "bundled_java_modules": "java.base java.datatransfer java.xml java.prefs java.desktop java.logging jdk.crypto.ec",
+    "native_resource": {
+      "jar": "VIPTV-Experiment/lib/app/composeApp-desktop-fbabd7dc2b19eaa961b89fd6dee9ea6.jar",
+      "jar_sha256": "4029588a193925ef72dc1d379ad3e645acbe520e19a0ba293d122ce29d8c2635",
+      "sha256": "95fd7917bc2ce63d24c8b8183ffe08bfbf891de0b80e1d555f8368626f3a7c63"
+    },
+    "current_native_input_sha256": "95fd7917bc2ce63d24c8b8183ffe08bfbf891de0b80e1d555f8368626f3a7c63",
+    "pinned_renderer_jvm_jars": {
+      "kiteplayer-core-jvm-0.3.0-viptv-presentation.4.jar": "dc1960c7b2320ffcc2a07a8e53bd952b8b9390408ca7c9f4ab92175674f0c937",
+      "kiteplayer-compose-video-jvm-0.3.0-viptv-presentation.4.jar": "8ddedcef11d328764e59273a2b3315c6ec835c666b800db8138224adf1b0124e",
+      "kiteplayer-compose-ui-jvm-0.3.0-viptv-presentation.4.jar": "7b35f656de9e5957c75f4c4e3f781c361d5682f496c367cdda40446a14ed5abc",
+      "kiteplayer-output-jvm-0.3.0-viptv-presentation.4.jar": "4d908ba961a28aaca11e4c6b03297bea10cbb2f5aa0e551578d448afbc6b44ff"
+    },
+    "launcher_jvm_sqlite_smoke_passed": true,
+    "smoke_seconds": 0.495,
+    "physical_device_or_user_vault_access": false,
+    "scope": "Executed current host platform only; does not qualify unavailable Windows/macOS runners or package-manager installation.",
+    "torrent_worker": {
+      "protocol": 2,
+      "revision": "674b71523dff5a74fb339eae97ddcb6217ea9f8b",
+      "sha256": "f001ccfee87f6e57ffdfd8c4c0d53d4d51b0bb0a23543a56e34adce30203b25b",
+      "qualification_only": false,
+      "toolchain": "go1.25.11",
+      "suspend_aware_clock": true
+    },
+    "torrent_worker_lifecycle_passed": true
+  },
+  "app_source_pin": "674b71523dff5a74fb339eae97ddcb6217ea9f8b",
+  "scope": "Local immutable worker adoption and isolated normal-pin Linux desktop package; no deployment or other-platform qualification",
+  "measured_artifact_sha256": "bcb96f9fdf47cb236aec7d4824ed9c89a7016e710a2c771f53c7fe9871d78e47"
+}
