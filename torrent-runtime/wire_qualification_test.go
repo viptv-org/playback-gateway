@@ -185,9 +185,14 @@ func pendingWireRange(h *Handle) <-chan wireReadResult {
 }
 
 func wireRuntime(t *testing.T, raw []byte) (*Runtime, *Handle) {
+	return wireRuntimePolicy(t, raw, false)
+}
+
+func wireRuntimePolicy(t *testing.T, raw []byte, verifiedOnly bool) (*Runtime, *Handle) {
 	t.Helper()
 	r, err := newRuntime(Config{CacheDir: t.TempDir(), CacheBytes: 256 << 10, ReadaheadBytes: 4096,
-		clientTuning: func(c *torrent.ClientConfig) { c.HeaderObfuscationPolicy.Preferred = false; c.DisableUTP = true }}, true)
+		verifiedPlaybackOnly: verifiedOnly,
+		clientTuning:         func(c *torrent.ClientConfig) { c.HeaderObfuscationPolicy.Preferred = false; c.DisableUTP = true }}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,33 +212,67 @@ func requireWireRange(t *testing.T, result <-chan wireReadResult, data []byte) {
 	}
 }
 
-func TestSlowPeerCannotExposePrefixBeforeWholePieceVerification(t *testing.T) {
+func TestEarlyPlaybackDeliversReceivedPrefixBeforeTheWholePiece(t *testing.T) {
 	raw, data, hash := wireMetainfo(t)
 	release := make(chan struct{})
 	peer := startWireFixture(t, data, hash, "127.0.0.1", release, false, false)
 	_, h := wireRuntime(t, raw)
 	h.t.AddPeers([]torrent.PeerInfo{{Addr: peer.listener.Addr()}})
 	result := pendingWireRange(h)
-	deadline := time.Now().Add(3 * time.Second)
-	for h.DemandDiagnostics().WrittenHeadBytes == 0 && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
+	requireWireRange(t, result, data)
+	if h.t.Piece(0).State().Complete {
+		t.Fatal("fixture did not hold back the rest of the piece")
 	}
-	if h.DemandDiagnostics().WrittenHeadBytes == 0 {
-		t.Fatal("slow peer never supplied its partial prefix")
-	}
-	select {
-	case <-result:
-		t.Fatal("partial piece reached media reader")
-	case <-time.After(100 * time.Millisecond):
+	verified := verifiedReader{c: h.r.cache, hash: hash.HexString(), info: h.t.Info()}
+	if n, err := verified.ReadAt(make([]byte, 1024), 0); n != 0 || err != io.EOF {
+		t.Fatal("early bytes became verified cache content")
 	}
 	close(release)
-	requireWireRange(t, result, data)
+}
+
+func TestEarlyCorruptionIsNeverPromotedToReusableCache(t *testing.T) {
+	raw, data, hash := wireMetainfo(t)
+	release := make(chan struct{})
+	bad := startWireFixture(t, data, hash, "127.0.0.1", release, true, false)
+	r, h := wireRuntime(t, raw)
+	h.t.AddPeers([]torrent.PeerInfo{{Addr: bad.listener.Addr()}})
+	select {
+	case got := <-pendingWireRange(h):
+		if got.err != nil || len(got.body) != 1024 || got.body[0] != data[0]^0xff {
+			t.Fatal("fixture did not exercise early, unverified bytes")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("early prefix was delayed")
+	}
+	// Keep demand alive until the remaining chunks arrive and the engine can
+	// judge the piece. The first short HTTP range has already closed.
+	reader := &demandReader{h: h, ctx: h.ctx, file: h.file}
+	defer reader.Close()
+	if err := reader.updateDemand(pieceWindow{0, 1}); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	deadline := time.Now().Add(3 * time.Second)
+	badCount := func() int64 { stats := h.t.Stats(); return stats.PiecesDirtiedBad.Int64() }
+	for badCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if badCount() == 0 {
+		t.Fatal("corrupt piece was not rejected")
+	}
+	verified := verifiedReader{c: r.cache, hash: hash.HexString(), info: h.t.Info()}
+	if n, _ := verified.ReadAt(make([]byte, 1024), 0); n != 0 {
+		t.Fatal("corrupt bytes became reusable")
+	}
+	if n, _ := verified.readAt(make([]byte, 1024), 0, true); n != 0 {
+		t.Fatal("rejected bytes remained available to early readers")
+	}
 }
 
 func TestCorruptWholePieceIsRefusedAndValidPeerRecovers(t *testing.T) {
 	raw, data, hash := wireMetainfo(t)
 	bad := startWireFixture(t, data, hash, "127.0.0.1", nil, true, false)
-	_, h := wireRuntime(t, raw)
+	_, h := wireRuntimePolicy(t, raw, true)
 	h.t.AddPeers([]torrent.PeerInfo{{Addr: bad.listener.Addr()}})
 	result := pendingWireRange(h)
 	deadline := time.Now().Add(3 * time.Second)

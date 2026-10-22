@@ -5,6 +5,11 @@ playback performance or release qualification. The gateway remains a generic
 media service; application source-selection policy and native client routing
 belong to its consumers.
 
+Historical policy note: on 2026-10-22 the owner explicitly approved early live
+selected-file reads while preserving verification for reusable cache data and
+archives. The original verified-read recommendation below records the earlier
+decision; see [the cold-start follow-up](TORRENT_COLD_START_2026_10_22.md).
+
 ## Decision and scope
 
 Use **anacrolix/torrent + rardecode** for the first replacement spike. One generic

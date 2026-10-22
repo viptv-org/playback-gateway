@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-//go:build !linux && !windows
+//go:build !linux && !windows && !darwin
 
 package torrentruntime
 

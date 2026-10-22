@@ -1,5 +1,10 @@
 # Torrent performance follow-up
 
+2026-10-22: cache and KMP desktop work, controlled/public measurements, and the
+remaining failed parity gate are recorded in
+[the performance report](TORRENT_PERFORMANCE_2026_10_22.md). The observations below
+remain historical evidence.
+
 Owner decision, 2026-10-09: proceed with client integration using the current
 shared runtime. Performance parity is deferred; cache integrity, authorization,
 cancellation and local validation remain required. This does not approve a

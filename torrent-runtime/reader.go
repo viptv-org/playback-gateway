@@ -23,6 +23,7 @@ type demandReader struct {
 	position          int64
 	closed            bool
 	readAheadOverride int64
+	early             bool
 }
 
 func (r *demandReader) Read(b []byte) (int, error) {
@@ -60,27 +61,33 @@ func (r *demandReader) Read(b []byte) (int, error) {
 		if !r.h.authorized() {
 			return 0, errors.New("authority unavailable")
 		}
-		r.h.r.cache.mu.Lock()
-		changed := r.h.r.cache.changed
-		r.h.r.cache.mu.Unlock()
-		n, err := reader.ReadAt(b, absolute)
+		changed, unwatch := r.h.r.cache.watchPiece(pieceKey(reader.hash, int(absolute/info.PieceLength)))
+		n, err := reader.readAt(b, absolute, r.early)
 		if n > 0 {
+			unwatch()
 			r.h.recordReadProgress(absolute, absolute+int64(n))
 			r.position += int64(n)
 			return n, nil
 		}
 		if err != io.EOF {
+			unwatch()
 			return 0, err
 		}
 		// Resynchronize stale upstream have-bits after bounded-store eviction.
 		if err = r.refresh(span); err != nil {
+			unwatch()
 			return 0, err
 		}
 		select {
 		case <-r.ctx.Done():
+			unwatch()
 			return 0, r.ctx.Err()
+		case <-r.h.r.cache.stopped:
+			unwatch()
+			return 0, ErrCacheUnavailable
 		case <-changed:
 		}
+		unwatch()
 	}
 }
 

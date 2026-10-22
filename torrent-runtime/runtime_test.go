@@ -35,8 +35,12 @@ func seedFixture(t *testing.T, utpOnly bool) (*torrent.Client, []byte, []byte) {
 }
 
 func seedPath(t *testing.T, path string, utpOnly bool) (*torrent.Client, []byte) {
+	return seedPathTuned(t, path, utpOnly, 4096, nil)
+}
+
+func seedPathTuned(t *testing.T, path string, utpOnly bool, pieceLength int64, tune func(*torrent.ClientConfig)) (*torrent.Client, []byte) {
 	t.Helper()
-	info := metainfo.Info{PieceLength: 4096}
+	info := metainfo.Info{PieceLength: pieceLength}
 	if err := info.BuildFromFilePath(path); err != nil {
 		t.Fatal(err)
 	}
@@ -60,6 +64,9 @@ func seedPath(t *testing.T, path string, utpOnly bool) (*torrent.Client, []byte)
 	cfg.Seed = true
 	cfg.DisableTCP = utpOnly
 	cfg.Slogger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	if tune != nil {
+		tune(cfg)
+	}
 	client, err := torrent.NewClient(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -179,6 +186,7 @@ func TestRealVerifiedCacheReusedWithoutSeederAfterRestart(t *testing.T) {
 	if !bytes.Equal(got, data[:4096]) {
 		t.Fatal("initial data")
 	}
+	waitVerifiedPiece(t, h, 0)
 	r.Close()
 	seed.Close()
 	r, err = newRuntime(Config{CacheDir: root, CacheBytes: 32 << 10, ReadaheadBytes: 4096}, true)
@@ -190,6 +198,17 @@ func TestRealVerifiedCacheReusedWithoutSeederAfterRestart(t *testing.T) {
 	got = fetchRange(t, h, 0, 4095)
 	if !bytes.Equal(got, data[:4096]) {
 		t.Fatal("cache reuse failed")
+	}
+}
+
+func waitVerifiedPiece(t *testing.T, h *Handle, index int) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for !h.t.Piece(index).State().Complete && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if !h.t.Piece(index).State().Complete {
+		t.Fatal("received bytes did not become verified cache data")
 	}
 }
 
@@ -252,5 +271,32 @@ func TestBriefTCPPreferenceRetainsUTPOnlyPeerPlayback(t *testing.T) {
 		if !strings.HasPrefix(peer.Network, "udp") && !strings.HasPrefix(peer.Network, "utp") {
 			t.Fatal("uTP-only fixture connected over another transport")
 		}
+	}
+}
+
+func TestPlaintextPreferenceRetainsEncryptedOnlyPeers(t *testing.T) {
+	for _, utpOnly := range []bool{false, true} {
+		t.Run(fmt.Sprintf("utp_only_%v", utpOnly), func(t *testing.T) {
+			data := bytes.Repeat([]byte("encrypted fallback fixture"), 4096)
+			path := filepath.Join(t.TempDir(), "media.bin")
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			seed, raw := seedPathTuned(t, path, utpOnly, 4096, func(c *torrent.ClientConfig) {
+				c.HeaderObfuscationPolicy.RequirePreferred = true
+				c.HeaderObfuscationPolicy.Preferred = true
+			})
+			r, err := newRuntime(Config{CacheDir: t.TempDir(), CacheBytes: 64 << 10, ReadaheadBytes: 4096,
+				clientTuning: func(c *torrent.ClientConfig) { c.HeaderObfuscationPolicy.Preferred = false }}, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer r.Close()
+			h := readyHandle(t, r, raw)
+			connectSeed(h, seed)
+			if got := fetchRange(t, h, 0, 4095); !bytes.Equal(got, data[:4096]) {
+				t.Fatal("plaintext preference lost encrypted fallback")
+			}
+		})
 	}
 }

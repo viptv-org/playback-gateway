@@ -30,15 +30,17 @@ import (
 )
 
 type Config struct {
-	CacheDir         string `json:"cache_dir"`
-	CacheBytes       int64  `json:"cache_bytes"`
-	ReadaheadBytes   int64  `json:"readahead_bytes"`
-	MaxInputs        int    `json:"max_inputs,omitempty"`
-	MaxHandles       int    `json:"max_handles,omitempty"`
-	clientTuning     func(*torrent.ClientConfig)
-	primeHeaders     bool
-	utpDialDelay     time.Duration
-	upstreamDefaults bool
+	CacheDir             string `json:"cache_dir"`
+	CacheBytes           int64  `json:"cache_bytes"`
+	ReadaheadBytes       int64  `json:"readahead_bytes"`
+	MaxInputs            int    `json:"max_inputs,omitempty"`
+	MaxHandles           int    `json:"max_handles,omitempty"`
+	clientTuning         func(*torrent.ClientConfig)
+	primeHeaders         bool
+	utpDialDelay         time.Duration
+	upstreamDefaults     bool
+	verifiedPlaybackOnly bool // Test-only comparison; not a control API setting.
+	primeHeadOnly        bool // Test-only priming experiment.
 }
 type Source struct {
 	ExpectedFileSize *int64   `json:"expected_file_size,omitempty"`
@@ -81,6 +83,8 @@ type Runtime struct {
 	metadataProgress sync.Map
 	requests         requestObservations
 	primeHeaders     bool
+	earlyPlayback    bool
+	primeHeadOnly    bool
 	maxInputs        int
 	maxHandles       int
 }
@@ -137,6 +141,8 @@ func newRuntime(cfg Config, privateFixture bool) (*Runtime, error) {
 	readAhead = min(readAhead, c.limit/4)
 	r := &Runtime{cache: c, handles: map[string]*Handle{}, retiring: map[*Handle]chan struct{}{}, shutdownDone: make(chan struct{}), refs: map[*torrent.Torrent]int{}, demands: map[*demandReader]pieceWindow{}, priorities: map[*torrent.Torrent]map[int]torrent.PiecePriority{}, readAhead: readAhead, privateFixture: privateFixture}
 	r.primeHeaders = cfg.primeHeaders
+	r.earlyPlayback = !cfg.verifiedPlaybackOnly
+	r.primeHeadOnly = cfg.primeHeadOnly
 	r.startupReadAhead = min(int64(4<<20), readAhead)
 	r.maxInputs = cfg.MaxInputs
 	r.maxHandles = cfg.MaxHandles
@@ -167,12 +173,18 @@ func newRuntime(cfg Config, privateFixture bool) (*Runtime, error) {
 	cc.Callbacks.PeerClosed = []func(*torrent.Peer){r.requests.closed}
 	if !privateFixture && !cfg.upstreamDefaults {
 		// Candidate streaming defaults, using upstream configuration seams.
-		// Preserve both TCP/uTP and the engine's encryption fallback policy.
+		// Keep TCP/uTP and encrypted fallback, but avoid the extra encryption
+		// handshake on peers which accept the ordinary BitTorrent handshake.
+		cc.HeaderObfuscationPolicy.Preferred = false
 		cc.DialRateLimiter = rate.NewLimiter(50, 50)
 		cc.HalfOpenConnsPerTorrent = 50
 		cc.NominalDialTimeout = 4 * time.Second
 		cc.MinDialTimeout = time.Second
 		r.primeHeaders = true
+		// Start the selected file immediately. Tail demand is installed by the
+		// player if its container requires it, rather than competing with the
+		// first frame on every cold start.
+		r.primeHeadOnly = true
 	}
 	if privateFixture {
 		cc.NoDHT = true
@@ -487,7 +499,7 @@ func (h *Handle) prepare(index, archiveIndex *int, expectedSize *int64, selectio
 	length := f.Length()
 	var resolvedArchiveIndex *int
 	open := func(ctx context.Context) (io.ReadSeekCloser, error) {
-		return &demandReader{h: h, ctx: ctx, file: f}, nil
+		return &demandReader{h: h, ctx: ctx, file: f, early: h.r.earlyPlayback}, nil
 	}
 	if archiveName(f.Path()) {
 		h.mu.Lock()
@@ -530,7 +542,11 @@ func (h *Handle) prepare(index, archiveIndex *int, expectedSize *int64, selectio
 	if h.r.primeHeaders && !archiveName(f.Path()) {
 		ctx, cancel := context.WithCancel(h.ctx)
 		h.primeCancel = cancel
-		for _, offset := range []int64{0, max(0, f.Length()-1)} {
+		offsets := []int64{0}
+		if !h.r.primeHeadOnly {
+			offsets = append(offsets, max(0, f.Length()-1))
+		}
+		for _, offset := range offsets {
 			go func(offset int64) {
 				reader := &demandReader{h: h, ctx: ctx, file: f, readAheadOverride: 1}
 				defer reader.Close()
@@ -721,7 +737,8 @@ func (r *Runtime) serve(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/octet-stream")
 	// ServeContent owns RFC Range/suffix/HEAD handling; the reader drives piece
-	// demand at each seek. Only the verified storage reader supplies its bytes.
+	// demand at each seek. Live plain-file playback may consume received spans
+	// before a whole-piece hash finishes; persisted completion remains verified.
 	http.ServeContent(w, req, "media", time.Time{}, &authorityReader{ReadSeekCloser: reader, h: h})
 }
 

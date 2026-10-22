@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -32,7 +33,9 @@ func TestGatewayQualificationWorker(t *testing.T) {
 		if json.Unmarshal(data, &request) == nil && request.Version == 2 && request.Op == "open" && request.Config != nil {
 			// Match the production streaming settings; only destination policy and DHT differ.
 			request.Config.primeHeaders = true
+			request.Config.primeHeadOnly = true
 			request.Config.clientTuning = func(c *torrent.ClientConfig) {
+				c.HeaderObfuscationPolicy.Preferred = false
 				c.DialRateLimiter = rate.NewLimiter(50, 50)
 				c.HalfOpenConnsPerTorrent = 50
 				c.NominalDialTimeout = 4 * time.Second
@@ -108,7 +111,20 @@ func TestGatewayQualificationSeeder(t *testing.T) {
 	if path == "" {
 		t.Skip("owned file seeder only")
 	}
-	client, raw := seedPath(t, path, false)
+	pieceLength := int64(4096)
+	if configured := os.Getenv("TORRENT_OWNED_PIECE_BYTES"); configured != "" {
+		var err error
+		pieceLength, err = strconv.ParseInt(configured, 10, 64)
+		if err != nil || pieceLength < 4096 || pieceLength > 16<<20 {
+			t.Fatal("invalid owned piece size")
+		}
+	}
+	upload, _ := strconv.ParseInt(os.Getenv("TORRENT_OWNED_UPLOAD_BYTES"), 10, 64)
+	client, raw := seedPathTuned(t, path, false, pieceLength, func(config *torrent.ClientConfig) {
+		if upload > 0 {
+			config.UploadRateLimiter = rate.NewLimiter(rate.Limit(upload), 1<<20)
+		}
+	})
 	port := 0
 	for _, address := range client.ListenAddrs() {
 		if tcp, ok := address.(*net.TCPAddr); ok {

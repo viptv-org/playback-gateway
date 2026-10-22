@@ -1,5 +1,11 @@
 # Qualification ledger
 
+2026-10-22 update: the owner approved Stremio-style early reads for ordinary
+live selected-file playback; reusable cached data and archives still require
+verification. The entries below retain their original verified-only semantics
+and measurements. Current cold-only work and its separate acceptance result are
+recorded in [the cold-start follow-up](../docs/TORRENT_COLD_START_2026_10_22.md).
+
 Status on 2026-10-09: **client integration authorized; performance parity deferred**.
 The approved replacement is specified in design's
 `specs/behavior/torrent-runtime-v2.md` at `16277ca`. The owner accepted current

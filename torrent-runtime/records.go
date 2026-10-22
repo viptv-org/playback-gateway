@@ -31,13 +31,19 @@ func (c *Cache) readRecord(key string, maxBytes int64) []byte {
 	if c.closed || c.failed || e == nil || e.evicting || !e.complete || e.length > maxBytes {
 		return nil
 	}
-	f, err := os.Open(c.path(key))
+	f, retained, err := c.beginIOLocked(e, nil)
 	if err != nil {
 		return nil
 	}
-	defer f.Close()
+	defer c.endIOLocked(e, f, retained)
+	if !e.complete {
+		return nil
+	}
 	b := make([]byte, e.length)
-	if _, err = f.ReadAt(b, pieceHeaderBytes); err != nil {
+	c.mu.Unlock()
+	_, err = f.ReadAt(b, pieceHeaderBytes)
+	c.mu.Lock()
+	if err != nil {
 		return nil
 	}
 	e.used = time.Now()
@@ -54,17 +60,33 @@ func (c *Cache) writeRecord(key string, data []byte) error {
 		c.mu.Unlock()
 		return os.ErrClosed
 	}
-	if e := c.entries[key]; e != nil {
+	for {
+		e := c.entries[key]
+		if e == nil {
+			break
+		}
+		if e.ioPins != 0 && !c.closed && !c.failed {
+			c.waitChangeLocked()
+			// Eviction can win the mutex after the reader unpins. Reacquire the
+			// inventory entry rather than unlinking a previously retained pointer.
+			continue
+		}
+		if c.closed || c.failed {
+			c.mu.Unlock()
+			return os.ErrClosed
+		}
 		if e.pins != 0 {
 			c.mu.Unlock()
 			return errors.New("record still in use")
 		}
+		c.closeFileLocked(e)
 		if err := os.Remove(c.path(key)); err != nil {
 			c.mu.Unlock()
 			return errors.New("record replacement failed")
 		}
 		delete(c.entries, key)
 		c.used -= c.charge(e.length)
+		break
 	}
 	c.mu.Unlock()
 	closed := false

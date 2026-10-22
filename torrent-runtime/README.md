@@ -46,6 +46,17 @@ then deletes its bytes. The allocation charge remains until deletion. A failed
 unlink terminates cache access and wakes waiting writers. A restart checks persisted records; incomplete or corrupt records cannot
 be served. Final handle closure retains verified data for an authorized replay.
 
+With the owner's 2026-10-22 approval of Stremio-style early playback, ordinary
+selected-file HTTP reads may expose contiguous received blocks before their
+whole-piece hash completes. They never expose unwritten holes. A failed hash
+revokes early reads of that cache entry until a verified replacement completes.
+Corrupt bytes can therefore reach the live decoder before a later rejection;
+they never become reusable verified data. Archive parsing and archive reads
+remain verified-only, as do storage readers and all persisted/restarted reuse.
+The existing `public_discovery_verified_v2` policy tag and public APIs are
+unchanged for compatibility; `verified` describes reusable cache integrity,
+not a guarantee that every live decoder read waits for the whole-piece hash.
+
 Public peer and tracker destinations are checked, automatic router mapping is
 disabled, and discovery enables trackers, DHT, PEX, TCP and uTP. Bench-only
 connection, TCP head-start and header-priming experiments are unexported configuration hooks;
@@ -53,7 +64,9 @@ their results must not be mistaken for production defaults.
 
 The streaming runtime configures an upstream dial burst/rate of 50, fifty
 half-open attempts per torrent, a 4 s nominal/1 s minimum connection budget, and
-verified head/index priming. Reader demand starts with at most 4 MiB and expands
+selected-file head priming. Plain BitTorrent handshakes are preferred, with
+encrypted fallback and both TCP/uTP retained. Container tail demand starts when
+the player requests it. Reader demand starts with at most 4 MiB and expands
 to the configured bounded window after first-frame acknowledgement. Reference
 probes can explicitly retain upstream defaults. These settings leave protocol,
 DNS, handshake, request scheduling and hash verification in their libraries.

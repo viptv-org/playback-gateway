@@ -88,6 +88,7 @@ func TestMetadataAndBytesResumeFromMagnetWithoutPeers(t *testing.T) {
 	h := readyHandle(t, r, raw)
 	connectSeed(h, seed)
 	fetchRange(t, h, 0, 4095)
+	waitVerifiedPiece(t, h, 0)
 	hash := h.t.InfoHash().HexString()
 	r.Close()
 	seed.Close()
