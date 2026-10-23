@@ -60,6 +60,29 @@ def load_magnet_cases(path):
     return cases
 
 
+def wait_for_player(process, result, timeout, sustained, playback_smoke):
+    budget = timeout * (4 if playback_smoke else 3) + sustained + (110 if playback_smoke else 30)
+    deadline = time.monotonic() + budget
+    while process.poll() is None and not result.is_file():
+        if time.monotonic() > deadline:
+            raise TimeoutError("player_timeout")
+        time.sleep(.05)
+
+
+def complete_playback_smoke(row):
+    phases = row.get("playback_phases", [])
+    if row.get("smoke_smooth") is not True or len(phases) != 3:
+        return False
+    for phase, (name, seconds) in zip(phases, [("start", 45), ("near_end", 15), ("backward", 15)]):
+        wall = phase.get("wall_seconds", 0)
+        if phase.get("phase") != name or not isinstance(wall, (int, float)) or not screen.math.isfinite(wall) or wall < seconds:
+            return False
+    duration = row.get("observed_duration_ms", 0)
+    return (duration > 120000 and row.get("near_end_target_ms") == duration * 95 // 100
+            and row.get("backward_target_ms") == 30000
+            and row.get("near_end_seconds") is not None and row.get("backward_seconds") is not None)
+
+
 class Resources:
     """Sample only the owned JVM and its descendants; never capture commands/URLs."""
     def __init__(self, process, cache):
@@ -71,6 +94,7 @@ class Resources:
         started = time.monotonic()
         while not self.stop.is_set():
             pending = [self.process.pid, *self.extra]; seen = set(); rss = 0; descriptors = 0
+            processes = []
             while pending:
                 pid = pending.pop()
                 if pid in seen: continue
@@ -79,7 +103,9 @@ class Resources:
                     directory = Path('/proc') / str(pid)
                     stat = (directory/'stat').read_text().rsplit(')', 1)[1].split()
                     self.cpu[(pid, stat[19])] = (int(stat[11])+int(stat[12]))/os.sysconf('SC_CLK_TCK')
-                    rss += int(stat[21])*os.sysconf('SC_PAGE_SIZE')
+                    process_rss = int(stat[21])*os.sysconf('SC_PAGE_SIZE')
+                    rss += process_rss
+                    processes.append(dict(pid=pid, name=(directory/'comm').read_text().strip(), rss_bytes=process_rss))
                     descriptors += len(list((directory/'fd').iterdir()))
                     for children in (directory/'task').glob('*/children'):
                         pending.extend(int(p) for p in children.read_text().split())
@@ -90,7 +116,8 @@ class Resources:
                     if file.is_file(): allocated += file.stat().st_blocks*512
             except OSError: pass
             self.rows.append(dict(seconds=time.monotonic()-started, rss_bytes=rss, descriptors=descriptors,
-                                  cpu_seconds=sum(self.cpu.values()), allocated_cache_bytes=allocated))
+                                  cpu_seconds=sum(self.cpu.values()), allocated_cache_bytes=allocated,
+                                  processes=processes))
             self.stop.wait(1)
 
     def close(self, output):
@@ -116,6 +143,7 @@ def main():
     parser.add_argument("--engines", nargs="+", choices=["baseline", "candidate", "stremio"], default=["baseline", "candidate", "stremio"])
     parser.add_argument("--sustained", type=int, default=0)
     parser.add_argument("--startup-only", action="store_true", help="Measure first rendered frame without seek trials")
+    parser.add_argument("--playback-smoke", action="store_true", help="45s playback, 95%% seek and 30s backward seek, with 15s playback after each")
     parser.add_argument("--candidate-grace", default="0")
     parser.add_argument("--candidate-profile", help="Test-only cold worker tuning profile")
     args = parser.parse_args(); os.umask(0o077)
@@ -125,6 +153,8 @@ def main():
         parser.error('--corpus and --magnets are mutually exclusive')
     if args.startup_only and args.states != ['cold']:
         parser.error('--startup-only requires --states cold')
+    if args.playback_smoke and (args.startup_only or args.states != ['cold']):
+        parser.error('--playback-smoke requires --states cold and cannot use --startup-only')
     if len(args.states) != len(set(args.states)) or ('cold' in args.states and args.states[0] != 'cold'):
         parser.error('cold must be the first state, and states must not repeat')
     def interrupted(*_): raise KeyboardInterrupt()
@@ -139,7 +169,7 @@ def main():
     (args.output / "owned-audio.json").write_text(json.dumps({"module":audio_module,"sink":sink}))
     alsa = args.output / "alsa.conf"; alsa.write_text("pcm.!default { type pulse }\nctl.!default { type pulse }\n")
     identity = {"trials": args.trials, "trial_offset": args.trial_offset, "states": args.states, "seed": args.seed, "sustained_seconds": args.sustained,
-                "startup_only": args.startup_only, "metadata_timeout_ms":args.timeout*1000, "render_timeout_ms":args.timeout*1000,
+                "startup_only": args.startup_only, "playback_smoke": args.playback_smoke, "metadata_timeout_ms":args.timeout*1000, "render_timeout_ms":args.timeout*1000,
                 "candidate_grace": args.candidate_grace,
                 "candidate_profile": args.candidate_profile,
                 "sha256": {name: screen.hashlib.sha256(path.read_bytes()).hexdigest() for name, path in
@@ -166,6 +196,7 @@ def main():
                 case = cases[ordinal]
                 spec = {"result": str(result), "cache": str(cache), "timeout_ms": args.timeout*1000, "sustained_seconds": args.sustained}
                 spec['startup_only'] = args.startup_only
+                spec['smoothness_smoke'] = args.playback_smoke
                 if engine == "stremio":
                     spec.update(reference_ready=str(directory / "reference-ready"), reference_reply=str(directory / "reference-reply.json"))
                 else:
@@ -198,13 +229,12 @@ def main():
                             resources.extra.append(reference.process.pid)
                             url = reference.prepare(case)
                             temporary = directory / "reply.tmp"; temporary.write_text(json.dumps({"url": url})); temporary.rename(spec["reference_reply"])
-                        deadline = time.monotonic()+args.timeout*3+args.sustained+30
-                        while process.poll() is None and not result.is_file():
-                            if time.monotonic()>deadline: raise TimeoutError("player_timeout")
-                            time.sleep(.05)
+                        wait_for_player(process, result, args.timeout, args.sustained, args.playback_smoke)
                         if result.is_file(): row.update(json.loads(result.read_text().splitlines()[-1]))
                         process.wait(10)
                         if process.returncode != 0 or not result.is_file(): raise RuntimeError("player_exited")
+                        if args.playback_smoke and row.get('passed') and not complete_playback_smoke(row):
+                            raise RuntimeError('missing_playback_smoke_measurements')
                         row["clean_shutdown"] = True
                     except Exception as error:
                         row["error_type"] = type(error).__name__; row["error_detail"] = str(error)[:300]; row["passed"] = False
@@ -226,6 +256,11 @@ def main():
                 report['performance_gate'] = screen.cold_start_gate(rows) if args.startup_only else screen.performance_gate(rows)
                 if args.startup_only:
                     report['cold_start_qualification'] = report['performance_gate']['passed']
+                if args.playback_smoke:
+                    expected = args.trials * len(cases) * len(args.engines)
+                    report['reason'] = 'Short actual playback/near-end/backward-seek smoke; not long-session qualification'
+                    report['playback_smoke'] = dict(complete=len(rows) == expected, attempts=len(rows), expected_attempts=expected,
+                                                     passed=len(rows) == expected and all(row['passed'] and complete_playback_smoke(row) for row in rows))
                 (args.output / "summary.json").write_text(json.dumps(report, indent=2))
                 print(json.dumps({k:v for k,v in row.items() if k != "player_samples"}), flush=True)
 

@@ -3,6 +3,7 @@ from pathlib import Path
 import unittest
 import json
 import tempfile
+from unittest.mock import Mock, patch
 
 spec = importlib.util.spec_from_file_location("desktop_benchmark", Path(__file__).with_name("benchmark-desktop.py"))
 benchmark = importlib.util.module_from_spec(spec)
@@ -59,6 +60,32 @@ class ScheduleTests(unittest.TestCase):
             with self.subTest(count=count, engines=engines, trials=trials, offset=offset):
                 with self.assertRaises(ValueError):
                     list(benchmark.trial_schedule(count, engines, trials, offset))
+
+    def test_player_wait_has_its_own_deadline_without_reference_launch(self):
+        for smoke in (False, True):
+            with self.subTest(smoke=smoke):
+                process, result = Mock(), Mock()
+                process.poll.return_value = None
+                result.is_file.return_value = False
+                with patch.object(benchmark.time, "monotonic", side_effect=[0, 10000]):
+                    with self.assertRaisesRegex(TimeoutError, "player_timeout"):
+                        benchmark.wait_for_player(process, result, 30, 0, smoke)
+
+    def test_player_wait_accepts_a_completed_result(self):
+        process, result = Mock(), Mock()
+        process.poll.return_value = None
+        result.is_file.return_value = True
+        benchmark.wait_for_player(process, result, 30, 0, True)
+
+    def test_startup_or_short_watch_cannot_pass_full_playback_smoke(self):
+        self.assertFalse(benchmark.complete_playback_smoke(dict(passed=True, first_frame_seconds=1)))
+        row = dict(smoke_smooth=True, observed_duration_ms=200000, near_end_target_ms=190000,
+                   backward_target_ms=30000, near_end_seconds=1, backward_seconds=.3,
+                   playback_phases=[dict(phase=name, wall_seconds=seconds) for name, seconds in
+                                    [("start", 45), ("near_end", 15), ("backward", 15)]])
+        self.assertTrue(benchmark.complete_playback_smoke(row))
+        row['playback_phases'][0]['wall_seconds'] = 1
+        self.assertFalse(benchmark.complete_playback_smoke(row))
 
 
 if __name__ == "__main__":

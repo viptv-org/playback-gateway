@@ -1,5 +1,10 @@
 # All supplied movies: Linux cold-start retest — 2026-10-22
 
+Follow-up [actual playback and near-end/backward seek tests](TORRENT_PLAYBACK_SMOKE_2026_10_23.md)
+found no detected half-second freezes in five short runs, but retained an
+intermittent HEVC cadence dip and a large shared desktop-player memory footprint.
+Cold-start speed alone does not establish long-session reliability.
+
 The optimized `e49dca8024e74ea85a064f7a4eb94702cf9691c7` worker was retested against unmodified Stremio server 4.19.0 across all 21 supplied torrents. Each engine used the same isolated KMP player, software renderer, exact magnet and trackers, largest-file selection, fresh worker and empty cache. Timing covers runtime admission to the first actual `DesktopDrawCompleted` image. Metadata and rendering each retain their separate 30-second deadlines.
 
 The predeclared fast-screen procedure runs one pair per movie, followed by exactly two extra pairs for either-engine failures, candidate losses or a candidate advantage smaller than 20%. First-pass outcomes are retained. Six movies met that repeat rule: Interstellar, Shawshank Redemption, Forrest Gump, Safety Not Guaranteed, Certified Copy and Martha Marcy May Marlene. This creates 33 pairs / 66 attempts; sources with clear initial advantages retain one pair. No unsuccessful attempt was removed or replaced.

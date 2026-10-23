@@ -1,0 +1,640 @@
+{
+  "scope": "Short actual Linux KMP software-rendered playback and seek smoke, not long-session or cross-platform qualification",
+  "protocol": {
+    "scope": "Quick actual Linux desktop playback/seek smoke; candidate only",
+    "cases": [
+      "Dune Part Two",
+      "Shawshank Redemption",
+      "Turbo Kid"
+    ],
+    "start_seconds": 45,
+    "near_end_fraction": 0.95,
+    "near_end_play_seconds": 15,
+    "backward_target_ms": 30000,
+    "backward_play_seconds": 15,
+    "seek_frame_requirement": "three new distinct rendered images with player position within target..target+3000ms",
+    "freeze_threshold_ms": 500,
+    "frame_age_sample_ms": 100,
+    "minimum_display_fps": 20,
+    "required_timeline_advancement_fraction": 0.8,
+    "fresh_cache": true,
+    "runtime_revision": "e49dca8024e74ea85a064f7a4eb94702cf9691c7"
+  },
+  "hevc_control_protocol": {
+    "scope": "Same HEVC clip and renderer; one fresh-cache full smoke per engine",
+    "java_tool_options": "-Xmx512m",
+    "rationale": "Check memory behavior and whether post-backward-seek cadence loss also occurs with stock Stremio",
+    "changes_to_engine_or_player_libraries": false
+  },
+  "runs": [
+    {
+      "trial": 0,
+      "case": 0,
+      "engine": "candidate",
+      "state": "cold",
+      "passed": true,
+      "sustained_seconds": 0,
+      "hash": "2770fe270845674966e184be60ed1be0fe494f3a",
+      "label": "Dune Part Two",
+      "dn": "Dune: Part Two 2024 1080p WEBRip",
+      "popularity_label": "POPULAR",
+      "measurement": "Desktop distinct-image draws; 45s start, 95% seek + 15s, backward seek + 15s",
+      "startup_only": false,
+      "endpoint_seconds": 0.611929582,
+      "first_frame_seconds": 5.268052916,
+      "playback_phases": [
+        {
+          "phase": "start",
+          "wall_seconds": 46.895803721,
+          "drawn_frames": 1124,
+          "rendered_fps": 23.968029350495414,
+          "start_position_ms": 101,
+          "end_position_ms": 46937,
+          "position_advanced_ms": 46836,
+          "max_sampled_frame_age_ms": 44,
+          "freeze_events_over_500ms": 0,
+          "smooth": true
+        },
+        {
+          "phase": "near_end",
+          "wall_seconds": 15.640366607,
+          "drawn_frames": 375,
+          "rendered_fps": 23.976420081621683,
+          "start_position_ms": 9449807,
+          "end_position_ms": 9465406,
+          "position_advanced_ms": 15599,
+          "max_sampled_frame_age_ms": 34,
+          "freeze_events_over_500ms": 0,
+          "smooth": true
+        },
+        {
+          "phase": "backward",
+          "wall_seconds": 15.640958536,
+          "drawn_frames": 374,
+          "rendered_fps": 23.911577998188744,
+          "start_position_ms": 30091,
+          "end_position_ms": 45728,
+          "position_advanced_ms": 15637,
+          "max_sampled_frame_age_ms": 70,
+          "freeze_events_over_500ms": 0,
+          "smooth": true
+        }
+      ],
+      "observed_duration_ms": 9947071,
+      "near_end_target_ms": 9449717,
+      "near_end_seconds": 0.726751668,
+      "backward_target_ms": 30000,
+      "backward_seconds": 0.300061985,
+      "smoke_smooth": true,
+      "worker_exit_code": 137,
+      "worker_retirement": "joined",
+      "worker_process_exited": true,
+      "presented_frames": 1880,
+      "clean_shutdown": true,
+      "peak_rss_bytes": 7420678144,
+      "cpu_seconds": 62.06,
+      "peak_cache_allocation_bytes": 176779264,
+      "batch": "candidate-fixed",
+      "selected_file": {
+        "index": 0,
+        "path": "Dune Part Two (2024) [1080p] [WEBRip] [YTS.MX]/Dune.Part.Two.2024.1080p.WEBRip.x264.AAC-[YTS.MX].mp4",
+        "length": 2968283738,
+        "hash": "2770fe270845674966e184be60ed1be0fe494f3a",
+        "piece_bytes": 2897920,
+        "container": ".mp4",
+        "selection_evidence": "observed_durable_resolved_selection_record",
+        "resolved_selection": {
+          "hash": "2770fe270845674966e184be60ed1be0fe494f3a",
+          "file_index": 0,
+          "archive_index": null,
+          "length": 2968283738,
+          "outer_length": 2968283738
+        }
+      },
+      "diagnostic_maxima": {
+        "rebuffers": 0,
+        "audio_underruns": 0,
+        "av_drift_ms": 39
+      },
+      "per_process_peak_rss_bytes": {}
+    },
+    {
+      "trial": 0,
+      "case": 1,
+      "engine": "candidate",
+      "state": "cold",
+      "passed": true,
+      "sustained_seconds": 0,
+      "hash": "e0d00667650aba9ee05aacbbbd8b55ea8a51f534",
+      "label": "Shawshank Redemption",
+      "dn": "The Shawshank Redemption (1994) 1080p BrRip - 1.6GB - YIFY",
+      "popularity_label": "POPULAR",
+      "measurement": "Desktop distinct-image draws; 45s start, 95% seek + 15s, backward seek + 15s",
+      "startup_only": false,
+      "endpoint_seconds": 0.56209327,
+      "first_frame_seconds": 3.186243507,
+      "playback_phases": [
+        {
+          "phase": "start",
+          "wall_seconds": 46.873957073,
+          "drawn_frames": 1123,
+          "rendered_fps": 23.957866374521693,
+          "start_position_ms": 67,
+          "end_position_ms": 46938,
+          "position_advanced_ms": 46871,
+          "max_sampled_frame_age_ms": 40,
+          "freeze_events_over_500ms": 0,
+          "smooth": true
+        },
+        {
+          "phase": "near_end",
+          "wall_seconds": 15.658371785,
+          "drawn_frames": 375,
+          "rendered_fps": 23.948850183722982,
+          "start_position_ms": 8119681,
+          "end_position_ms": 8135327,
+          "position_advanced_ms": 15646,
+          "max_sampled_frame_age_ms": 37,
+          "freeze_events_over_500ms": 0,
+          "smooth": true
+        },
+        {
+          "phase": "backward",
+          "wall_seconds": 15.616457247,
+          "drawn_frames": 374,
+          "rendered_fps": 23.949093836365947,
+          "start_position_ms": 30096,
+          "end_position_ms": 45695,
+          "position_advanced_ms": 15599,
+          "max_sampled_frame_age_ms": 38,
+          "freeze_events_over_500ms": 0,
+          "smooth": true
+        }
+      ],
+      "observed_duration_ms": 8546944,
+      "near_end_target_ms": 8119596,
+      "near_end_seconds": 1.917175784,
+      "backward_target_ms": 30000,
+      "backward_seconds": 0.298618651,
+      "smoke_smooth": true,
+      "worker_exit_code": 137,
+      "worker_retirement": "joined",
+      "worker_process_exited": true,
+      "presented_frames": 1879,
+      "clean_shutdown": true,
+      "peak_rss_bytes": 8498716672,
+      "cpu_seconds": 73.56,
+      "peak_cache_allocation_bytes": 111902720,
+      "batch": "candidate-fixed",
+      "selected_file": {
+        "index": 3,
+        "path": "The Shawshank Redemption (1994) [1080p]/The.Shawshank.Redemption.1994.1080p.x264.YIFY.mp4",
+        "length": 1722009470,
+        "hash": "e0d00667650aba9ee05aacbbbd8b55ea8a51f534",
+        "piece_bytes": 2097152,
+        "container": ".mp4",
+        "selection_evidence": "observed_durable_resolved_selection_record",
+        "resolved_selection": {
+          "hash": "e0d00667650aba9ee05aacbbbd8b55ea8a51f534",
+          "file_index": 3,
+          "archive_index": null,
+          "length": 1722009470,
+          "outer_length": 1722009470
+        }
+      },
+      "diagnostic_maxima": {
+        "rebuffers": 0,
+        "audio_underruns": 0,
+        "av_drift_ms": 39
+      },
+      "per_process_peak_rss_bytes": {}
+    },
+    {
+      "trial": 0,
+      "case": 2,
+      "engine": "candidate",
+      "state": "cold",
+      "passed": false,
+      "sustained_seconds": 0,
+      "hash": "b77a9d14c90da0f0096631605e280e65d6c606f6",
+      "label": "Turbo Kid",
+      "dn": "Turbo Kid 2015 1080p BluRay HEVC x265 5.1 BONE",
+      "popularity_label": "NOT POPULAR",
+      "measurement": "Desktop distinct-image draws; 45s start, 95% seek + 15s, backward seek + 15s",
+      "startup_only": false,
+      "endpoint_seconds": 0.612884729,
+      "first_frame_seconds": 1.222565804,
+      "playback_phases": [
+        {
+          "phase": "start",
+          "wall_seconds": 46.916269199,
+          "drawn_frames": 1126,
+          "rendered_fps": 24.00020332443655,
+          "start_position_ms": 102,
+          "end_position_ms": 46971,
+          "position_advanced_ms": 46869,
+          "max_sampled_frame_age_ms": 31,
+          "freeze_events_over_500ms": 0,
+          "smooth": true
+        },
+        {
+          "phase": "near_end",
+          "wall_seconds": 15.641159261,
+          "drawn_frames": 375,
+          "rendered_fps": 23.97520501789359,
+          "start_position_ms": 5295001,
+          "end_position_ms": 5310646,
+          "position_advanced_ms": 15645,
+          "max_sampled_frame_age_ms": 31,
+          "freeze_events_over_500ms": 0,
+          "smooth": true
+        },
+        {
+          "phase": "backward",
+          "wall_seconds": 15.399002585,
+          "drawn_frames": 297,
+          "rendered_fps": 19.286963448483636,
+          "start_position_ms": 30132,
+          "end_position_ms": 45520,
+          "position_advanced_ms": 15388,
+          "max_sampled_frame_age_ms": 80,
+          "freeze_events_over_500ms": 0,
+          "smooth": false
+        }
+      ],
+      "observed_duration_ms": 5573589,
+      "near_end_target_ms": 5294909,
+      "near_end_seconds": 3.72265944,
+      "backward_target_ms": 30000,
+      "backward_seconds": 0.356168948,
+      "smoke_smooth": false,
+      "error": "playback_measurement_failed",
+      "measurement_error_type": "IllegalStateException",
+      "worker_exit_code": 137,
+      "worker_retirement": "joined",
+      "worker_process_exited": true,
+      "presented_frames": 1805,
+      "clean_shutdown": true,
+      "peak_rss_bytes": 3754803200,
+      "cpu_seconds": 56.449999999999996,
+      "peak_cache_allocation_bytes": 83841024,
+      "batch": "candidate-fixed",
+      "selected_file": {
+        "index": 0,
+        "path": "Turbo Kid 2015 1080p BluRay HEVC x265 5.1 BONE.mkv",
+        "length": 1507507710,
+        "hash": "b77a9d14c90da0f0096631605e280e65d6c606f6",
+        "piece_bytes": 2097152,
+        "container": ".mkv",
+        "selection_evidence": "observed_durable_resolved_selection_record",
+        "resolved_selection": {
+          "hash": "b77a9d14c90da0f0096631605e280e65d6c606f6",
+          "file_index": 0,
+          "archive_index": null,
+          "length": 1507507710,
+          "outer_length": 1507507710
+        }
+      },
+      "diagnostic_maxima": {
+        "rebuffers": 0,
+        "audio_underruns": 0,
+        "av_drift_ms": 41
+      },
+      "per_process_peak_rss_bytes": {}
+    },
+    {
+      "trial": 0,
+      "case": 0,
+      "engine": "candidate",
+      "state": "cold",
+      "passed": true,
+      "sustained_seconds": 0,
+      "hash": "b77a9d14c90da0f0096631605e280e65d6c606f6",
+      "label": "Turbo Kid",
+      "dn": "Turbo Kid 2015 1080p BluRay HEVC x265 5.1 BONE",
+      "popularity_label": "NOT POPULAR",
+      "measurement": "Desktop distinct-image draws; 45s start, 95% seek + 15s, backward seek + 15s",
+      "startup_only": false,
+      "endpoint_seconds": 0.758696246,
+      "first_frame_seconds": 1.342820759,
+      "playback_phases": [
+        {
+          "phase": "start",
+          "wall_seconds": 46.897350882,
+          "drawn_frames": 1124,
+          "rendered_fps": 23.967238636317308,
+          "start_position_ms": 102,
+          "end_position_ms": 46941,
+          "position_advanced_ms": 46839,
+          "max_sampled_frame_age_ms": 62,
+          "freeze_events_over_500ms": 0,
+          "smooth": true
+        },
+        {
+          "phase": "near_end",
+          "wall_seconds": 15.642986125,
+          "drawn_frames": 375,
+          "rendered_fps": 23.97240507684718,
+          "start_position_ms": 5294996,
+          "end_position_ms": 5310593,
+          "position_advanced_ms": 15597,
+          "max_sampled_frame_age_ms": 30,
+          "freeze_events_over_500ms": 0,
+          "smooth": true
+        },
+        {
+          "phase": "backward",
+          "wall_seconds": 15.615182717,
+          "drawn_frames": 374,
+          "rendered_fps": 23.951048590218043,
+          "start_position_ms": 30091,
+          "end_position_ms": 45693,
+          "position_advanced_ms": 15602,
+          "max_sampled_frame_age_ms": 46,
+          "freeze_events_over_500ms": 0,
+          "smooth": true
+        }
+      ],
+      "observed_duration_ms": 5573589,
+      "near_end_target_ms": 5294909,
+      "near_end_seconds": 3.851434116,
+      "backward_target_ms": 30000,
+      "backward_seconds": 0.314857523,
+      "smoke_smooth": true,
+      "worker_exit_code": 137,
+      "worker_retirement": "joined",
+      "worker_process_exited": true,
+      "presented_frames": 1880,
+      "clean_shutdown": true,
+      "peak_rss_bytes": 7695003648,
+      "cpu_seconds": 59.71,
+      "peak_cache_allocation_bytes": 79618048,
+      "batch": "hevc-bounded-pair",
+      "selected_file": {
+        "index": 0,
+        "path": "Turbo Kid 2015 1080p BluRay HEVC x265 5.1 BONE.mkv",
+        "length": 1507507710,
+        "hash": "b77a9d14c90da0f0096631605e280e65d6c606f6",
+        "piece_bytes": 2097152,
+        "container": ".mkv",
+        "selection_evidence": "observed_durable_resolved_selection_record",
+        "resolved_selection": {
+          "hash": "b77a9d14c90da0f0096631605e280e65d6c606f6",
+          "file_index": 0,
+          "archive_index": null,
+          "length": 1507507710,
+          "outer_length": 1507507710
+        }
+      },
+      "diagnostic_maxima": {
+        "rebuffers": 0,
+        "audio_underruns": 0,
+        "av_drift_ms": 39
+      },
+      "per_process_peak_rss_bytes": {
+        "VIPTV-Experimen": 7660339200,
+        "sh": 0,
+        "torrent-worker": 41709568
+      },
+      "requested_java_heap_option_acknowledged": true
+    },
+    {
+      "trial": 0,
+      "case": 0,
+      "engine": "stremio",
+      "state": "cold",
+      "passed": true,
+      "sustained_seconds": 0,
+      "hash": "b77a9d14c90da0f0096631605e280e65d6c606f6",
+      "label": "Turbo Kid",
+      "dn": "Turbo Kid 2015 1080p BluRay HEVC x265 5.1 BONE",
+      "popularity_label": "NOT POPULAR",
+      "measurement": "Desktop distinct-image draws; 45s start, 95% seek + 15s, backward seek + 15s",
+      "startup_only": false,
+      "endpoint_seconds": 0.930488511,
+      "first_frame_seconds": 2.562253885,
+      "playback_phases": [
+        {
+          "phase": "start",
+          "wall_seconds": 46.752257298,
+          "drawn_frames": 1122,
+          "rendered_fps": 23.998841229169862,
+          "start_position_ms": 98,
+          "end_position_ms": 46811,
+          "position_advanced_ms": 46713,
+          "max_sampled_frame_age_ms": 53,
+          "freeze_events_over_500ms": 0,
+          "smooth": true
+        },
+        {
+          "phase": "near_end",
+          "wall_seconds": 15.640920862,
+          "drawn_frames": 375,
+          "rendered_fps": 23.97557044809757,
+          "start_position_ms": 5294999,
+          "end_position_ms": 5310643,
+          "position_advanced_ms": 15644,
+          "max_sampled_frame_age_ms": 31,
+          "freeze_events_over_500ms": 0,
+          "smooth": true
+        },
+        {
+          "phase": "backward",
+          "wall_seconds": 15.642928706,
+          "drawn_frames": 375,
+          "rendered_fps": 23.972493070058235,
+          "start_position_ms": 30093,
+          "end_position_ms": 45736,
+          "position_advanced_ms": 15643,
+          "max_sampled_frame_age_ms": 30,
+          "freeze_events_over_500ms": 0,
+          "smooth": true
+        }
+      ],
+      "observed_duration_ms": 5573589,
+      "near_end_target_ms": 5294909,
+      "near_end_seconds": 3.837023405,
+      "backward_target_ms": 30000,
+      "backward_seconds": 0.311400571,
+      "smoke_smooth": true,
+      "presented_frames": 1879,
+      "clean_shutdown": true,
+      "peak_rss_bytes": 7820136448,
+      "cpu_seconds": 62.980000000000004,
+      "peak_cache_allocation_bytes": 169889792,
+      "batch": "hevc-bounded-pair",
+      "selected_file": {
+        "index": 0,
+        "path": "Turbo Kid 2015 1080p BluRay HEVC x265 5.1 BONE.mkv",
+        "length": 1507507710,
+        "hash": "b77a9d14c90da0f0096631605e280e65d6c606f6"
+      },
+      "diagnostic_maxima": {
+        "rebuffers": 0,
+        "audio_underruns": 0,
+        "av_drift_ms": 40
+      },
+      "per_process_peak_rss_bytes": {
+        "VIPTV-Experimen": 7655858176,
+        "sh": 790528,
+        "MainThread": 167063552
+      },
+      "requested_java_heap_option_acknowledged": true
+    }
+  ],
+  "evidence_root": "/mnt/ALPH/.viptv-qa/playback-smoke-20261023-0143",
+  "runner_tests_passed": 32,
+  "batches": [
+    {
+      "directory": "/mnt/ALPH/.viptv-qa/playback-smoke-20261023-0143/candidate-fixed",
+      "run": {
+        "trials": 1,
+        "trial_offset": 0,
+        "states": [
+          "cold"
+        ],
+        "seed": 20261022,
+        "sustained_seconds": 0,
+        "startup_only": false,
+        "playback_smoke": true,
+        "metadata_timeout_ms": 30000,
+        "render_timeout_ms": 30000,
+        "candidate_grace": "0",
+        "candidate_profile": null,
+        "sha256": {
+          "baseline": "bcb96f9fdf47cb236aec7d4824ed9c89a7016e710a2c771f53c7fe9871d78e47",
+          "candidate": "55ae4c16efc8d006605cbea575393760d181fc4296258dc72eb1afc8202ae0f9",
+          "stremio": "08d5510a771c3d07a8b1f9c0e521324551d6055b001c5a56c7a79e3e3e0474ef",
+          "launcher": "51bc95a8ead1e651eba4d5c15113597ef2ba9c989ad25d587132fcc8b60154d6"
+        }
+      },
+      "results_sha256": "e6c2c444bb7559d5d21a6ce9b9c1c910a842c08695c3d881c2968faabe81fc64"
+    },
+    {
+      "directory": "/mnt/ALPH/.viptv-qa/playback-smoke-20261023-0143/hevc-bounded-pair",
+      "run": {
+        "trials": 1,
+        "trial_offset": 0,
+        "states": [
+          "cold"
+        ],
+        "seed": 20261022,
+        "sustained_seconds": 0,
+        "startup_only": false,
+        "playback_smoke": true,
+        "metadata_timeout_ms": 30000,
+        "render_timeout_ms": 30000,
+        "candidate_grace": "0",
+        "candidate_profile": null,
+        "sha256": {
+          "baseline": "bcb96f9fdf47cb236aec7d4824ed9c89a7016e710a2c771f53c7fe9871d78e47",
+          "candidate": "55ae4c16efc8d006605cbea575393760d181fc4296258dc72eb1afc8202ae0f9",
+          "stremio": "08d5510a771c3d07a8b1f9c0e521324551d6055b001c5a56c7a79e3e3e0474ef",
+          "launcher": "51bc95a8ead1e651eba4d5c15113597ef2ba9c989ad25d587132fcc8b60154d6"
+        }
+      },
+      "results_sha256": "efd974893e859c7f89d8bcf31c2dea11dbedc90f50735720fbf658415db97eaf"
+    }
+  ],
+  "summary": {
+    "actual_runs": 5,
+    "candidate_runs": 4,
+    "reference_runs": 1,
+    "strict_smoke_passes": 4,
+    "completed_video_segments": 15,
+    "observed_segment_wall_seconds": 390.473972604,
+    "detected_freeze_events_over_500ms": 0,
+    "minimum_observed_segment_fps": 19.286963448483636,
+    "maximum_sampled_frame_age_ms": 80,
+    "all_requested_seeks_completed": true
+  },
+  "initial_infrastructure_failure": {
+    "reason": "Runner deadline variable was scoped only to reference launches; fixed before any actual playback measurement. Logs preserved, not counted as media trials.",
+    "rows": [
+      {
+        "trial": 0,
+        "case": 0,
+        "engine": "candidate",
+        "state": "cold",
+        "passed": false,
+        "sustained_seconds": 0,
+        "hash": "2770fe270845674966e184be60ed1be0fe494f3a",
+        "label": "Dune Part Two",
+        "dn": "Dune: Part Two 2024 1080p WEBRip",
+        "popularity_label": "POPULAR",
+        "error_type": "UnboundLocalError",
+        "error_detail": "cannot access local variable 'deadline' where it is not associated with a value",
+        "clean_shutdown": false,
+        "peak_rss_bytes": 909312,
+        "cpu_seconds": 0.0,
+        "peak_cache_allocation_bytes": 0
+      },
+      {
+        "trial": 0,
+        "case": 1,
+        "engine": "candidate",
+        "state": "cold",
+        "passed": false,
+        "sustained_seconds": 0,
+        "hash": "e0d00667650aba9ee05aacbbbd8b55ea8a51f534",
+        "label": "Shawshank Redemption",
+        "dn": "The Shawshank Redemption (1994) 1080p BrRip - 1.6GB - YIFY",
+        "popularity_label": "POPULAR",
+        "error_type": "UnboundLocalError",
+        "error_detail": "cannot access local variable 'deadline' where it is not associated with a value",
+        "clean_shutdown": false,
+        "peak_rss_bytes": 0,
+        "cpu_seconds": 0.0,
+        "peak_cache_allocation_bytes": 0
+      },
+      {
+        "trial": 0,
+        "case": 2,
+        "engine": "candidate",
+        "state": "cold",
+        "passed": false,
+        "sustained_seconds": 0,
+        "hash": "b77a9d14c90da0f0096631605e280e65d6c606f6",
+        "label": "Turbo Kid",
+        "dn": "Turbo Kid 2015 1080p BluRay HEVC x265 5.1 BONE",
+        "popularity_label": "NOT POPULAR",
+        "error_type": "UnboundLocalError",
+        "error_detail": "cannot access local variable 'deadline' where it is not associated with a value",
+        "clean_shutdown": false,
+        "peak_rss_bytes": 393216,
+        "cpu_seconds": 0.0,
+        "peak_cache_allocation_bytes": 0
+      }
+    ]
+  },
+  "build_log_sha256": "87bf05d4dc02a1b1655a02876f209c2e599f480d2d88c201be8cc20af0cb5764",
+  "smoke_hook_sha256": "f20be8468fb2eebb325eb4f5233976da69b675c56d7976a1344e1c24aa3d878e",
+  "smoke_main_jar_sha256": "8a981d73ecf436a835ff896f9d30fe021ed3e67b30d211baa9932a4a232f637c",
+  "unchanged_cold_main_jar_sha256": "8a6594947ae403fda60e2bc7b2b5a0eaa17d56c0be6a036058545c4aad715634",
+  "worker_sha256": "55ae4c16efc8d006605cbea575393760d181fc4296258dc72eb1afc8202ae0f9",
+  "reference_sha256": "08d5510a771c3d07a8b1f9c0e521324551d6055b001c5a56c7a79e3e3e0474ef",
+  "managed_jobs": [
+    {
+      "id": "0692f1c4-5db8-42da-9d04-3be8648f08f9",
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "finishedAt": "2026-10-23T01:47:31.219Z"
+    },
+    {
+      "id": "02675c66-3f0a-4ebd-95c8-74312c3f2788",
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "finishedAt": "2026-10-23T01:53:03.805Z"
+    },
+    {
+      "id": "9e08f4ca-1213-483d-9a70-b3734eb0b08c",
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "finishedAt": "2026-10-23T01:58:04.289Z"
+    }
+  ],
+  "matching_file_selection_groups": 3
+}
