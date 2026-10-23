@@ -36,6 +36,7 @@ func TestColdQualificationWorker(t *testing.T) {
 		}
 		defer trace.Close()
 	}
+	profiled := map[*Handle]bool{}
 	fmt.Println(`{"version":2,"ready":true,"qualification":"cold-experiment"}`)
 	for scanner.Scan() {
 		data := append([]byte(nil), scanner.Bytes()...)
@@ -46,6 +47,8 @@ func TestColdQualificationWorker(t *testing.T) {
 			config := *request.Config
 			switch profile {
 			case "current":
+			case "completion-only":
+				config.completionOnly = true
 			case "verified-only":
 				config.verifiedPlaybackOnly = true
 			case "head-only":
@@ -77,6 +80,25 @@ func TestColdQualificationWorker(t *testing.T) {
 			}
 		} else {
 			response = controller.Call(data)
+		}
+		if request.Op == "observe" && trace != nil {
+			h := controller.handles[request.Handle]
+			if h != nil && !profiled[h] {
+				h.mu.Lock()
+				if h.openMedia != nil {
+					h.openMedia = wrapQualificationReader(h.openMedia, func(event map[string]any) {
+						event["elapsed_ms"] = float64(time.Since(h.started).Microseconds()) / 1000
+						if info := h.t.Info(); info != nil {
+							event["piece_bytes"] = info.PieceLength
+						}
+						traceMu.Lock()
+						_ = json.NewEncoder(trace).Encode(event)
+						traceMu.Unlock()
+					})
+					profiled[h] = true
+				}
+				h.mu.Unlock()
+			}
 		}
 		if request.Op == "prepare" && trace != nil {
 			var result reply

@@ -120,7 +120,15 @@ func (r *demandReader) refresh(span pieceWindow) error {
 		return errors.New("reader retired")
 	}
 	for i := span.begin; i < span.end; i++ {
-		r.h.t.Piece(i).UpdateCompletion()
+		if i == span.begin && runtime.repairChunks {
+			offset := (r.file.Offset() + r.position) % r.h.t.Info().PieceLength
+			repaired := r.h.t.Piece(i).UpdateStorageAt(offset, false)
+			if repaired > 0 {
+				r.h.repairedChunks.Add(uint64(repaired))
+			}
+		} else {
+			r.h.t.Piece(i).UpdateCompletion()
+		}
 	}
 	return nil
 }
@@ -160,6 +168,16 @@ func (r *demandReader) updateDemand(span pieceWindow) error {
 	}
 	if !runtime.cache.headsFit(headCost, payloadCost) {
 		return ErrCapacity
+	}
+	// Reconcile stored bytes before publishing a new urgent range. Otherwise a
+	// peer can fill its queue using stale received bits before the first read
+	// discovers the cache hole.
+	if span.begin < span.end && runtime.repairChunks {
+		offset := (r.file.Offset() + r.position) % r.h.t.Info().PieceLength
+		repaired := r.h.t.Piece(span.begin).UpdateStorageAt(offset, !r.early)
+		if repaired > 0 {
+			r.h.repairedChunks.Add(uint64(repaired))
+		}
 	}
 	if span.begin == span.end {
 		delete(runtime.demands, r)

@@ -60,6 +60,7 @@ func (o *requestObservations) closed(peer *torrent.Peer) {
 }
 
 type DemandDiagnostics struct {
+	RepairedChunks          uint64  `json:"repaired_chunks"`
 	HeadPieces              int     `json:"head_pieces"`
 	VerifiedHeadPieces      int     `json:"verified_head_pieces"`
 	WrittenHeadBytes        int64   `json:"written_head_bytes"`
@@ -72,6 +73,7 @@ type DemandDiagnostics struct {
 
 func (h *Handle) DemandDiagnostics() DemandDiagnostics {
 	var out DemandDiagnostics
+	out.RepairedChunks = h.repairedChunks.Load()
 	heads := map[int]bool{}
 	h.r.mu.Lock()
 	for reader, span := range h.r.demands {

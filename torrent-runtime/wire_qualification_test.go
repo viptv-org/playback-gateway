@@ -33,6 +33,7 @@ type wireFixture struct {
 	hash          metainfo.Hash
 	requests      chan int
 	gate          <-chan struct{}
+	firstBlock    uint32
 	corrupt       bool
 	dropHandshake bool
 }
@@ -59,12 +60,16 @@ func wireMetainfo(t *testing.T) ([]byte, []byte, metainfo.Hash) {
 
 func startWireFixture(t *testing.T, data []byte, hash metainfo.Hash, host string, gate <-chan struct{}, corrupt, drop bool) *wireFixture {
 	t.Helper()
+	return startWireFixtureAt(t, data, hash, host, gate, corrupt, drop, 0)
+}
+func startWireFixtureAt(t *testing.T, data []byte, hash metainfo.Hash, host string, gate <-chan struct{}, corrupt, drop bool, firstBlock uint32) *wireFixture {
+	t.Helper()
 	listener, err := net.Listen("tcp4", host+":0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	f := &wireFixture{listener: listener, ctx: ctx, cancel: cancel, data: data, hash: hash, requests: make(chan int, 64), gate: gate, corrupt: corrupt, dropHandshake: drop}
+	f := &wireFixture{listener: listener, ctx: ctx, cancel: cancel, data: data, hash: hash, requests: make(chan int, 64), gate: gate, corrupt: corrupt, dropHandshake: drop, firstBlock: firstBlock}
 	f.joined.Add(1)
 	go func() {
 		defer f.joined.Done()
@@ -107,6 +112,7 @@ func (f *wireFixture) serve(conn net.Conn) {
 	}
 	clear(handshake[20:28])
 	copy(handshake[48:], []byte("-VTRQA1-owned-peer00"))
+	binary.BigEndian.PutUint16(handshake[66:], uint16(conn.LocalAddr().(*net.TCPAddr).Port))
 	if _, err := conn.Write(handshake[:]); err != nil {
 		return
 	}
@@ -142,7 +148,7 @@ func (f *wireFixture) serve(conn net.Conn) {
 		case f.requests <- int(begin):
 		default:
 		}
-		if begin != 0 && f.gate != nil {
+		if begin != f.firstBlock && f.gate != nil {
 			select {
 			case <-f.gate:
 			case <-f.ctx.Done():

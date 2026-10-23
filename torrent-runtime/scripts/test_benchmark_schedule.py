@@ -87,6 +87,17 @@ class ScheduleTests(unittest.TestCase):
         row['playback_phases'][0]['wall_seconds'] = 1
         self.assertFalse(benchmark.complete_playback_smoke(row))
 
+    def test_seek_screen_requires_real_far_seek_and_sustained_destination_frames(self):
+        self.assertFalse(benchmark.complete_seek_screen(dict(passed=True, forward_seconds=.1, backward_seconds=.1)))
+        phase=dict(seconds=3.1,rendered_fps=24,freeze_samples=0,position_advanced_ms=3000)
+        row=dict(observed_duration_ms=200000,forward_target_ms=190000,backward_target_ms=10000,
+                 forward_seconds=.1,backward_seconds=.1,forward_playback=phase.copy(),backward_playback=phase.copy())
+        self.assertTrue(benchmark.complete_seek_screen(row))
+        for field,value in [('seconds',2),('rendered_fps',float('nan')),('freeze_samples',1),('position_advanced_ms',0)]:
+            changed={**row,'forward_playback':{**phase,field:value}}
+            self.assertFalse(benchmark.complete_seek_screen(changed))
+        self.assertFalse(benchmark.complete_seek_screen({**row,'forward_target_ms':120000}))
+
 
 if __name__ == "__main__":
     unittest.main()

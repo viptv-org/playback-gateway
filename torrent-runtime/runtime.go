@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 )
 
 type Config struct {
+	completionOnly       bool   // Private qualification control; never serialized.
 	CacheDir             string `json:"cache_dir"`
 	CacheBytes           int64  `json:"cache_bytes"`
 	ReadaheadBytes       int64  `json:"readahead_bytes"`
@@ -76,6 +78,7 @@ type Runtime struct {
 	refs             map[*torrent.Torrent]int
 	demands          map[*demandReader]pieceWindow
 	priorities       map[*torrent.Torrent]map[int]torrent.PiecePriority
+	repairChunks     bool
 	readAhead        int64
 	startupReadAhead int64
 	closed           bool
@@ -91,27 +94,28 @@ type Runtime struct {
 }
 
 type Handle struct {
-	mu           sync.Mutex
-	r            *Runtime
-	t            *torrent.Torrent
-	file         *torrent.File
-	openMedia    func(context.Context) (io.ReadSeekCloser, error)
-	token        string
-	ctx          context.Context
-	cancel       context.CancelFunc
-	done         chan struct{}
-	once         sync.Once
-	progress     Progress
-	expires      time.Time
-	started      time.Time
-	progressAt   time.Time
-	firstFrame   bool
-	connected    bool
-	startedBoot  int64
-	progressBoot int64
-	expiresBoot  int64
-	primeCancel  context.CancelFunc
-	consumed     []byteSpan
+	mu             sync.Mutex
+	r              *Runtime
+	t              *torrent.Torrent
+	file           *torrent.File
+	openMedia      func(context.Context) (io.ReadSeekCloser, error)
+	token          string
+	ctx            context.Context
+	cancel         context.CancelFunc
+	done           chan struct{}
+	once           sync.Once
+	progress       Progress
+	expires        time.Time
+	started        time.Time
+	progressAt     time.Time
+	firstFrame     bool
+	repairedChunks atomic.Uint64
+	connected      bool
+	startedBoot    int64
+	progressBoot   int64
+	expiresBoot    int64
+	primeCancel    context.CancelFunc
+	consumed       []byteSpan
 }
 
 func New(cfg Config) (*Runtime, error) { return newRuntime(cfg, false) }
@@ -141,6 +145,7 @@ func newRuntime(cfg Config, privateFixture bool) (*Runtime, error) {
 	}
 	readAhead = min(readAhead, c.limit/4)
 	r := &Runtime{cache: c, handles: map[string]*Handle{}, retiring: map[*Handle]chan struct{}{}, shutdownDone: make(chan struct{}), refs: map[*torrent.Torrent]int{}, demands: map[*demandReader]pieceWindow{}, priorities: map[*torrent.Torrent]map[int]torrent.PiecePriority{}, readAhead: readAhead, privateFixture: privateFixture}
+	r.repairChunks = !cfg.completionOnly
 	r.primeHeaders = cfg.primeHeaders
 	r.earlyPlayback = !cfg.verifiedPlaybackOnly
 	r.primeHeadOnly = cfg.primeHeadOnly

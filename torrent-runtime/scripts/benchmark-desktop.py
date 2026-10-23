@@ -83,6 +83,20 @@ def complete_playback_smoke(row):
             and row.get("near_end_seconds") is not None and row.get("backward_seconds") is not None)
 
 
+def complete_seek_screen(row):
+    duration = row.get('observed_duration_ms', 0)
+    if duration <= 120000 or row.get('forward_target_ms') != duration*95//100 or row.get('backward_target_ms') != 10000:
+        return False
+    for name in ['forward', 'backward']:
+        phase = row.get(name+'_playback', {})
+        seconds = phase.get('seconds', 0)
+        fps = phase.get('rendered_fps', 0)
+        if not all(isinstance(x, (int,float)) and screen.math.isfinite(x) for x in [seconds, fps]): return False
+        if seconds < 3 or fps < 20 or phase.get('freeze_samples') != 0 or phase.get('position_advanced_ms', 0) < 2400: return False
+        if not isinstance(row.get(name+'_seconds'), (int,float)) or not screen.math.isfinite(row[name+'_seconds']) or row[name+'_seconds'] <= 0: return False
+    return True
+
+
 class Resources:
     """Sample only the owned JVM and its descendants; never capture commands/URLs."""
     def __init__(self, process, cache):
@@ -143,6 +157,7 @@ def main():
     parser.add_argument("--engines", nargs="+", choices=["baseline", "candidate", "stremio"], default=["baseline", "candidate", "stremio"])
     parser.add_argument("--sustained", type=int, default=0)
     parser.add_argument("--startup-only", action="store_true", help="Measure first rendered frame without seek trials")
+    parser.add_argument("--seek-screen", action="store_true", help="Quick 95%%/back seeks with three seconds of playback after each")
     parser.add_argument("--playback-smoke", action="store_true", help="45s playback, 95%% seek and 30s backward seek, with 15s playback after each")
     parser.add_argument("--candidate-grace", default="0")
     parser.add_argument("--candidate-profile", help="Test-only cold worker tuning profile")
@@ -153,6 +168,8 @@ def main():
         parser.error('--corpus and --magnets are mutually exclusive')
     if args.startup_only and args.states != ['cold']:
         parser.error('--startup-only requires --states cold')
+    if args.seek_screen and (args.startup_only or args.playback_smoke or args.states != ['cold']):
+        parser.error('--seek-screen requires cold and excludes other screen modes')
     if args.playback_smoke and (args.startup_only or args.states != ['cold']):
         parser.error('--playback-smoke requires --states cold and cannot use --startup-only')
     if len(args.states) != len(set(args.states)) or ('cold' in args.states and args.states[0] != 'cold'):
@@ -195,6 +212,7 @@ def main():
                     raise RuntimeError('cold trial cache already exists')
                 case = cases[ordinal]
                 spec = {"result": str(result), "cache": str(cache), "timeout_ms": args.timeout*1000, "sustained_seconds": args.sustained}
+                spec['seek_screen'] = args.seek_screen
                 spec['startup_only'] = args.startup_only
                 spec['smoothness_smoke'] = args.playback_smoke
                 if engine == "stremio":
@@ -235,6 +253,8 @@ def main():
                         if process.returncode != 0 or not result.is_file(): raise RuntimeError("player_exited")
                         if args.playback_smoke and row.get('passed') and not complete_playback_smoke(row):
                             raise RuntimeError('missing_playback_smoke_measurements')
+                        if args.seek_screen and row.get('passed') and not complete_seek_screen(row):
+                            raise RuntimeError('missing_seek_screen_measurements')
                         row["clean_shutdown"] = True
                     except Exception as error:
                         row["error_type"] = type(error).__name__; row["error_detail"] = str(error)[:300]; row["passed"] = False

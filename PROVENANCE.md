@@ -13,7 +13,7 @@ source under `torrent-runtime/third_party/torrent`, with local changes to
 `PeerConn.nominalMaxRequests` and `PeerConn.applyRequestState`: a larger adaptive
 pipeline is enabled after useful payload arrives, and sampled queue completion
 rates guide reassignment after both peers have supplied four useful chunks. The upstream license and attribution are retained;
-`VIPTV_PATCH.md` documents the delta. The local replacement is pinned by the
+`VIPTV_PATCH.md` documents the delta, including stored-chunk reconciliation for return seeks and the client-lock correction for concurrent peer diagnostics. The local replacement is pinned by the
 runtime source revision; `go.sum` continues to record the upstream module checksums.
 A custom demand reader preserves bounded-cache cancellation because a separate
 upstream capped-reader cancellation issue remains. Persisted reusable data stays

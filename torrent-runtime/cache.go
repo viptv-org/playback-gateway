@@ -767,3 +767,21 @@ func (c *Cache) Close() error {
 	close(c.closeDone)
 	return c.closeErr
 }
+
+// HasData reports actual in-process byte coverage, not verified completion.
+// The torrent scheduler uses this only to forget received bits for discarded
+// writes. It never grants read access or marks reusable data verified.
+func (p *cachePiece) HasData(off, length int64) bool {
+	c := p.c
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e := c.entries[p.key]
+	if c.closed || c.failed || *p.ownerClosed || e == nil || e.evicting || off < 0 || length <= 0 || off > e.length-length {
+		return false
+	}
+	if e.complete {
+		return true
+	}
+	i := sort.Search(len(e.writes), func(i int) bool { return e.writes[i].end > off })
+	return i < len(e.writes) && e.writes[i].start <= off && e.writes[i].end >= off+length
+}

@@ -291,6 +291,8 @@ func (t *Torrent) Closed() events.Done {
 // KnownSwarm returns the known subset of the peers in the Torrent's swarm, including active,
 // pending, and half-open peers.
 func (t *Torrent) KnownSwarm() (ks []PeerInfo) {
+	t.cl.rLock()
+	defer t.cl.rUnlock()
 	// Add pending peers to the list
 	t.peers.Each(func(peer PeerInfo) {
 		ks = append(ks, peer)
@@ -304,8 +306,6 @@ func (t *Torrent) KnownSwarm() (ks []PeerInfo) {
 	}
 
 	// Add active peers to the list
-	t.cl.rLock()
-	defer t.cl.rUnlock()
 	for conn := range t.conns {
 		ks = append(ks, PeerInfo{
 			Id:     conn.PeerID,
