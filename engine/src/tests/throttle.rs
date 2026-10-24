@@ -271,8 +271,14 @@ fn vod_prefix_cleanup_trails_the_furthest_fetch_without_repeats() {
     throttle.apply_playlist(&playlist);
     let pending = throttle.take_pending_deletions();
     assert_eq!(pending.len(), 50);
-    assert_eq!(pending.first().map(String::as_str), Some("segment-000000000.ts"));
-    assert_eq!(pending.last().map(String::as_str), Some("segment-000000049.ts"));
+    assert_eq!(
+        pending.first().map(String::as_str),
+        Some("segment-000000000.ts")
+    );
+    assert_eq!(
+        pending.last().map(String::as_str),
+        Some("segment-000000049.ts")
+    );
     // Re-applying the same playlist must not queue the same files again.
     throttle.apply_playlist(&playlist);
     assert!(throttle.take_pending_deletions().is_empty());
@@ -280,7 +286,10 @@ fn vod_prefix_cleanup_trails_the_furthest_fetch_without_repeats() {
     throttle.observe("segment-000000090.ts");
     throttle.apply_playlist(&playlist);
     let pending = throttle.take_pending_deletions();
-    assert_eq!(pending.first().map(String::as_str), Some("segment-000000050.ts"));
+    assert_eq!(
+        pending.first().map(String::as_str),
+        Some("segment-000000050.ts")
+    );
 }
 
 #[test]
@@ -297,5 +306,32 @@ fn fragmented_mp4_segments_count_toward_throttle_and_cleanup() {
     assert!(
         !throttle.take_pending_deletions().is_empty(),
         "fMP4 VOD sessions reclaim the watched prefix too"
+    );
+}
+
+#[test]
+fn completed_long_features_still_reclaim_after_a_deep_seek() {
+    let mut throttle = Throttle::on_demand();
+    // A two-hour feature is thousands of segments; the timeline must outlive
+    // any fixed tail window or a deep seek in a completed playlist would stall
+    // prefix cleanup for the rest of the session.
+    let mut playlist = String::from("#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-ENDLIST\n");
+    let mut body = String::new();
+    for i in 0..4000u64 {
+        body.push_str(&format!("#EXTINF:2.000000,\nsegment-{i:09}.ts\n"));
+    }
+    playlist.push_str(&body);
+    throttle.apply_playlist(&playlist);
+    throttle.observe("segment-000000200.ts");
+    throttle.apply_playlist(&playlist);
+    let pending = throttle.take_pending_deletions();
+    assert_eq!(
+        pending.len(),
+        170,
+        "ends 2..=340s lie behind the 342s watermark"
+    );
+    assert_eq!(
+        pending.last().map(String::as_str),
+        Some("segment-000000169.ts")
     );
 }

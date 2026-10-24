@@ -124,10 +124,9 @@ impl Throttle {
                 duration = 0.0;
             }
         }
-        if let Some(last) = self.last_segment {
-            self.timeline
-                .retain(|index, _| *index >= last.saturating_sub(256));
-        }
+        // Keep the whole timeline: a completed long feature is still only a
+        // few thousand entries, and a late fetch of any listed segment must
+        // resolve its end time or prefix cleanup would stall forever.
         // Reclaim the contiguous watched prefix. A file leaves only after its
         // media ended a full grace period behind the furthest fetch, so a
         // viewer's buffered media is never pulled from under it.

@@ -647,16 +647,47 @@ async fn a_completed_fast_copy_keeps_its_whole_playlist() {
     // tracks and one-second keyframes, so the copy cuts one-second segments.
     let status = Command::new(&ffmpeg)
         .args([
-            "-v", "error",
-            "-f", "lavfi", "-i", "testsrc=size=640x360:rate=30",
-            "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
-            "-f", "lavfi", "-i", "sine=frequency=880:sample_rate=48000",
-            "-t", "90",
-            "-map", "0:v:0", "-map", "1:a:0", "-map", "2:a:0",
-            "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
-            "-g", "30", "-keyint_min", "30", "-sc_threshold", "0",
-            "-force_key_frames", "expr:gte(t,n_forced*1)",
-            "-c:a", "aac", "-ac", "2", "-shortest",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=640x360:rate=30",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=48000",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=880:sample_rate=48000",
+            "-t",
+            "90",
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-map",
+            "2:a:0",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-pix_fmt",
+            "yuv420p",
+            "-g",
+            "30",
+            "-keyint_min",
+            "30",
+            "-sc_threshold",
+            "0",
+            "-force_key_frames",
+            "expr:gte(t,n_forced*1)",
+            "-c:a",
+            "aac",
+            "-ac",
+            "2",
+            "-shortest",
         ])
         .arg(&fixture)
         .status()
@@ -664,14 +695,28 @@ async fn a_completed_fast_copy_keeps_its_whole_playlist() {
         .unwrap();
     assert!(status.success());
     let probe = Command::new(&ffprobe)
-        .args(["-v", "error", "-show_entries", "format=duration", "-of", "json"])
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "json",
+        ])
         .arg(&fixture)
         .output()
         .await
         .unwrap();
     let probed: serde_json::Value = serde_json::from_slice(&probe.stdout).unwrap();
-    let duration: f64 = probed["format"]["duration"].as_str().unwrap().parse().unwrap();
-    assert!((89.0..=91.0).contains(&duration), "fixture duration: {duration}");
+    let duration: f64 = probed["format"]["duration"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(
+        (89.0..=91.0).contains(&duration),
+        "fixture duration: {duration}"
+    );
 
     let bytes = tokio::fs::read(&fixture).await.unwrap();
     let router = axum::Router::new().route(
@@ -738,7 +783,11 @@ async fn a_completed_fast_copy_keeps_its_whole_playlist() {
         .lines()
         .filter(|line| media_type(line) == Some("video/mp2t"))
         .collect();
-    assert_eq!(segments.first(), Some(&"segment-000000000.ts"), "{playlist}");
+    assert_eq!(
+        segments.first(),
+        Some(&"segment-000000000.ts"),
+        "{playlist}"
+    );
     let advertised: f64 = playlist
         .lines()
         .filter_map(|line| line.strip_prefix("#EXTINF:"))
@@ -757,7 +806,10 @@ async fn a_completed_fast_copy_keeps_its_whole_playlist() {
     // Prefix cleanup trails the viewer's furthest fetch, even after the
     // producer has exited: disk stays bounded during long viewing.
     let last = segments.last().unwrap().to_owned();
-    manager.serve(&response.id, &capability, last).await.unwrap();
+    manager
+        .serve(&response.id, &capability, last)
+        .await
+        .unwrap();
     tokio::time::sleep(Duration::from_millis(700)).await;
     let dir = root.path().join("media").join(&response.id);
     assert!(
