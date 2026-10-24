@@ -14,7 +14,7 @@ FROM debian:trixie-slim AS media-build
 ARG FFMPEG_VERSION=9.0.2
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential pkg-config nasm curl ca-certificates gnupg xz-utils \
-    libgnutls28-dev libx264-dev libzimg-dev libva-dev libdrm-dev libvpl-dev \
+    libgnutls28-dev libx264-dev libzimg-dev libva-dev libdrm-dev libvpl-dev libxml2-dev libdav1d-dev \
     && apt-get clean
 WORKDIR /src
 RUN curl --fail --silent --show-error --location https://ffmpeg.org/ffmpeg-devel.asc -o release-key.asc \
@@ -25,12 +25,12 @@ RUN curl --fail --silent --show-error --location https://ffmpeg.org/ffmpeg-devel
     && tar -xf ffmpeg.tar.xz --strip-components=1 \
     && ./configure --prefix=/opt/ffmpeg --disable-debug --disable-doc --disable-ffplay \
        --disable-autodetect --enable-gpl --enable-gnutls --enable-libx264 --enable-libzimg \
-       --enable-vaapi --enable-libdrm --enable-libvpl \
+       --enable-vaapi --enable-libdrm --enable-libvpl --enable-libxml2 --enable-libdav1d \
     && make -j4 && make install
 
 FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl libgnutls30t64 libx264-164 libzimg2 libva2 libva-drm2 libdrm2 libvpl2 \
+    ca-certificates curl libgnutls30t64 libx264-164 libzimg2 libva2 libva-drm2 libdrm2 libvpl2 libxml2 libdav1d7 \
     mesa-va-drivers intel-media-va-driver \
     && apt-get clean \
     && groupadd --gid 10001 gateway && useradd --uid 10001 --gid gateway --no-create-home gateway \
