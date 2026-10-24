@@ -109,7 +109,9 @@ impl PlaybackManager {
         if selection
             .audio_track_index
             .is_some_and(|index| index > 65535)
-            || selection.required_audio_index.is_some_and(|index| index > 65535)
+            || selection
+                .required_audio_index
+                .is_some_and(|index| index > 65535)
         {
             return Err("Requested input audio track index is out of range".into());
         }
@@ -523,12 +525,14 @@ impl PlaybackManager {
         let hdr_transfer = probe.hdr_transfer()?;
         let hdr = hdr_transfer.is_some();
         let interlaced = probe.interlaced();
+        let automatic_deinterlace = probe.frame_interlace_detection_needed();
+        let deinterlace_needed = interlaced || automatic_deinterlace;
         let mut transforms = Vec::new();
         // A GPU tone mapper replaces only the HDR step; deinterlacing stays on the CPU.
         let mut deinterlace = None;
-        if interlaced || hdr {
+        if deinterlace_needed || hdr {
             let filters = self.available_filters().await?;
-            if interlaced {
+            if deinterlace_needed {
                 let filter = if filters.contains("bwdif") {
                     "bwdif"
                 } else if filters.contains("yadif") {
@@ -538,8 +542,13 @@ impl PlaybackManager {
                         "Interlaced playback requires the bwdif or yadif FFmpeg filter".into(),
                     );
                 };
+                let deint = if automatic_deinterlace {
+                    "interlaced"
+                } else {
+                    "all"
+                };
                 let filter =
-                    format!("{filter}=mode=send_frame:parity=auto:deint=all,setfield=prog");
+                    format!("{filter}=mode=send_frame:parity=auto:deint={deint},setfield=prog");
                 transforms.push(filter.clone());
                 deinterlace = Some(filter);
             }
@@ -692,7 +701,7 @@ impl PlaybackManager {
                 } else {
                     "mpegts"
                 },
-                if copy_video && caps.browser.is_none() {
+                if copy_video && caps.browser.is_none() && !live {
                     "split"
                 } else {
                     "keyframes"
@@ -754,8 +763,13 @@ impl PlaybackManager {
             } else {
                 self.accel().await
             };
-            let mut pipeline =
-                hardware::plan(copy_video, accel, probe.video()?, hdr_transfer, interlaced);
+            let mut pipeline = hardware::plan(
+                copy_video,
+                accel,
+                probe.video()?,
+                hdr_transfer,
+                deinterlace_needed,
+            );
             let tone_map = hardware::tone_map(accel.vaapi, hdr_transfer);
             let engine_started = Instant::now();
             loop {
@@ -797,15 +811,10 @@ impl PlaybackManager {
                 let mut network_input = String::new();
                 if let Some(ingest) = &session.ingest {
                     contain_media_process(&mut cmd);
-                    // Trusted generated playlist only. Provider protocols and
-                    // credentials cannot leak into local output readers.
                     cmd.args([
                         "-protocol_whitelist",
                         "file",
                         "-allowed_extensions",
-                        // FFmpeg 9 applies this allowlist to live playlist
-                        // reloads as well as segments. Both are gateway-owned
-                        // files; network protocols remain disabled above.
                         ingest.extensions(),
                         "-live_start_index",
                         "-2",
@@ -871,7 +880,11 @@ impl PlaybackManager {
             );
                     let filter = match pipeline {
                         hardware::Pipeline::QsvDecode => {
-                            hardware::scale(probe.video()?, width, height)
+                            if hdr {
+                                hardware::qsv_hdr_filter(probe.video()?, &transforms.join(","))
+                            } else {
+                                hardware::scale(probe.video()?, width, height)
+                            }
                         }
                         hardware::Pipeline::QsvEncode => format!(
                             "{},format=nv12,hwupload=extra_hw_frames=64",
@@ -1087,9 +1100,29 @@ impl PlaybackManager {
                             "v:0,{audio_map}s:0,sgroup:subs,language:{language}"
                         ));
                 }
-                let initial_segment_seconds = HLS_INITIAL_SEGMENT_SECONDS.to_string();
+                let selected_index = selected_audio.as_ref().map(|audio| audio.input_index);
+                let initial_segment_seconds = hls::initial_segment_seconds(&probe, selected_index)
+                    .max(
+                        session
+                            .ingest
+                            .as_ref()
+                            .map(|ingest| ingest.initial_segment_seconds(selected_index))
+                            .unwrap_or(HLS_INITIAL_SEGMENT_SECONDS),
+                    )
+                    .to_string();
                 let segment_seconds = HLS_SEGMENT_SECONDS.to_string();
-                let list_size = (HLS_WINDOW_SECONDS / HLS_SEGMENT_SECONDS).to_string();
+                // Live readers may join anywhere, so live keeps a rolling
+                // window. VOD readers start at segment zero: an on-demand
+                // producer can finish faster than one throttle tick, and a
+                // sliding window would publish a completed playlist with its
+                // prefix missing. VOD lists everything it has produced; the
+                // throttle bounds how far production runs ahead of the viewer
+                // and reclaims watched prefix files itself.
+                let list_size = if live {
+                    (HLS_WINDOW_SECONDS / HLS_SEGMENT_SECONDS).to_string()
+                } else {
+                    "0".to_owned()
+                };
                 let delete_threshold = (HLS_DELETE_GRACE_SECONDS / HLS_SEGMENT_SECONDS).to_string();
                 cmd.args([
                     "-max_muxing_queue_size",
@@ -1101,12 +1134,28 @@ impl PlaybackManager {
                 ]);
                 let hls_flags = if copy_video {
                     if caps.browser.is_some() {
-                        "delete_segments+temp_file+independent_segments"
+                        if live {
+                            "delete_segments+temp_file+independent_segments"
+                        } else {
+                            "temp_file+independent_segments"
+                        }
                     } else {
-                        "delete_segments+temp_file+split_by_time"
-                    } // Preserve the legacy delivery contract during rollout.
-                } else {
+                        if live {
+                            // A live reader may join at any advertised fragment.
+                            // Keep complete GOPs and decoder headers at each join.
+                            "delete_segments+temp_file"
+                        } else {
+                            // VOD starts at segment zero and decodes continuously.
+                            // Retain short time slices without claiming independent
+                            // segments: scene-dependent GOP lengths must not change
+                            // TARGETDURATION after the first playlist was served.
+                            "temp_file+split_by_time"
+                        }
+                    }
+                } else if live {
                     "delete_segments+temp_file"
+                } else {
+                    "temp_file"
                 };
                 let fmp4_hls = (!copy_video || hevc_copy)
                     && selected_subtitle.is_none()
@@ -1119,50 +1168,74 @@ impl PlaybackManager {
                         "init.mp4",
                     ]);
                 }
-                cmd.args([
-                    "-hls_time",
-                    &segment_seconds,
-                    "-hls_list_size",
-                    &list_size,
-                    "-hls_delete_threshold",
-                    &delete_threshold,
-                    "-hls_flags",
-                    hls_flags,
-                    "-hls_segment_filename",
-                ]);
+                cmd.args(["-hls_time", &segment_seconds, "-hls_list_size", &list_size]);
+                if live {
+                    cmd.args(["-hls_delete_threshold", &delete_threshold]);
+                }
+                cmd.args(["-hls_flags", hls_flags, "-hls_segment_filename"]);
                 cmd.arg(dir.join(if fmp4_hls {
                     "segment-%09d.m4s"
                 } else {
                     "segment-%09d.ts"
                 }))
                 .arg(dir.join("index.m3u8"));
+                let mut output_changes = output_changes::OutputChanges::new(&dir);
                 session.child = Some(
                     cmd.spawn()
                         .map_err(|_| "Playback engine unavailable".to_owned())?,
                 );
-                // Do not return a URL until both the playlist and first segment exist.
-                let ready = timeout(Duration::from_secs(if pipeline.accelerated() { 12 } else { 30 }), async {
-            loop {
-                if !cache_safe(&dir, false).await {
-                    return false;
-                }
-                if let Some(child) = session.child.as_mut() {
-                    if let Ok(Some(status)) = child.try_wait() {
-                        if !status.success() {
-                            tracing::warn!(exit_code = ?status.code(), "Playback engine startup failed");
-                            return false;
+                let started_wall_ns = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos() as u64;
+                tracing::info!(
+                    process_id = session.child.as_ref().and_then(|child| child.id()),
+                    output_id = %id,
+                    ingest_id = session.ingest.as_ref().and_then(|ingest| ingest.playlist.parent()?.file_name()?.to_str()),
+                    started_wall_ns,
+                    "Playback producer launched"
+                );
+                // Publish enough media for the reader's first playlist reload.
+                let ready = timeout(
+                    Duration::from_secs(if pipeline.accelerated() { 12 } else { 30 }),
+                    async {
+                        loop {
+                            if !cache_safe(&dir, false).await {
+                                return false;
+                            }
+                            if let Some(child) = session.child.as_mut() {
+                                if let Ok(Some(status)) = child.try_wait() {
+                                    if !status.success() {
+                                        tracing::warn!(exit_code = ?status.code(), "Playback engine startup failed");
+                                        return false;
+                                    }
+                                    return if shared_captions {
+                                        hls::shared_caption_ready(&dir, selected_subtitle.as_ref()).await
+                                    } else {
+                                        playback_ready(&dir, selected_subtitle.as_ref()).await
+                                    };
+                                }
+                            }
+                            if let Some(buffer) = hls::startup_buffer(&dir, live).await {
+                                let playable = if shared_captions {
+                                    hls::shared_caption_ready(&dir, selected_subtitle.as_ref()).await
+                                } else {
+                                    playback_ready(&dir, selected_subtitle.as_ref()).await
+                                };
+                                if playable {
+                                    let epoch = std::time::UNIX_EPOCH;
+                                    let published_wall_ns = buffer.published_at.and_then(|t| t.duration_since(epoch).ok()).map(|d| d.as_nanos() as u64);
+                                    let detected_wall_ns = std::time::SystemTime::now().duration_since(epoch).ok().map(|d| d.as_nanos() as u64);
+                                    tracing::info!(output_id=%id, published_wall_ns, detected_wall_ns, live, "Playback output detected");
+                                    return true;
+                                }
+                            }
+                            output_changes.wait().await;
                         }
-                        return if shared_captions {hls::shared_caption_ready(&dir,selected_subtitle.as_ref()).await} else {playback_ready(&dir, selected_subtitle.as_ref()).await};
-                    }
-                }
-                if if shared_captions {hls::shared_caption_ready(&dir,selected_subtitle.as_ref()).await} else {playback_ready(&dir, selected_subtitle.as_ref()).await} {
-                    return true;
-                }
-                sleep(Duration::from_millis(150)).await;
-            }
-        })
-        .await
-        .unwrap_or(false);
+                    },
+                )
+                .await
+                .unwrap_or(false);
                 if ready {
                     break;
                 }

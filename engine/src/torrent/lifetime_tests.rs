@@ -1,5 +1,4 @@
 use super::*;
-use std::net::SocketAddr;
 use librqbit::{
     storage::{
         filesystem::{FilesystemStorage, FilesystemStorageFactory},
@@ -7,6 +6,7 @@ use librqbit::{
     },
     AddTorrent, AddTorrentOptions, ManagedTorrentShared, Session, SessionOptions, TorrentMetadata,
 };
+use std::net::SocketAddr;
 use std::{
     path::Path,
     sync::{

@@ -160,12 +160,19 @@ pub(super) struct SharedIngest {
     indices: BTreeMap<u32, u32>,
     kind: ReplayKind,
     pub(super) captions: Option<Arc<captions::Captions>>,
+    initial_segments: BTreeMap<u32, u32>,
     running: Arc<std::sync::atomic::AtomicBool>,
     cancel: Option<tokio::sync::oneshot::Sender<()>>,
     task: Option<tokio::task::JoinHandle<()>>,
     cleanup_tasks: CleanupTasks,
 }
+
 impl SharedIngest {
+    pub(super) fn initial_segment_seconds(&self, audio_index: Option<u32>) -> u32 {
+        audio_index
+            .and_then(|index| self.initial_segments.get(&index).copied())
+            .unwrap_or(HLS_INITIAL_SEGMENT_SECONDS)
+    }
     pub(super) fn extensions(&self) -> &'static str {
         self.kind.extensions()
     }
@@ -435,7 +442,17 @@ impl PlaybackManager {
             Some(cache) => Some(captions::Pipes::attach(&mut cmd, &probe, cache.clone())?),
             None => None,
         };
+        let mut changes = output_changes::OutputChanges::new(&dir);
         session.child = Some(cmd.spawn().map_err(|_| "Playback engine unavailable")?);
+        let started_wall_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+        tracing::info!(
+            process_id = session.child.as_ref().and_then(|child| child.id()),
+            started_wall_ns,
+            "Playback producer launched"
+        );
         #[cfg(target_os = "linux")]
         if let Some(pipes) = &mut caption_pipes {
             pipes.spawned();
@@ -461,7 +478,7 @@ impl PlaybackManager {
                 if ready {
                     return true;
                 }
-                sleep(Duration::from_millis(100)).await;
+                changes.wait().await;
             }
         })
         .await
@@ -495,6 +512,17 @@ impl PlaybackManager {
         let child = inspect
             .spawn()
             .map_err(|_| "Replay inspection unavailable")?;
+        tracing::info!(
+            process_id = child.id(),
+            inspection_profile = "local_replay_streams_v1",
+            inspection_program = %self.config.ffprobe.display(),
+            allowed_extensions = kind.extensions(),
+            ingest_id = playlist
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|p| p.to_str()),
+            "Replay inspection launched"
+        );
         let mut guard = ProbeChild {
             child: Some(child),
             permits: Some(session.permits.clone()),
@@ -541,6 +569,15 @@ impl PlaybackManager {
         {
             return Err("Replay stream mapping changed".into());
         }
+        let initial_segments = indices
+            .iter()
+            .map(|(original, local)| {
+                (
+                    *original,
+                    hls::initial_segment_seconds(&replay, Some(*local)),
+                )
+            })
+            .collect();
         let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
         let alive = running.clone();
         let (cancel, mut cancelled) = tokio::sync::oneshot::channel();
@@ -581,6 +618,7 @@ impl PlaybackManager {
             indices,
             kind,
             captions,
+            initial_segments,
             running,
             cancel: Some(cancel),
             task: Some(task),

@@ -252,3 +252,50 @@ async fn on_demand_encoding_pauses_ahead_of_the_viewer_and_resumes() {
     server.abort();
     let _ = server.await;
 }
+
+#[test]
+fn vod_prefix_cleanup_trails_the_furthest_fetch_without_repeats() {
+    let mut throttle = Throttle::on_demand();
+    let mut playlist = String::from("#EXTM3U\n#EXT-X-TARGETDURATION:2\n");
+    for i in 0..100u64 {
+        playlist.push_str(&format!("#EXTINF:2.000000,\nsegment-{i:09}.ts\n"));
+    }
+    throttle.apply_playlist(&playlist);
+    assert!(
+        throttle.take_pending_deletions().is_empty(),
+        "nothing is reclaimed before the viewer fetches"
+    );
+    // A deep fetch marks ~162s consumed; only media ending more than the
+    // grace period behind it (end < 102s, segments 0..=49) is reclaimed.
+    throttle.observe("segment-000000080.ts");
+    throttle.apply_playlist(&playlist);
+    let pending = throttle.take_pending_deletions();
+    assert_eq!(pending.len(), 50);
+    assert_eq!(pending.first().map(String::as_str), Some("segment-000000000.ts"));
+    assert_eq!(pending.last().map(String::as_str), Some("segment-000000049.ts"));
+    // Re-applying the same playlist must not queue the same files again.
+    throttle.apply_playlist(&playlist);
+    assert!(throttle.take_pending_deletions().is_empty());
+    // Catching up reclaims the next contiguous prefix only.
+    throttle.observe("segment-000000090.ts");
+    throttle.apply_playlist(&playlist);
+    let pending = throttle.take_pending_deletions();
+    assert_eq!(pending.first().map(String::as_str), Some("segment-000000050.ts"));
+}
+
+#[test]
+fn fragmented_mp4_segments_count_toward_throttle_and_cleanup() {
+    assert_eq!(segment_number("segment-000000012.m4s"), Some(12));
+    assert_eq!(segment_number("init.mp4"), None);
+    let mut throttle = Throttle::on_demand();
+    let mut playlist = String::from("#EXTM3U\n#EXT-X-TARGETDURATION:2\n");
+    for i in 0..80u64 {
+        playlist.push_str(&format!("#EXTINF:2.000000,\nsegment-{i:09}.m4s\n"));
+    }
+    throttle.observe("segment-000000070.m4s");
+    throttle.apply_playlist(&playlist);
+    assert!(
+        !throttle.take_pending_deletions().is_empty(),
+        "fMP4 VOD sessions reclaim the watched prefix too"
+    );
+}

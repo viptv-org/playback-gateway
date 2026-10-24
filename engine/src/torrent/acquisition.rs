@@ -950,11 +950,11 @@ impl Drop for TorrentAcquisition {
 #[cfg(all(test, feature = "test-network-policy"))]
 mod tests {
     use super::*;
-    use std::net::SocketAddr;
     use librqbit::storage::{
         filesystem::{FilesystemStorage, FilesystemStorageFactory},
         BoxStorageFactory, StorageFactory, StorageFactoryExt, TorrentStorage,
     };
+    use std::net::SocketAddr;
     #[derive(Default)]
     struct StorageGate {
         active: AtomicBool,

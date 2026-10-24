@@ -372,7 +372,7 @@ impl PlaybackManager {
         file: &str,
     ) -> Result<axum::response::Response, String> {
         let mime = media_type(file).ok_or_else(|| "Media not found".to_owned())?;
-        let (path, stable_target_duration, shared_caption) = {
+        let (path, stable_target_duration, shared_caption, on_demand) = {
             let mut sessions = self.sessions.lock().await;
             let session = sessions
                 .get_mut(id)
@@ -392,6 +392,7 @@ impl PlaybackManager {
                     .as_ref()
                     .and_then(|ingest| ingest.captions.clone())
                     .zip(session.caption_track),
+                session.throttle.enabled,
             )
         };
         if let Some((captions, track)) = shared_caption {
@@ -399,7 +400,9 @@ impl PlaybackManager {
                 let av = tokio::fs::read_to_string(path.with_file_name("index.m3u8"))
                     .await
                     .map_err(|_| "Media not found")?;
-                if av.len() > 128 * 1024 {
+                // On-demand playlists list every produced segment; a long
+                // feature is a few hundred KB of playlist text.
+                if av.len() > 4 * 1024 * 1024 {
                     return Err("Invalid HLS output".into());
                 }
                 let mut playlist = String::new();
@@ -458,6 +461,9 @@ impl PlaybackManager {
             let mut bytes = tokio::fs::read(&path)
                 .await
                 .map_err(|_| "Media not found".to_owned())?;
+            if mime == "application/vnd.apple.mpegurl" && on_demand {
+                bytes = hls::vod_start_playlist(bytes);
+            }
             if mime == "application/vnd.apple.mpegurl" && stable_target_duration {
                 bytes = stable_hls_target_duration(bytes);
                 let text = std::str::from_utf8(&bytes).map_err(|_| "Invalid HLS output")?;

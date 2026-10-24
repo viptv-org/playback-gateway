@@ -271,7 +271,10 @@ async fn clean_source(ffmpeg: &PathBuf, dir: &std::path::Path, segments: u32, se
 /// A real still image of `format` (mjpeg, gif or png) from FFmpeg itself.
 async fn image(ffmpeg: &PathBuf, dir: &std::path::Path, extension: &str) -> Vec<u8> {
     let path = dir.join(format!("prefix.{extension}"));
-    let status = Command::new(ffmpeg)
+    let fixture_ffmpeg = std::env::var("PLAYBACK_FIXTURE_FFMPEG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| ffmpeg.clone());
+    let status = Command::new(fixture_ffmpeg)
         .args(["-v", "error", "-nostdin", "-y", "-f", "lavfi", "-i"])
         .arg("color=c=red:size=8x8")
         .args(["-frames:v", "1", "-update", "1"])

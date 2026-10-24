@@ -483,6 +483,36 @@ async fn capabilities_expiry_and_cleanup_are_enforced() {
         .await
         .unwrap();
     assert_eq!(bytes.as_ref(), b"#EXTM3U\n");
+    let playlist = b"#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:1,\nsegment-000000000.ts\n";
+    tokio::fs::write(dir.join("index.m3u8"), playlist)
+        .await
+        .unwrap();
+    let live = manager
+        .serve("id", "capability", "index.m3u8")
+        .await
+        .unwrap();
+    assert_eq!(
+        axum::body::to_bytes(live.into_body(), 1024)
+            .await
+            .unwrap()
+            .as_ref(),
+        playlist
+    );
+    manager
+        .sessions
+        .lock()
+        .await
+        .get_mut("id")
+        .unwrap()
+        .throttle = Throttle::on_demand();
+    let vod = manager
+        .serve("id", "capability", "index.m3u8")
+        .await
+        .unwrap();
+    let vod = axum::body::to_bytes(vod.into_body(), 1024).await.unwrap();
+    assert!(std::str::from_utf8(&vod)
+        .unwrap()
+        .contains("#EXT-X-START:TIME-OFFSET=0,PRECISE=YES"));
     assert!(manager.heartbeat("id").await);
     manager.sessions.lock().await.get_mut("id").unwrap().touched =
         Instant::now() - Duration::from_secs(61);

@@ -1,6 +1,25 @@
 use super::*;
 
 #[test]
+fn decoder_frame_flags_are_used_for_unspecified_legacy_field_order() {
+    for codec in ["mpeg2video", "vc1"] {
+        let probe: Probe = serde_json::from_value(
+            serde_json::json!({"streams":[{"codec_type":"video","codec_name":codec}],"format":{}}),
+        )
+        .unwrap();
+        assert!(!probe.interlaced());
+        assert!(probe.frame_interlace_detection_needed());
+        let progressive: Probe = serde_json::from_value(serde_json::json!({"streams":[{"codec_type":"video","codec_name":codec,"field_order":"progressive"}],"format":{}})).unwrap();
+        assert!(!progressive.frame_interlace_detection_needed());
+    }
+    let h264: Probe = serde_json::from_value(
+        serde_json::json!({"streams":[{"codec_type":"video","codec_name":"h264"}],"format":{}}),
+    )
+    .unwrap();
+    assert!(!h264.frame_interlace_detection_needed());
+}
+
+#[test]
 fn direct_transport_capabilities_preserve_legacy_and_gate_inspected_format() {
     let mut probe: Probe = serde_json::from_value(serde_json::json!({
         "streams": [
@@ -596,24 +615,58 @@ fn provider_audio_ordinal_is_not_an_absolute_stream_id_and_never_falls_back() {
         {"index":3,"codec_type":"audio","codec_name":"unknown","tags":{"language":"ita"}},
         {"index":5,"codec_type":"subtitle","codec_name":"subrip"},
         {"index":17,"codec_type":"audio","codec_name":"aac","tags":{"language":"eng"}}
-    ]})).unwrap();
-    let mut selection = TrackSelection { required_audio_index: Some(1), ..Default::default() };
-    assert_eq!(probe.select_audio(&selection).unwrap().unwrap().index, Some(17));
+    ]}))
+    .unwrap();
+    let mut selection = TrackSelection {
+        required_audio_index: Some(1),
+        ..Default::default()
+    };
+    assert_eq!(
+        probe.select_audio(&selection).unwrap().unwrap().index,
+        Some(17)
+    );
     selection.preferred_audio_language = Some("it".into());
-    assert_eq!(probe.select_audio(&selection).unwrap().unwrap().index, Some(17));
+    assert_eq!(
+        probe.select_audio(&selection).unwrap().unwrap().index,
+        Some(17)
+    );
     selection.audio_track_index = Some(3);
-    assert_eq!(probe.select_audio(&selection).unwrap().unwrap().index, Some(3), "manual absolute choice wins");
+    assert_eq!(
+        probe.select_audio(&selection).unwrap().unwrap().index,
+        Some(3),
+        "manual absolute choice wins"
+    );
     selection.audio_track_index = None;
     selection.required_audio_index = Some(2);
-    assert!(probe.select_audio(&selection).is_err(), "missing required audio cannot select default");
+    assert!(
+        probe.select_audio(&selection).is_err(),
+        "missing required audio cannot select default"
+    );
     selection.required_audio_index = Some(0);
-    assert_eq!(probe.select_audio(&selection).unwrap().unwrap().index, Some(3), "unsupported streams still count toward the ordinal");
+    assert_eq!(
+        probe.select_audio(&selection).unwrap().unwrap().index,
+        Some(3),
+        "unsupported streams still count toward the ordinal"
+    );
     let missing: Probe = serde_json::from_value(serde_json::json!({"streams":[
         {"codec_type":"audio","codec_name":"aac"},
         {"index":17,"codec_type":"audio","codec_name":"aac"}
-    ]})).unwrap();
-    assert!(missing.select_audio(&selection).is_err(), "invalid first audio cannot shift ordinal0 to second audio");
+    ]}))
+    .unwrap();
+    assert!(
+        missing.select_audio(&selection).is_err(),
+        "invalid first audio cannot shift ordinal0 to second audio"
+    );
     selection.required_audio_index = Some(1);
-    assert_eq!(missing.select_audio(&selection).unwrap().unwrap().index, Some(17));
-    assert!(direct_format(&probe, &Capabilities::default(), probe.select_audio(&selection).unwrap(), &selection).is_none());
+    assert_eq!(
+        missing.select_audio(&selection).unwrap().unwrap().index,
+        Some(17)
+    );
+    assert!(direct_format(
+        &probe,
+        &Capabilities::default(),
+        probe.select_audio(&selection).unwrap(),
+        &selection
+    )
+    .is_none());
 }

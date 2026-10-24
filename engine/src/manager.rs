@@ -156,20 +156,35 @@ impl PlaybackManager {
             if !session.throttle.enabled {
                 continue;
             }
+            if let Some(stream) = &session.stream {
+                let Some(child) = session.child.as_mut() else {
+                    continue;
+                };
+                if !matches!(child.try_wait(), Ok(None)) {
+                    continue;
+                }
+                let (produced, consumed) = stream.times();
+                session.throttle.apply_ahead(child, produced - consumed);
+                continue;
+            }
+            // Prefix cleanup tracks the viewer, not the producer: it must
+            // keep running after a fast producer has already exited.
+            if let Ok(playlist) = tokio::fs::read_to_string(session.dir.join("index.m3u8")).await {
+                session.throttle.apply_playlist(&playlist);
+            }
+            for file in session.throttle.take_pending_deletions() {
+                if file.starts_with("segment-") && !file.contains(['/', '\\']) {
+                    let _ = tokio::fs::remove_file(session.dir.join(&file)).await;
+                }
+            }
             let Some(child) = session.child.as_mut() else {
                 continue;
             };
             if !matches!(child.try_wait(), Ok(None)) {
                 continue;
             }
-            if let Some(stream) = &session.stream {
-                let (produced, consumed) = stream.times();
-                session.throttle.apply_ahead(child, produced - consumed);
-                continue;
-            }
-            if let Ok(playlist) = tokio::fs::read_to_string(session.dir.join("index.m3u8")).await {
-                session.throttle.apply_playlist(child, &playlist);
-            }
+            let ahead = session.throttle.ahead();
+            session.throttle.apply_ahead(child, ahead);
         }
     }
 
@@ -220,9 +235,17 @@ impl PlaybackManager {
     }
 
     pub(super) async fn accel(&self) -> hardware::Accel {
+        let qsv = self.qsv_available().await;
         let mut accel = hardware::Accel {
-            qsv: self.qsv_available().await,
-            vaapi: self.vaapi_available().await,
+            qsv,
+            // Every QSV plan and its retry ladder stay on QSV/CPU. Probing an
+            // unused VAAPI tone mapper adds another media process to first
+            // playback without affecting its selected pipeline.
+            vaapi: if qsv {
+                hardware::Vaapi::default()
+            } else {
+                self.vaapi_available().await
+            },
         };
         // A VAAPI pipeline that failed on a real stream is not retried for the
         // process lifetime: the startup probe's claim is overridden by the
@@ -254,6 +277,9 @@ impl PlaybackManager {
     /// Where HDR10/HLG sources are tone mapped: the Intel VPP, Vulkan
     /// (libplacebo), or the CPU.
     pub fn tone_mapping_status(&self) -> &'static str {
+        if self.qsv_ready.get() == Some(&true) {
+            return "software";
+        }
         if self.vaapi_path().is_none() {
             return "software";
         }

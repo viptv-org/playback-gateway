@@ -1109,7 +1109,9 @@ pub(crate) mod tests {
         let ffprobe = std::env::var("PLAYBACK_TEST_FFPROBE").unwrap();
         let root = tempfile::tempdir().unwrap();
         let generated = root.path().join("input.m3u8");
-        let mut generation = tokio::process::Command::new(&ffmpeg);
+        let fixture_ffmpeg =
+            std::env::var("PLAYBACK_FIXTURE_FFMPEG").unwrap_or_else(|_| ffmpeg.clone());
+        let mut generation = tokio::process::Command::new(fixture_ffmpeg);
         generation.kill_on_drop(true).args([
             "-v",
             "error",
@@ -1194,7 +1196,7 @@ pub(crate) mod tests {
                 KeySpec {
                     label: "HLS fixture".into(),
                     namespaces: vec!["fixture".into()],
-                    scopes: vec![Scope::Create, Scope::Read, Scope::Release],
+                    scopes: vec![Scope::Create, Scope::Read, Scope::Renew, Scope::Release],
                     quotas: Quotas {
                         inputs: 1,
                         outputs: 2,
@@ -2082,7 +2084,7 @@ pub(crate) mod tests {
                 KeySpec {
                     label: "4K fixture".into(),
                     namespaces: vec!["fixture".into()],
-                    scopes: vec![Scope::Create, Scope::Read, Scope::Release],
+                    scopes: vec![Scope::Create, Scope::Read, Scope::Renew, Scope::Release],
                     quotas: Quotas {
                         inputs: 1,
                         outputs: 1,
@@ -2289,7 +2291,13 @@ pub(crate) mod tests {
                 })
                 .args([
                     "-t",
-                    if matroska { "40" } else { "8" },
+                    if matroska && copy_source {
+                        "180"
+                    } else if matroska {
+                        "40"
+                    } else {
+                        "8"
+                    },
                     "-c:v",
                     if copy_source {
                         "libx264"
@@ -2321,11 +2329,14 @@ pub(crate) mod tests {
         assert!(generated.status.success());
         let bytes = std::fs::read(input_file).unwrap();
         let delay = if copy_source {
-            Duration::from_millis((188 * 100 * 10_000u64 / bytes.len() as u64).max(1))
+            Duration::from_millis((188 * 100 * 45_000u64 / bytes.len() as u64).max(1))
         } else {
             Duration::from_millis(30)
         };
-        let source = http_source_with_interval(bytes, delay).await;
+        // A Matroska byte-loop repeats EBML headers and resets timestamps.
+        // Keep this valid-live regression on one continuous recording; the
+        // H.264 recording lasts beyond the late join and output decoding.
+        let source = http_source_with_repetition(bytes, delay, !matroska).await;
         let config = playback_engine::Config {
             ffmpeg: ffmpeg.clone().into(),
             ffprobe: ffprobe.clone().into(),
@@ -2352,7 +2363,7 @@ pub(crate) mod tests {
                 KeySpec {
                     label: "fallback fixture".into(),
                     namespaces: vec!["fixture".into()],
-                    scopes: vec![Scope::Create, Scope::Read, Scope::Release],
+                    scopes: vec![Scope::Create, Scope::Read, Scope::Renew, Scope::Release],
                     quotas: Quotas {
                         inputs: if shared { 1 } else { 2 },
                         outputs: 3,
@@ -2376,14 +2387,6 @@ pub(crate) mod tests {
             .create(&principal, &input, "first", 0)
             .await
             .unwrap();
-        expect_connections(&source, 1).await;
-        let opened = source.requests.load(std::sync::atomic::Ordering::SeqCst);
-        let same = workers.create(&principal, &input, "same", 1).await.unwrap();
-        assert_eq!(same.job_id, first.job_id);
-        assert_eq!(
-            source.requests.load(std::sync::atomic::Ordering::SeqCst),
-            opened
-        );
         if budget.is_some() {
             let engine_id = workers.active.lock().unwrap()[&first.job_id].id.clone();
             tokio::time::timeout(Duration::from_secs(20), async {
@@ -2408,6 +2411,14 @@ pub(crate) mod tests {
             workers.shutdown().await;
             return;
         }
+        expect_connections(&source, 1).await;
+        let opened = source.requests.load(std::sync::atomic::Ordering::SeqCst);
+        let same = workers.create(&principal, &input, "same", 1).await.unwrap();
+        assert_eq!(same.job_id, first.job_id);
+        assert_eq!(
+            source.requests.load(std::sync::atomic::Ordering::SeqCst),
+            opened
+        );
         if matroska {
             let replay = std::fs::read_dir(root.path().join("media"))
                 .unwrap()
@@ -2721,7 +2732,20 @@ printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","wi
         let script = if stall {
             "#!/bin/sh\nprintf x >> \"$0.count\"\nexec sleep 30\n"
         } else {
-            "#!/bin/sh\nprintf x >> \"$0.count\"\nprintf '%s\\n' \"$$\" >> \"$0.pids\"\nfor arg do case \"$arg\" in *independent_segments*) printf '%s' \"$$\" > \"$0.ingest-pid\" ;; esac; done\nfor last do :; done\ndir=${last%/*}\nprintf 'fixture' > \"$dir/segment-000000000.ts\"\nprintf '#EXTM3U\\n#EXTINF:1,\\nsegment-000000000.ts\\n' > \"$last\"\nexec sleep 30\n"
+            r#"#!/bin/sh
+printf x >> "$0.count"
+printf '%s\n' "$$" >> "$0.pids"
+for arg do case "$arg" in *independent_segments*) printf '%s' "$$" > "$0.ingest-pid" ;; esac; done
+for last do :; done
+dir=${last%/*}
+printf '#EXTM3U\n#EXT-X-TARGETDURATION:2\n' > "$last.tmp"
+for n in 000000000 000000001 000000002; do
+    printf 'fixture' > "$dir/segment-$n.ts"
+    printf '#EXTINF:2,\nsegment-%s.ts\n' "$n" >> "$last.tmp"
+done
+mv "$last.tmp" "$last"
+exec sleep 30
+"#
         };
         std::fs::write(&encoder, script).unwrap();
         for file in [&probe, &encoder] {

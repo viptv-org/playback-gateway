@@ -114,7 +114,14 @@ async fn real_audio_selection_accepts_tagged_and_unknown_languages() {
             .await
             .unwrap();
         let selected = response.selected_audio.as_ref().unwrap();
-        assert_eq!(selected.input_index, if matches!(case,"dual"|"required_english"|"required_override") { 2 } else { 1 });
+        assert_eq!(
+            selected.input_index,
+            if matches!(case, "dual" | "required_english" | "required_override") {
+                2
+            } else {
+                1
+            }
+        );
         assert_eq!(selected.output_index, 0);
         assert_eq!(selected.output_audio_ordinal, 0);
         assert_eq!(selected.output_stream_index, 1);
@@ -167,7 +174,11 @@ async fn real_audio_selection_accepts_tagged_and_unknown_languages() {
         assert!(samples.len() > 4000);
         let crossings = samples.windows(2).filter(|s| s[0] <= 0 && s[1] > 0).count();
         let frequency = crossings as f64 * 8000.0 / samples.len() as f64;
-        let expected_frequency = if matches!(case,"italian"|"required_italian") { 440.0 } else { 880.0 };
+        let expected_frequency = if matches!(case, "italian" | "required_italian") {
+            440.0
+        } else {
+            880.0
+        };
         assert!(
             ((expected_frequency - 40.0)..(expected_frequency + 40.0)).contains(&frequency),
             "Wrong selected audio frequency for {case}: {frequency}"

@@ -409,6 +409,18 @@ async fn a_720p60_source_is_stream_copied_into_hls() {
 #[tokio::test]
 #[ignore = "requires real FFmpeg/ffprobe binaries"]
 async fn compatible_video_is_copied_while_incompatible_audio_is_encoded() {
+    copied_video_with_encoded_audio(false).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires real FFmpeg/ffprobe binaries"]
+async fn copied_live_fragments_start_independently_with_encoded_audio() {
+    copied_video_with_encoded_audio(true).await;
+}
+
+#[cfg(unix)]
+async fn copied_video_with_encoded_audio(live: bool) {
     use std::os::unix::fs::PermissionsExt;
     let ffmpeg =
         PathBuf::from(std::env::var("PLAYBACK_TEST_FFMPEG").expect("PLAYBACK_TEST_FFMPEG"));
@@ -429,7 +441,7 @@ async fn compatible_video_is_copied_while_incompatible_audio_is_encoded() {
             "-i",
             "sine=frequency=880:sample_rate=48000",
             "-t",
-            "6",
+            "12",
             "-map",
             "0:v:0",
             "-map",
@@ -451,7 +463,7 @@ async fn compatible_video_is_copied_while_incompatible_audio_is_encoded() {
             "-sc_threshold",
             "0",
             "-force_key_frames",
-            "0,2,5",
+            "0,1,10",
             "-c:a",
             "ac3",
             "-ac",
@@ -498,7 +510,7 @@ async fn compatible_video_is_copied_while_incompatible_audio_is_encoded() {
         ttl: Duration::from_secs(60),
     });
     let response = manager
-        .start_with_permit(url, HashMap::new(), 0.0, None, false, false, None)
+        .start_with_permit(url, HashMap::new(), 0.0, None, false, live, None)
         .await
         .unwrap();
     assert_eq!(response.mode, "transcode");
@@ -515,7 +527,13 @@ async fn compatible_video_is_copied_while_incompatible_audio_is_encoded() {
     assert_eq!(value_after("-c:a"), Some("aac"));
     assert!(!args.contains(&"libx264"));
     assert_eq!(value_after("-hls_init_time"), Some("1"));
-    assert!(value_after("-hls_flags").is_some_and(|flags| flags.contains("split_by_time")));
+    assert_eq!(
+        value_after("-hls_flags").unwrap().contains("split_by_time"),
+        !live
+    );
+    assert!(!value_after("-hls_flags")
+        .unwrap()
+        .contains("independent_segments"));
     assert!(!args.contains(&"-threads"));
     assert!(!args.contains(&"-filter_threads"));
     let playlist_path = root
@@ -541,10 +559,34 @@ async fn compatible_video_is_copied_while_incompatible_audio_is_encoded() {
         .filter_map(|value| value.trim_end_matches(',').parse().ok())
         .collect();
     assert!(durations.len() >= 3, "{disk_playlist}");
+    let longest = durations.iter().copied().fold(0.0, f64::max);
     assert!(
-        durations.iter().copied().fold(0.0, f64::max) <= 2.1,
+        if live {
+            longest >= 8.9 && longest <= 9.1
+        } else {
+            longest <= 2.1
+        },
         "{durations:?}"
     );
+    if live {
+        for segment in disk_playlist
+            .lines()
+            .filter(|line| media_type(line) == Some("video/mp2t"))
+        {
+            let decoded = Command::new(&ffmpeg)
+                .args(["-v", "error", "-xerror", "-i"])
+                .arg(playlist_path.parent().unwrap().join(segment))
+                .args(["-map", "0:v:0", "-frames:v", "1", "-f", "null", "-"])
+                .output()
+                .await
+                .unwrap();
+            assert!(
+                decoded.status.success(),
+                "live join must start decodably: {segment}: {}",
+                String::from_utf8_lossy(&decoded.stderr)
+            );
+        }
+    }
     let capability = response.url.split('/').nth(3).unwrap();
     let served = String::from_utf8(
         axum::body::to_bytes(
@@ -560,7 +602,15 @@ async fn compatible_video_is_copied_while_incompatible_audio_is_encoded() {
         .to_vec(),
     )
     .unwrap();
-    assert!(served.contains("#EXT-X-TARGETDURATION:2"), "{served}");
+    let expected_target = if live {
+        "#EXT-X-TARGETDURATION:9"
+    } else {
+        "#EXT-X-TARGETDURATION:2"
+    };
+    assert!(
+        served.lines().any(|line| line == expected_target),
+        "{served}"
+    );
     let decoded = Command::new(&ffmpeg)
         .args(["-v", "error", "-xerror", "-i"])
         .arg(&playlist_path)
@@ -573,6 +623,149 @@ async fn compatible_video_is_copied_while_incompatible_audio_is_encoded() {
         "{}",
         String::from_utf8_lossy(&decoded.stderr)
     );
+    assert!(manager.stop(&response.id).await);
+    manager.shutdown().await;
+    server.abort();
+    let _ = server.await;
+}
+
+/// ROK-MEDIA-20261024-MKV-COPY: a 90s Matroska remuxes faster than one
+/// throttle tick. The rolling playlist must not slide past a viewer that has
+/// not started: once the producer finishes, the served VOD playlist must still
+/// begin at segment zero and cover the advertised duration.
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires real FFmpeg/ffprobe binaries"]
+async fn a_completed_fast_copy_keeps_its_whole_playlist() {
+    let ffmpeg =
+        PathBuf::from(std::env::var("PLAYBACK_TEST_FFMPEG").expect("PLAYBACK_TEST_FFMPEG"));
+    let ffprobe =
+        PathBuf::from(std::env::var("PLAYBACK_TEST_FFPROBE").expect("PLAYBACK_TEST_FFPROBE"));
+    let root = tempfile::tempdir().unwrap();
+    let fixture = root.path().join("mkv-copy.mkv");
+    // Mirror the reported fixture: 90s H.264/AAC Matroska with two audio
+    // tracks and one-second keyframes, so the copy cuts one-second segments.
+    let status = Command::new(&ffmpeg)
+        .args([
+            "-v", "error",
+            "-f", "lavfi", "-i", "testsrc=size=640x360:rate=30",
+            "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
+            "-f", "lavfi", "-i", "sine=frequency=880:sample_rate=48000",
+            "-t", "90",
+            "-map", "0:v:0", "-map", "1:a:0", "-map", "2:a:0",
+            "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+            "-g", "30", "-keyint_min", "30", "-sc_threshold", "0",
+            "-force_key_frames", "expr:gte(t,n_forced*1)",
+            "-c:a", "aac", "-ac", "2", "-shortest",
+        ])
+        .arg(&fixture)
+        .status()
+        .await
+        .unwrap();
+    assert!(status.success());
+    let probe = Command::new(&ffprobe)
+        .args(["-v", "error", "-show_entries", "format=duration", "-of", "json"])
+        .arg(&fixture)
+        .output()
+        .await
+        .unwrap();
+    let probed: serde_json::Value = serde_json::from_slice(&probe.stdout).unwrap();
+    let duration: f64 = probed["format"]["duration"].as_str().unwrap().parse().unwrap();
+    assert!((89.0..=91.0).contains(&duration), "fixture duration: {duration}");
+
+    let bytes = tokio::fs::read(&fixture).await.unwrap();
+    let router = axum::Router::new().route(
+        "/mkv-copy.mkv",
+        axum::routing::get(move || {
+            let bytes = bytes.clone();
+            async move { bytes }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/mkv-copy.mkv", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+
+    let manager = PlaybackManager::new(Config {
+        ffmpeg,
+        ffprobe,
+        root: root.path().join("media"),
+        max_sessions: 1,
+        ttl: Duration::from_secs(120),
+    });
+    let response = manager
+        .start_with_permit(url, HashMap::new(), 0.0, None, false, false, None)
+        .await
+        .unwrap();
+    let capability = response.url.split('/').nth(3).unwrap().to_owned();
+    let playlist_of = || async {
+        String::from_utf8(
+            axum::body::to_bytes(
+                manager
+                    .serve(&response.id, &capability, "index.m3u8")
+                    .await
+                    .unwrap()
+                    .into_body(),
+                4 * 1024 * 1024,
+            )
+            .await
+            .unwrap()
+            .to_vec(),
+        )
+        .unwrap()
+    };
+    // Never fetch a segment: the fast producer must not outrun a late reader.
+    let mut playlist = String::new();
+    let finished = timeout(Duration::from_secs(90), async {
+        loop {
+            playlist = playlist_of().await;
+            if playlist.lines().any(|line| line == "#EXT-X-ENDLIST") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await;
+    assert!(finished.is_ok(), "producer never finished: {playlist}");
+
+    let sequence: u64 = playlist
+        .lines()
+        .find_map(|line| line.strip_prefix("#EXT-X-MEDIA-SEQUENCE:")?.parse().ok())
+        .unwrap_or(0);
+    assert_eq!(sequence, 0, "completed VOD dropped its prefix: {playlist}");
+    let segments: Vec<&str> = playlist
+        .lines()
+        .filter(|line| media_type(line) == Some("video/mp2t"))
+        .collect();
+    assert_eq!(segments.first(), Some(&"segment-000000000.ts"), "{playlist}");
+    let advertised: f64 = playlist
+        .lines()
+        .filter_map(|line| line.strip_prefix("#EXTINF:"))
+        .filter_map(|value| value.split(',').next()?.parse::<f64>().ok())
+        .sum();
+    assert!(
+        (duration - 3.0..=duration + 3.0).contains(&advertised),
+        "listed {advertised}s of {duration}s"
+    );
+    // The listed prefix must actually be fetchable from the start.
+    manager
+        .serve(&response.id, &capability, "segment-000000000.ts")
+        .await
+        .unwrap();
+
+    // Prefix cleanup trails the viewer's furthest fetch, even after the
+    // producer has exited: disk stays bounded during long viewing.
+    let last = segments.last().unwrap().to_owned();
+    manager.serve(&response.id, &capability, last).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    let dir = root.path().join("media").join(&response.id);
+    assert!(
+        !dir.join("segment-000000000.ts").exists(),
+        "watched prefix must be reclaimed behind the viewer"
+    );
+    assert!(dir.join(last).exists(), "the fetched tail must remain");
+
     assert!(manager.stop(&response.id).await);
     manager.shutdown().await;
     server.abort();

@@ -271,7 +271,10 @@ async fn qualified_live_hevc_audio_conversion_keeps_video_and_continuous_progres
     let ffprobe = PathBuf::from(std::env::var("PLAYBACK_TEST_FFPROBE").unwrap());
     let root = tempfile::tempdir().unwrap();
     let file = root.path().join("live.mkv");
-    let result = Command::new(&ffmpeg)
+    let fixture_ffmpeg = std::env::var("PLAYBACK_FIXTURE_FFMPEG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| ffmpeg.clone());
+    let result = Command::new(fixture_ffmpeg)
         .args([
             "-v",
             "error",

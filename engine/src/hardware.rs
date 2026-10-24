@@ -138,13 +138,13 @@ pub(super) fn plan(
     let decodable = hardware_decodable(video, interlaced);
     if hdr.is_some() {
         // CPU tone mapping of 4K HDR runs below realtime on a 6-core host;
-        // a GPU tone mapper is preferred over every CPU path. VPP tone
-        // mapping is VAAPI's unique capability, but it is only trusted when
-        // Quick Sync is absent: a VAAPI device that passes its startup probe
-        // yet fails on real streams (measured: Intel UHD 630 encode, iHD)
-        // otherwise drags every HDR start through a failing pipeline first.
-        // With QSV proven, HDR plans on Quick Sync and tone maps in software
-        // inside that pipeline.
+        // VPP is retained for VAAPI-only hosts. On a QSV host keep the existing
+        // CPU Mobius tone mapper: a real 4K PQ comparison measured only 27dB
+        // PSNR for VPP versus 48dB for QSV decode with the unchanged CPU filter.
+        // With QSV proven, decode compatible HDR on the GPU as well. Only
+        // download for the unchanged CPU tone mapper, then upload the smaller
+        // SDR frames for encoding. On a measured 4K grain-heavy HDR source this
+        // removed ~42% of CPU work versus software HEVC decode.
         match tone_map(accel.vaapi, hdr) {
             Some(ToneMap::Vpp) if decodable && !accel.qsv => return Pipeline::VaapiDecode,
             Some(ToneMap::Vpp) if !accel.qsv => return Pipeline::VaapiEncode,
@@ -154,7 +154,11 @@ pub(super) fn plan(
             _ => {}
         }
         return if accel.qsv {
-            Pipeline::QsvEncode
+            if decodable {
+                Pipeline::QsvDecode
+            } else {
+                Pipeline::QsvEncode
+            }
         } else if accel.vaapi.encode {
             Pipeline::VaapiEncode
         } else {
@@ -182,6 +186,18 @@ pub(super) fn device_args(cmd: &mut Command, device: &std::path::Path) {
     cmd.arg("-init_hw_device")
         .arg(format!("qsv=viptv,child_device={}", device.display()))
         .args(["-filter_hw_device", "viptv"]);
+}
+
+/// Preserve the CPU tone mapper's linear-light resize and color transforms.
+/// QSV surfaces need one explicit download in their native bit depth; uploading
+/// the converted SDR frames reuses the existing bounded encoder frame pool.
+pub(super) fn qsv_hdr_filter(video: &ProbeStream, software: &str) -> String {
+    let format = if video.pix_fmt.as_deref() == Some("yuv420p10le") {
+        "p010le"
+    } else {
+        "nv12"
+    };
+    format!("hwdownload,format={format},{software},format=nv12,hwupload=extra_hw_frames=64")
 }
 
 pub(super) fn vaapi_device_args(cmd: &mut Command, device: &std::path::Path, decode: bool) {
@@ -430,6 +446,19 @@ mod tests {
     };
 
     #[test]
+    fn qsv_hdr_download_preserves_bit_depth_and_existing_color_filter_order() {
+        for (pix_fmt, download) in [("yuv420p10le", "p010le"), ("yuv420p", "nv12")] {
+            let video = stream(
+                serde_json::json!({"codec_name":"hevc","pix_fmt":pix_fmt,"width":3840,"height":2160}),
+            );
+            let software = "zscale=transfer=linear,format=gbrpf32le,zscale=w=1920:h=1080,tonemap=mobius,format=yuv420p";
+            let filter = qsv_hdr_filter(&video, software);
+            assert_eq!(filter, format!("hwdownload,format={download},{software},format=nv12,hwupload=extra_hw_frames=64"));
+            assert_eq!(filter.matches("hwdownload").count(), 1);
+            assert_eq!(filter.matches("hwupload").count(), 1);
+        }
+    }
+    #[test]
     fn hardware_never_overrides_copy_and_preserves_complex_filters() {
         let video = stream(
             serde_json::json!({"codec_name":"hevc","pix_fmt":"yuv420p10le","width":3840,"height":2160,"sample_aspect_ratio":"1:1"}),
@@ -442,7 +471,7 @@ mod tests {
         assert_eq!(plan(false, QSV, &video, None, false), Pipeline::QsvDecode);
         assert_eq!(
             plan(false, QSV, &video, Some("smpte2084"), false),
-            Pipeline::QsvEncode
+            Pipeline::QsvDecode
         );
         assert_eq!(plan(false, QSV, &video, None, true), Pipeline::QsvEncode);
         assert_eq!(
@@ -478,9 +507,9 @@ mod tests {
     /// only trusted when Quick Sync is absent — a VAAPI device whose startup
     /// probe lies would otherwise drag every HDR start through a failing
     /// pipeline), and HLG (unsupported by FFmpeg 5.1's tonemap_vaapi) stays on
-    /// the CPU chain inside the QSV pipeline.
+    /// the CPU chain between QSV decode and encode.
     #[test]
-    fn quick_sync_hosts_tone_map_hdr10_on_the_vpp_and_keep_sdr_unchanged() {
+    fn quick_sync_hosts_decode_hdr_in_hardware_and_preserve_tone_mapping() {
         let accel = Accel {
             qsv: true,
             vaapi: Vaapi {
@@ -498,7 +527,7 @@ mod tests {
         assert_eq!(plan(false, accel, &hevc, None, false), Pipeline::QsvDecode);
         assert_eq!(
             plan(false, accel, &hevc, Some("smpte2084"), false),
-            Pipeline::QsvEncode,
+            Pipeline::QsvDecode,
             "HDR never plans on VAAPI while Quick Sync is proven"
         );
         // Undecodable on the GPU (AV1 on Gen 9.5) or interlaced: CPU decode.
@@ -512,7 +541,7 @@ mod tests {
         );
         assert_eq!(
             plan(false, accel, &hevc, Some("arib-std-b67"), false),
-            Pipeline::QsvEncode
+            Pipeline::QsvDecode
         );
         assert_eq!(
             tone_map(accel.vaapi, Some("arib-std-b67")),

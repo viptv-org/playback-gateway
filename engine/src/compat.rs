@@ -20,6 +20,7 @@ pub(super) struct ProbeStream {
     pub(super) tags: HashMap<String, String>,
     pub(super) codec_type: Option<String>,
     pub(super) codec_name: Option<String>,
+    pub(super) start_time: Option<String>,
     pub(super) width: Option<u32>,
     pub(super) height: Option<u32>,
     pub(super) pix_fmt: Option<String>,
@@ -203,9 +204,12 @@ impl Probe {
         if let Some(index) = selection.required_audio_index {
             // Count every input audio stream before checking whether it is usable.
             // Filtering first would shift the provider's ordinal to another language.
-            return self.streams.iter()
+            return self
+                .streams
+                .iter()
                 .filter(|stream| stream.codec_type.as_deref() == Some("audio"))
-                .take(32).nth(index as usize)
+                .take(32)
+                .nth(index as usize)
                 .filter(|stream| stream.index.is_some_and(|index| index <= 65535))
                 .map(Some)
                 .ok_or_else(|| "Required source audio track is unavailable".into());
@@ -283,6 +287,15 @@ impl Probe {
                 video.field_order.as_deref(),
                 Some("tt" | "bb" | "tb" | "bt")
             )
+        })
+    }
+    /// MPEG-2/VC-1 can report field order only on decoded frames. Avoid a second
+    /// network probe: let FFmpeg's conditional deinterlacer inspect those flags
+    /// when an encode is already required. Explicit progressive metadata wins.
+    pub(super) fn frame_interlace_detection_needed(&self) -> bool {
+        self.video().is_ok_and(|video| {
+            matches!(video.codec_name.as_deref(), Some("mpeg2video" | "vc1"))
+                && matches!(video.field_order.as_deref(), None | Some("unknown"))
         })
     }
     pub(super) fn ensure_supported(&self) -> Result<(), String> {

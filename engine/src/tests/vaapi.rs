@@ -17,7 +17,7 @@ esac
 for last do :; done
 dir=${{last%/*}}
 printf x > "$dir/segment-000000000.ts"
-printf '#EXTM3U\n#EXTINF:1,\nsegment-000000000.ts\n' > "$last"
+printf '#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\nsegment-000000000.ts\n#EXT-X-ENDLIST\n' > "$last"
 "#
         ),
     )
@@ -129,6 +129,8 @@ async fn failing_gpu_tone_mapping_keeps_a_qualified_qsv_encoder() {
     assert_eq!(attempts.len(), 1, "{attempts:?}");
     assert!(attempts[0].contains("zscale=transfer=linear"));
     assert!(attempts[0].contains("h264_qsv"));
+    assert!(attempts[0].contains("-c:v hevc_qsv"));
+    assert!(attempts[0].contains("hwdownload,format=p010le,zscale=transfer=linear"));
     assert!(attempts[0].contains("-init_hw_device qsv=viptv,child_device=/dev/dri/renderD128"));
     assert!(!attempts[0].contains("-init_hw_device vaapi"));
     assert!(
@@ -140,6 +142,62 @@ async fn failing_gpu_tone_mapping_keeps_a_qualified_qsv_encoder() {
     assert!(!attempts[0].contains("-color_primaries"), "output color options must not request an automatic software format conversion: {attempts:?}");
     assert!(attempts[0].contains("sidedata=mode=delete"));
     assert!(attempts[0].contains("-c:a copy"));
+    assert_eq!(manager.tone_mapping_status(), "software");
+    assert!(manager.stop(&result.id).await);
+    manager.shutdown().await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn failed_hdr_hardware_decode_retries_cpu_decode_with_the_same_qsv_encoder() {
+    let root = tempfile::tempdir().unwrap();
+    let (ffprobe, ffmpeg) = scripted(root.path(), HDR10_HEVC, "-hwaccel qsv");
+    let manager = PlaybackManager::new_with_qsv(
+        Config {
+            ffmpeg: ffmpeg.clone(),
+            ffprobe,
+            root: root.path().join("media"),
+            max_sessions: 1,
+            ttl: Duration::from_secs(60),
+        },
+        Some("/dev/dri/renderD128".into()),
+    );
+    manager.qsv_ready.set(true).unwrap();
+    manager
+        .filters
+        .set(["zscale", "tonemap", "sidedata"].map(String::from).into())
+        .unwrap();
+    let result = manager
+        .start_with_permit(
+            "http://fixture.invalid/video".into(),
+            HashMap::new(),
+            0.0,
+            Some(Capabilities {
+                max_width: 1920,
+                max_height: 1080,
+                ..Default::default()
+            }),
+            false,
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+    let attempts = std::fs::read_to_string(ffmpeg.with_extension("attempts")).unwrap();
+    let attempts: Vec<_> = attempts.lines().collect();
+    assert_eq!(attempts.len(), 2, "{attempts:?}");
+    assert!(attempts[0].contains("-c:v hevc_qsv"));
+    assert!(attempts[0].contains("hwdownload,format=p010le"));
+    assert!(!attempts[1].contains("-hwaccel"));
+    assert!(!attempts[1].contains("hwdownload"));
+    for attempt in attempts {
+        assert!(attempt.contains("-c:v h264_qsv"));
+        assert!(attempt.contains("zscale=transfer=linear"));
+        assert!(attempt.contains("setparams=range=limited:color_primaries=bt709"));
+        assert!(!attempt.contains("libx264"));
+    }
+    assert_eq!(result.video_mode, "encode");
+    assert_eq!(result.audio_mode, "copy");
     assert!(manager.stop(&result.id).await);
     manager.shutdown().await;
 }

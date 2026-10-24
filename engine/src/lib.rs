@@ -30,6 +30,8 @@ mod lifecycle;
 #[cfg(feature = "media")]
 mod manager;
 #[cfg(feature = "media")]
+mod output_changes;
+#[cfg(feature = "media")]
 mod prepared;
 #[cfg(feature = "media")]
 mod probe;

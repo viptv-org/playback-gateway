@@ -266,9 +266,20 @@ async fn real_hdr10_file_is_delivered_as_original_to_a_webcodecs_client() {
 async fn real_common_format_conversion() {
     let ffmpeg = PathBuf::from(std::env::var("PLAYBACK_TEST_FFMPEG").unwrap());
     let ffprobe = PathBuf::from(std::env::var("PLAYBACK_TEST_FFPROBE").unwrap());
-    for kind in ["interlaced", "smpte2084", "arib-std-b67"] {
+    for kind in [
+        "interlaced",
+        "mpeg2-interlaced",
+        "mpeg2-progressive",
+        "smpte2084",
+        "arib-std-b67",
+    ] {
+        let mpeg2 = kind.starts_with("mpeg2-");
+        let interlaced = matches!(kind, "interlaced" | "mpeg2-interlaced");
+        let hdr = matches!(kind, "smpte2084" | "arib-std-b67");
         let root = tempfile::tempdir().unwrap();
-        let fixture = root.path().join("source.mp4");
+        let fixture = root
+            .path()
+            .join(if mpeg2 { "source.ts" } else { "source.mp4" });
         let mut generate = Command::new(&ffmpeg);
         generate.args([
             "-v",
@@ -278,22 +289,26 @@ async fn real_common_format_conversion() {
             "-f",
             "lavfi",
             "-i",
-            "testsrc2=size=320x240:rate=60",
+            if mpeg2 {
+                "nullsrc=s=320x240:r=50,geq=lum='if(lt(mod(X+N*8,32),16),235,16)':cb=128:cr=128"
+            } else {
+                "testsrc2=size=320x240:rate=60"
+            },
             "-t",
             "2",
         ]);
-        if kind == "interlaced" {
+        if interlaced {
             generate.args([
                 "-vf",
                 "tinterlace=mode=interleave_top",
                 "-flags",
                 "+ilme+ildct",
-                "-x264-params",
-                "tff=1",
+                "-field_order",
+                "tt",
                 "-pix_fmt",
                 "yuv420p",
             ]);
-        } else {
+        } else if hdr {
             generate.arg("-vf").arg(format!("zscale=transferin=bt709:primariesin=bt709:matrixin=bt709:transfer={kind}:primaries=bt2020:matrix=bt2020nc:npl=100,format=yuv420p10le"));
             generate.args([
                 "-color_trc",
@@ -304,8 +319,19 @@ async fn real_common_format_conversion() {
                 "bt2020nc",
             ]);
         }
-        let status = generate
-            .args([
+        if mpeg2 {
+            generate.args([
+                "-c:v",
+                "mpeg2video",
+                "-q:v",
+                "2",
+                "-threads",
+                "2",
+                "-f",
+                "mpegts",
+            ]);
+        } else {
+            generate.args([
                 "-c:v",
                 "libx264",
                 "-threads",
@@ -314,11 +340,9 @@ async fn real_common_format_conversion() {
                 "ultrafast",
                 "-movflags",
                 "+faststart",
-            ])
-            .arg(&fixture)
-            .status()
-            .await
-            .unwrap();
+            ]);
+        }
+        let status = generate.arg(&fixture).status().await.unwrap();
         assert!(status.success(), "generate {kind}");
         let bytes = tokio::fs::read(&fixture).await.unwrap();
         let router = axum::Router::new().route(
@@ -341,14 +365,14 @@ async fn real_common_format_conversion() {
             ttl: Duration::from_secs(60),
         });
         let source = manager.probe(&url, "", None).await.unwrap();
-        assert_eq!(source.interlaced(), kind == "interlaced");
+        if mpeg2 && interlaced {
+            assert!(source.interlaced() || source.frame_interlace_detection_needed());
+        } else {
+            assert_eq!(source.interlaced(), interlaced);
+        }
         assert_eq!(
             source.hdr_transfer().unwrap(),
-            if kind == "interlaced" {
-                None
-            } else {
-                Some(kind)
-            }
+            if hdr { Some(kind) } else { None }
         );
         let response = manager
             .start(url, HashMap::new(), 0.0, None, false)
@@ -376,6 +400,43 @@ async fn real_common_format_conversion() {
                 .find(|line| media_type(line) == Some("video/mp2t"))
                 .unwrap(),
         );
+        if mpeg2 {
+            let mut expected = Command::new(&ffmpeg);
+            expected.args(["-v", "error", "-i"]).arg(&fixture).args([
+                "-vf",
+                "bwdif=mode=send_frame:parity=auto:deint=interlaced,setfield=prog,setsar=1",
+                "-frames:v",
+                "1",
+                "-pix_fmt",
+                "rgb24",
+                "-f",
+                "rawvideo",
+                "pipe:1",
+            ]);
+            let expected = hdr_test_command(&mut expected).await.stdout;
+            let mut actual = Command::new(&ffmpeg);
+            actual.args(["-v", "error", "-i"]).arg(&segment).args([
+                "-frames:v",
+                "1",
+                "-pix_fmt",
+                "rgb24",
+                "-f",
+                "rawvideo",
+                "pipe:1",
+            ]);
+            let actual = hdr_test_command(&mut actual).await.stdout;
+            assert_eq!(actual.len(), expected.len());
+            let mse = actual
+                .iter()
+                .zip(&expected)
+                .map(|(a, b)| (*a as f64 - *b as f64).powi(2))
+                .sum::<f64>()
+                / actual.len() as f64;
+            assert!(
+                mse < 25.0,
+                "{kind} must match decoded-frame deinterlacing, MSE {mse}"
+            );
+        }
         let output = Command::new(&ffprobe)
             .args(["-v", "error", "-show_streams", "-of", "json"])
             .arg(&segment)
@@ -389,7 +450,7 @@ async fn real_common_format_conversion() {
         assert_eq!(video["pix_fmt"], "yuv420p");
         assert_eq!(video["field_order"], "progressive");
         assert!(conservative_frame_rate(video["r_frame_rate"].as_str()));
-        if kind != "interlaced" {
+        if hdr {
             for field in ["color_transfer", "color_primaries", "color_space"] {
                 assert_eq!(video[field], "bt709");
             }

@@ -164,7 +164,7 @@ esac
 for last do :; done
 dir=${last%/*}
 printf x > "$dir/segment-000000000.ts"
-printf '#EXTM3U\n#EXTINF:1,\nsegment-000000000.ts\n' > "$last"
+printf '#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\nsegment-000000000.ts\n#EXT-X-ENDLIST\n' > "$last"
 "#,
     )
     .unwrap();

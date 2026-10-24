@@ -206,6 +206,17 @@ fn quoted(value: &Path) -> String {
     format!("'{}'", value.to_string_lossy().replace('\'', "'\"'\"'"))
 }
 
+fn trust_bundle() -> PathBuf {
+    [
+        "/etc/ca-certificates/extracted/tls-ca-bundle.pem",
+        "/etc/ssl/certs/ca-certificates.crt",
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .find(|path| path.is_file())
+    .expect("system CA bundle for the real TLS fixture")
+}
+
 fn trusted_binary(
     root: &Path,
     name: &str,
@@ -217,15 +228,24 @@ fn trusted_binary(
     let anchors = root.join(format!("{name}-anchors"));
     std::fs::create_dir(&anchors).unwrap();
     std::fs::copy(certificate, anchors.join("fixture.crt")).unwrap();
+    let anchor_mount = if Path::new("/etc/ca-certificates/trust-source/anchors").is_dir() {
+        format!(
+            "--ro-bind {} /etc/ca-certificates/trust-source/anchors",
+            quoted(&anchors)
+        )
+    } else {
+        String::new()
+    };
     // Per-process mount namespace only: never modify the host trust store.
     // HLS children use GnuTLS system trust rather than inheriting root ca_file.
     let body = format!(
-        "#!/bin/sh\nremote=0\nfor arg do case \"$arg\" in http://*|https://*) remote=1 ;; esac; done\nif [ \"$remote\" = 1 ]; then\n printf x >> {}\n exec bwrap --die-with-parent --ro-bind / / --bind {} {} --ro-bind {} /etc/ca-certificates/trust-source/anchors --ro-bind {} /etc/ca-certificates/extracted/tls-ca-bundle.pem -- {} \"$@\"\nfi\nexec {} \"$@\"\n",
+        "#!/bin/sh\nremote=0\nfor arg do case \"$arg\" in http://*|https://*) remote=1 ;; esac; done\nif [ \"$remote\" = 1 ]; then\n printf x >> {}\n exec bwrap --die-with-parent --ro-bind / / --bind {} {} {} --ro-bind {} {} -- {} \"$@\"\nfi\nexec {} \"$@\"\n",
         quoted(&trace),
         quoted(root),
         quoted(root),
-        quoted(&anchors),
+        anchor_mount,
         quoted(certificate),
+        quoted(&trust_bundle()),
         quoted(binary),
         quoted(binary)
     );
@@ -278,7 +298,7 @@ async fn real_shared_https_and_http_https_children_verify_trust_and_hostnames() 
     let ffmpeg = PathBuf::from(std::env::var("PLAYBACK_TEST_FFMPEG").unwrap());
     let ffprobe = PathBuf::from(std::env::var("PLAYBACK_TEST_FFPROBE").unwrap());
     let root = tempfile::tempdir().unwrap();
-    let host_trust = std::fs::read("/etc/ca-certificates/extracted/tls-ca-bundle.pem").unwrap();
+    let host_trust = std::fs::read(trust_bundle()).unwrap();
     let source = tls_source(root.path(), &ffmpeg).await;
     let (trusted_ffmpeg, trace) =
         trusted_binary(root.path(), "trusted-ffmpeg", &ffmpeg, &source.certificate);
@@ -405,7 +425,7 @@ async fn real_shared_https_and_http_https_children_verify_trust_and_hostnames() 
         workers.shutdown().await;
     }
     assert_eq!(
-        std::fs::read("/etc/ca-certificates/extracted/tls-ca-bundle.pem").unwrap(),
+        std::fs::read(trust_bundle()).unwrap(),
         host_trust,
         "fixture namespaces must leave host trust untouched"
     );

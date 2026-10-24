@@ -9,6 +9,70 @@ pub(super) const PROBE_CACHE_TTL: Duration = Duration::from_secs(120);
 pub(super) const LIVE_PROBE_CACHE_TTL: Duration = Duration::from_secs(30);
 const PROBE_CACHE_CAP: usize = 128;
 
+#[derive(Deserialize)]
+struct ProbeDocument {
+    #[serde(flatten)]
+    metadata: Probe,
+    #[serde(default)]
+    frames: Vec<ProbeFrame>,
+}
+
+#[derive(Deserialize)]
+struct ProbeFrame {
+    stream_index: Option<u32>,
+    interlaced_frame: Option<u8>,
+    top_field_first: Option<u8>,
+}
+
+fn decoded_field_order(bytes: &[u8]) -> Result<Probe, ProbeFailure> {
+    let mut document: ProbeDocument =
+        serde_json::from_slice(bytes).map_err(|_| ProbeFailure::InvalidJson)?;
+    for video in document
+        .metadata
+        .streams
+        .iter_mut()
+        .filter(|s| s.is_video())
+    {
+        let frames: Vec<_> = document
+            .frames
+            .iter()
+            .filter(|f| f.stream_index.is_some() && f.stream_index == video.index)
+            .collect();
+        if let Some(frame) = frames.iter().find(|f| f.interlaced_frame == Some(1)) {
+            video.field_order = Some(
+                if frame.top_field_first == Some(1) {
+                    "tt"
+                } else {
+                    "bb"
+                }
+                .into(),
+            );
+        } else if matches!(video.field_order.as_deref(), None | Some("unknown"))
+            && frames.iter().any(|f| f.interlaced_frame == Some(0))
+        {
+            video.field_order = Some("progressive".into());
+        }
+    }
+    Ok(document.metadata)
+}
+
+fn hls_path(url: &str) -> bool {
+    url::Url::parse(url).ok().is_some_and(|url| {
+        let path = url.path().to_ascii_lowercase();
+        path.ends_with(".m3u8") || path.ends_with(".m3u")
+    })
+}
+
+fn hls_field_order_missing(probe: &Probe) -> bool {
+    probe.format["format_name"]
+        .as_str()
+        .is_some_and(|f| f.split(',').any(|f| f == "hls"))
+        && probe.video().is_ok_and(|v| {
+            v.codec_name.as_deref() == Some("h264")
+                && matches!(v.field_order.as_deref(), None | Some("unknown"))
+        })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ProbeFailure {
     Spawn,
@@ -296,7 +360,7 @@ impl PlaybackManager {
             let mut cache = self.probe_cache.lock().await;
             prune_probe_cache(&mut cache, now);
             if let Some(entry) = cache.get(&key) {
-                tracing::debug!("Reused bounded source probe metadata");
+                tracing::info!(live, "Source inspection cache hit");
                 return Some(entry.probe.clone());
             }
         }
@@ -313,8 +377,10 @@ impl PlaybackManager {
         };
         let _flight = flight.lock().await;
         if let Some(entry) = self.probe_cache.lock().await.get(&key) {
+            tracing::info!(live, "Source inspection coalesced");
             return Some(entry.probe.clone());
         }
+        tracing::info!(live, "Source inspection cache miss");
         let probe = Arc::new(self.probe(url, headers, permits).await?);
         let mut cache = self.probe_cache.lock().await;
         prune_probe_cache(&mut cache, now);
@@ -396,9 +462,17 @@ impl PlaybackManager {
         permits: Option<Arc<InputPermits>>,
         reduced: bool,
     ) -> Result<Probe, ProbeFailure> {
-        let direct = self
-            .probe_command(url, headers, permits.clone(), reduced, None)
+        let sample_frames = hls_path(url);
+        let mut direct = self
+            .probe_command(url, headers, permits.clone(), reduced, None, sample_frames)
             .await;
+        // Ordinary HLS uses a single process for metadata and a bounded keyframe
+        // sample. Extensionless HLS is discovered from actual demuxer metadata.
+        if !sample_frames && direct.as_ref().is_ok_and(hls_field_order_missing) {
+            direct = self
+                .probe_command(url, headers, permits.clone(), reduced, None, true)
+                .await;
+        }
         if !disguise_signal(&direct) {
             return direct;
         }
@@ -413,7 +487,7 @@ impl PlaybackManager {
             return direct;
         };
         match self
-            .probe_command(url, headers, permits, reduced, Some(&sanitizer))
+            .probe_command(url, headers, permits, reduced, Some(&sanitizer), true)
             .await
         {
             Ok(mut probe) if !probe.image_only_hls() => {
@@ -436,6 +510,7 @@ impl PlaybackManager {
         permits: Option<Arc<InputPermits>>,
         reduced: bool,
         sanitizer: Option<&sanitize::HlsSanitizer>,
+        sample_frames: bool,
     ) -> Result<Probe, ProbeFailure> {
         let mut cmd = Command::new(&self.config.ffprobe);
         cmd.kill_on_drop(true)
@@ -446,9 +521,25 @@ impl PlaybackManager {
         // The reduced form keeps every field the delivery decision needs, including
         // SDR/HDR transfer evidence, while shrinking a response that failed to parse.
         let entries = if reduced {
-            "format=duration,format_name,start_time:stream=index,codec_type,codec_name,width,height,pix_fmt,channels,avg_frame_rate,color_transfer"
+            "format=duration,format_name,start_time:stream=index,codec_type,codec_name,start_time,width,height,pix_fmt,channels,avg_frame_rate,color_transfer"
         } else {
-            "format=duration,format_name,start_time:stream=index,codec_type,codec_name,width,height,pix_fmt,sample_aspect_ratio,profile,level,channels,avg_frame_rate,r_frame_rate,color_transfer,field_order:stream_tags=language,title:stream_disposition=default,comment,hearing_impaired,visual_impaired,forced,attached_pic"
+            "format=duration,format_name,start_time:stream=index,codec_type,codec_name,start_time,width,height,pix_fmt,sample_aspect_ratio,profile,level,channels,avg_frame_rate,r_frame_rate,color_transfer,field_order:stream_tags=language,title:stream_disposition=default,comment,hearing_impaired,visual_impaired,forced,attached_pic"
+        };
+        let entries = if sample_frames {
+            cmd.args([
+                "-threads",
+                "1",
+                "-skip_frame",
+                "nokey",
+                "-read_intervals",
+                "%+#8",
+                "-show_frames",
+            ]);
+            format!(
+                "{entries}:frame=stream_index,interlaced_frame,top_field_first:frame_tags=:frame_side_data="
+            )
+        } else {
+            entries.to_owned()
         };
         cmd.args([
             "-analyzeduration",
@@ -456,7 +547,7 @@ impl PlaybackManager {
             "-probesize",
             "5000000",
             "-show_entries",
-            entries,
+            &entries,
             "-of",
             "json",
             "-i",
@@ -507,6 +598,29 @@ impl PlaybackManager {
             };
             return Err(probe_failure(&stderr));
         }
-        serde_json::from_slice(&bytes).map_err(|_| ProbeFailure::InvalidJson)
+        decoded_field_order(&bytes)
+    }
+}
+
+#[cfg(test)]
+mod frame_evidence_tests {
+    use super::*;
+
+    #[test]
+    fn hls_frame_evidence_prevents_interlaced_h264_copy_without_losing_other_tracks() {
+        let probe = decoded_field_order(br#"{"streams":[{"index":4,"codec_type":"video","codec_name":"h264"},{"index":9,"codec_type":"audio","codec_name":"aac"}],"format":{"format_name":"hls"},"frames":[{"stream_index":9},{"stream_index":4,"interlaced_frame":1,"top_field_first":1}]}"#).unwrap();
+        assert!(probe.interlaced());
+        assert_eq!(probe.streams.len(), 2);
+    }
+
+    #[test]
+    fn progressive_frame_evidence_does_not_erase_known_interlaced_metadata() {
+        let probe = decoded_field_order(br#"{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","field_order":"tt"}],"frames":[{"stream_index":0,"interlaced_frame":0}]}"#).unwrap();
+        assert!(probe.interlaced());
+        let probe = decoded_field_order(br#"{"streams":[{"index":0,"codec_type":"video","codec_name":"h264"}],"frames":[{"stream_index":0,"interlaced_frame":0}]}"#).unwrap();
+        assert_eq!(
+            probe.video().unwrap().field_order.as_deref(),
+            Some("progressive")
+        );
     }
 }
