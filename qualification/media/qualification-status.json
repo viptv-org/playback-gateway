@@ -1,0 +1,67 @@
+{
+  "state": "formal_baseline_running_after_roku_campaign",
+  "candidate_sha256": "4d7a435abaebaea948163b3511afcedf521cdbad365498949483b6c823d9dfde",
+  "api_scope": "Gateway/backend public API shapes unchanged. Current-app live-source caller corrected to the existing POST mutation route.",
+  "implemented": [
+    "Event-driven readiness with a bounded 50 ms polling fallback and same-inode publication timing",
+    "VOD retains split-by-time HLS for continuous decoding from segment zero; live uses independently decodable keyframe boundaries; audio-only conversion preserves video copy",
+    "FFmpeg 9 build enables DASH XML and dav1d AV1; upstream retained pending corrected Jellyfin source-build comparison; official package TLS-default failure remains",
+    "Corrected 1056-variant corpus, owned HTTPS/live origin, 111 verified public assets, actual current KMP app driver, and pinned browser",
+    "Absolute A/V identities, independent load clients, matched FFmpeg controls, continuous backend soak, and quality/resource/capacity reports",
+    "Compatible Intel HDR sources use QSV decode with the existing CPU tone mapper and QSV encode; hardware decode fallback remains bounded",
+    "Quality comparator restores metadata only on known software references; original and corrected scores of unchanged response bytes retained"
+  ],
+  "validated": {
+    "workspace_passed": 244,
+    "workspace_failed": 0,
+    "real_media_passed": 36,
+    "backend_contracts_passed": 72,
+    "python_passed": 19,
+    "node_passed": 5,
+    "current_app_persistent_sources_passed": 7,
+    "cold_warm_startup_smoke_passed": 4,
+    "protected_tv_distribution_files_unchanged": 112,
+    "roku_additional_https_inspected": 50,
+    "roku_primary_attempted": 50,
+    "roku_primary_initial_compatibility_passed": 47,
+    "roku_primary_initial_strict_passed": 29,
+    "roku_primary_metadata_startup_retakes_passed": 3,
+    "owned_roku_format_cases": 20,
+    "hdr_pq_hlg_browser_timing_passed": 2,
+    "roku_trials": 90,
+    "roku_unique_compatible_sources": 70,
+    "roku_primary_resolved_compatible": 50,
+    "roku_primary_retained_performance_failures": 18,
+    "roku_all_capacity_reclaimed": true,
+    "original_user_http_browser_passed": 10,
+    "python_harness_passed": 19,
+    "privacy_http_tests_passed": 4,
+    "node_observer_tests_passed": 5,
+    "latest_real_hdr_tls_tests_passed": 7,
+    "quality_comparator_real_media_passed": 3
+  },
+  "early_performance_screen": {
+    "scope": "Preliminary API screen, not final candidate or browser campaign",
+    "paired_trials": 70,
+    "median_before_ms": 313.606,
+    "median_after_ms": 228.539,
+    "ready_publication_p95_before_ms": 144.518,
+    "ready_publication_p95_after_ms": 5.987
+  },
+  "not_yet_qualified": [
+    "Full frozen current-app Intel baseline/final and8hsoak campaigns",
+    "Heavy HDR realtime throughput: direct FFmpeg and browser confirm software tone-mapping ceiling",
+    "Secondary AMD hardware execution",
+    "Legacy WebCodecs pacedTS AV416ms diagnostic remains visible",
+    "Existing torrent fixture could not resolve peers; excluded from HTTP media pass counts",
+    "Correctly patched Jellyfin source candidate and OpenCL/libplacebo/tonemapx HDR research"
+  ],
+  "production_deployment": false,
+  "hdr_processing_control": {
+    "scope": "30s real4kPQsample,two runs/path,same4CPUbudget",
+    "processing_reduction_percent": 33.8,
+    "cpu_reduction_percent": 42.1,
+    "output_psnr_db": 48.10928
+  },
+  "hdr_passthrough_note": "HDR-PASSTHROUGH-NOTE.md"
+}

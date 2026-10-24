@@ -1,0 +1,9 @@
+ARG BASE_IMAGE=playback-media-lab:intel-20261023
+FROM ${BASE_IMAGE}
+USER root
+ADD https://github.com/jellyfin/jellyfin-ffmpeg/releases/download/v8.1.3-1/jellyfin-ffmpeg8_8.1.3-1-trixie_amd64.deb /tmp/jellyfin.deb
+RUN echo 'fbef9f81a53e175194e3f67832618a86111f7bd37197df21a5d748c34289f9c0  /tmp/jellyfin.deb' | sha256sum -c - \
+    && apt-get update && apt-get install -y --no-install-recommends /tmp/jellyfin.deb \
+    && rm -rf /var/lib/apt/lists/* /tmp/jellyfin.deb
+# Explicit candidate only. The default production Dockerfile remains unchanged.
+ENV LAB_FFMPEG=/usr/lib/jellyfin-ffmpeg/ffmpeg LAB_FFPROBE=/usr/lib/jellyfin-ffmpeg/ffprobe

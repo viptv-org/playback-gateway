@@ -1,0 +1,1263 @@
+{
+  "kind": "pre-final controlled Intel startup screen",
+  "qualification_complete": false,
+  "comparison": {
+    "pairs": [
+      {
+        "identity": [
+          "media-069f42c708ce0296",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 244.851421,
+        "candidate_ms": 188.330973,
+        "change_ms": -56.52044799999999,
+        "change_percent": -23.083569525210144,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-069f42c708ce0296",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 158.740893,
+        "candidate_ms": 121.261022,
+        "change_ms": -37.479871,
+        "change_percent": -23.610722033672825,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-079836ce8de20f51",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 704.556802,
+        "candidate_ms": 718.825256,
+        "change_ms": 14.26845400000002,
+        "change_percent": 2.02516730510538,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-079836ce8de20f51",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 460.293756,
+        "candidate_ms": 361.966954,
+        "change_ms": -98.32680199999999,
+        "change_percent": -21.36175012550029,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-0a500e629cc10f03",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 385.364488,
+        "candidate_ms": 187.627388,
+        "change_ms": -197.7371,
+        "change_percent": -51.311707787667245,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-0a500e629cc10f03",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 156.100318,
+        "candidate_ms": 129.368527,
+        "change_ms": -26.731790999999987,
+        "change_percent": -17.124751148809313,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-0f382ed49bdf4c21",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 427.647069,
+        "candidate_ms": 267.051252,
+        "change_ms": -160.595817,
+        "change_percent": -37.553353838138904,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-0f382ed49bdf4c21",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 309.074976,
+        "candidate_ms": 210.556728,
+        "change_ms": -98.518248,
+        "change_percent": -31.875193933526347,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-17d82b32aca5d96e",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 235.2172,
+        "candidate_ms": 229.98233,
+        "change_ms": -5.234870000000001,
+        "change_percent": -2.2255472814062927,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-17d82b32aca5d96e",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 156.364116,
+        "candidate_ms": 108.288506,
+        "change_ms": -48.07561,
+        "change_percent": -30.745935339793682,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-1c964712ebaf4353",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 231.953255,
+        "candidate_ms": 197.638365,
+        "change_ms": -34.31489000000002,
+        "change_percent": -14.793881637918815,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-1c964712ebaf4353",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 157.30829,
+        "candidate_ms": 74.318978,
+        "change_ms": -82.989312,
+        "change_percent": -52.75584141179082,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-20c4189aa599353c",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 521.183367,
+        "candidate_ms": 438.284707,
+        "change_ms": -82.89865999999995,
+        "change_percent": -15.90585295865744,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-20c4189aa599353c",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 309.000728,
+        "candidate_ms": 194.450335,
+        "change_ms": -114.55039299999999,
+        "change_percent": -37.071237256114166,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-21fe320fb2753852",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 238.442678,
+        "candidate_ms": 171.297452,
+        "change_ms": -67.14522600000001,
+        "change_percent": -28.159902649642277,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-21fe320fb2753852",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 159.292062,
+        "candidate_ms": 86.228065,
+        "change_ms": -73.06399699999999,
+        "change_percent": -45.867946012275226,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-2e61d68caf63c084",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 474.303826,
+        "candidate_ms": 512.823498,
+        "change_ms": 38.51967199999996,
+        "change_percent": 8.121307459155936,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-2e61d68caf63c084",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 307.067642,
+        "candidate_ms": 249.123987,
+        "change_ms": -57.94365499999998,
+        "change_percent": -18.869997054264665,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-2f7fdb8d0fe0b7c9",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 404.543971,
+        "candidate_ms": 251.887405,
+        "change_ms": -152.656566,
+        "change_percent": -37.73546930452215,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-2f7fdb8d0fe0b7c9",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 313.599933,
+        "candidate_ms": 187.552952,
+        "change_ms": -126.04698100000002,
+        "change_percent": -40.19356120206824,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-3343d05e75cc7b70",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 245.07119,
+        "candidate_ms": 151.876951,
+        "change_ms": -93.19423900000001,
+        "change_percent": -38.02741521759453,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-3343d05e75cc7b70",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 165.694466,
+        "candidate_ms": 104.042401,
+        "change_ms": -61.65206500000001,
+        "change_percent": -37.208282502325694,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-381461edb268d363",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "failed",
+        "candidate_status": "passed"
+      },
+      {
+        "identity": [
+          "media-381461edb268d363",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "failed",
+        "candidate_status": "passed"
+      },
+      {
+        "identity": [
+          "media-3db6015a6e260682",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 843.036763,
+        "candidate_ms": 696.507791,
+        "change_ms": -146.52897199999995,
+        "change_percent": -17.381089227777835,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-3db6015a6e260682",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 466.590361,
+        "candidate_ms": 302.173073,
+        "change_ms": -164.41728799999999,
+        "change_percent": -35.23803784707845,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-50d7ace2c55e61d9",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 742.18537,
+        "candidate_ms": 688.168341,
+        "change_ms": -54.01702899999998,
+        "change_percent": -7.278104794763063,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-50d7ace2c55e61d9",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 609.202368,
+        "candidate_ms": 469.675613,
+        "change_ms": -139.52675499999998,
+        "change_percent": -22.90318658117888,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-50e83c0aca0cc5fa",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 838.382231,
+        "candidate_ms": 831.102286,
+        "change_ms": -7.279944999999998,
+        "change_percent": -0.8683324539591752,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-50e83c0aca0cc5fa",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 609.556234,
+        "candidate_ms": 423.378976,
+        "change_ms": -186.177258,
+        "change_percent": -30.54308160844763,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-54bc4f1c08f6e7dc",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 385.398637,
+        "candidate_ms": 239.955589,
+        "change_ms": -145.443048,
+        "change_percent": -37.73834000352212,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-54bc4f1c08f6e7dc",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 307.868417,
+        "candidate_ms": 157.760371,
+        "change_ms": -150.10804600000003,
+        "change_percent": -48.75720850573641,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-599e8278aaf8a1d6",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 736.393801,
+        "candidate_ms": 697.916927,
+        "change_ms": -38.476874000000066,
+        "change_percent": -5.225040453592856,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-599e8278aaf8a1d6",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 460.578455,
+        "candidate_ms": 421.814895,
+        "change_ms": -38.76356000000004,
+        "change_percent": -8.416277309367427,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-69f4a3d4f505bd87",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 233.749489,
+        "candidate_ms": 170.583417,
+        "change_ms": -63.166072000000014,
+        "change_percent": -27.022977577503926,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-69f4a3d4f505bd87",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 156.044759,
+        "candidate_ms": 86.434407,
+        "change_ms": -69.610352,
+        "change_percent": -44.6092213837185,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-6c18200f4512e6c2",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 379.697489,
+        "candidate_ms": 288.192194,
+        "change_ms": -91.50529500000005,
+        "change_percent": -24.09952597816628,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-6c18200f4512e6c2",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 312.927662,
+        "candidate_ms": 227.757942,
+        "change_ms": -85.16971999999998,
+        "change_percent": -27.21706334801427,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-6d6f0f1f3fc6eef3",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "failed",
+        "candidate_status": "passed"
+      },
+      {
+        "identity": [
+          "media-6d6f0f1f3fc6eef3",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "failed",
+        "candidate_status": "passed"
+      },
+      {
+        "identity": [
+          "media-71393495b6d1935d",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 388.46249,
+        "candidate_ms": 246.764083,
+        "change_ms": -141.698407,
+        "change_percent": -36.47672829363783,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-71393495b6d1935d",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 155.996866,
+        "candidate_ms": 146.105746,
+        "change_ms": -9.89112,
+        "change_percent": -6.340588919267132,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-7efcece77cbaf463",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 386.043287,
+        "candidate_ms": 211.069123,
+        "change_ms": -174.97416400000003,
+        "change_percent": -45.325011441009735,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-7efcece77cbaf463",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 155.238466,
+        "candidate_ms": 124.740337,
+        "change_ms": -30.49812899999999,
+        "change_percent": -19.645987097038176,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-85e5de3436a6bc33",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 376.178656,
+        "candidate_ms": 259.05578,
+        "change_ms": -117.12287599999996,
+        "change_percent": -31.134907345726702,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-85e5de3436a6bc33",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 310.85139,
+        "candidate_ms": 203.68361,
+        "change_ms": -107.16778,
+        "change_percent": -34.475567247744976,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-8f94250ff0f84972",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 1057.361022,
+        "candidate_ms": 960.342868,
+        "change_ms": -97.0181540000001,
+        "change_percent": -9.175499378300334,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-8f94250ff0f84972",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 611.511933,
+        "candidate_ms": 558.976901,
+        "change_ms": -52.535032,
+        "change_percent": -8.591006841398796,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-8fd155efd501578d",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "failed",
+        "candidate_status": "passed"
+      },
+      {
+        "identity": [
+          "media-8fd155efd501578d",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "failed",
+        "candidate_status": "passed"
+      },
+      {
+        "identity": [
+          "media-9b9bac2ce514eea5",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "failed",
+        "candidate_status": "passed"
+      },
+      {
+        "identity": [
+          "media-9b9bac2ce514eea5",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "failed",
+        "candidate_status": "passed"
+      },
+      {
+        "identity": [
+          "media-9f484207b57630e9",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 381.193173,
+        "candidate_ms": 263.030277,
+        "change_ms": -118.16289599999999,
+        "change_percent": -30.998166905785585,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-9f484207b57630e9",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 307.326134,
+        "candidate_ms": 216.3174,
+        "change_ms": -91.00873400000003,
+        "change_percent": -29.613080025273742,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-b09a17e7b98a54bc",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 224.155428,
+        "candidate_ms": 137.216682,
+        "change_ms": -86.93874600000001,
+        "change_percent": -38.78502821711728,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-b09a17e7b98a54bc",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 158.286441,
+        "candidate_ms": 77.873931,
+        "change_ms": -80.41251,
+        "change_percent": -50.801894016936046,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-b56fd2e3cd2a4c33",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 5488.362247,
+        "candidate_ms": 5420.487674,
+        "change_ms": -67.87457300000005,
+        "change_percent": -1.236699947003339,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-b56fd2e3cd2a4c33",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 2735.01695,
+        "candidate_ms": 2661.743175,
+        "change_ms": -73.27377500000011,
+        "change_percent": -2.6790976560492674,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-bcbd916cecabde14",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 376.483775,
+        "candidate_ms": 286.039705,
+        "change_ms": -90.44406999999995,
+        "change_percent": -24.02336461909944,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-bcbd916cecabde14",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 308.568192,
+        "candidate_ms": 213.333235,
+        "change_ms": -95.23495700000001,
+        "change_percent": -30.863504233125884,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-c3b1ca6db3711fdd",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 371.849249,
+        "candidate_ms": 229.320737,
+        "change_ms": -142.52851199999998,
+        "change_percent": -38.32964901322148,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-c3b1ca6db3711fdd",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 307.621051,
+        "candidate_ms": 140.88181,
+        "change_ms": -166.73924100000002,
+        "change_percent": -54.20280584113861,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-c45ba1989ad2d7a1",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 777.833985,
+        "candidate_ms": 802.958302,
+        "change_ms": 25.12431700000002,
+        "change_percent": 3.2300359054123984,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-c45ba1989ad2d7a1",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 458.703869,
+        "candidate_ms": 418.452624,
+        "change_ms": -40.25124499999998,
+        "change_percent": -8.774995747855785,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-c4b0f8ceb07531cf",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 5444.981766,
+        "candidate_ms": 5549.647198,
+        "change_ms": 104.66543199999978,
+        "change_percent": 1.9222365932161756,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-c4b0f8ceb07531cf",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 2883.219498,
+        "candidate_ms": 2774.244836,
+        "change_ms": -108.97466200000008,
+        "change_percent": -3.7796172672802886,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-d0fa893a9e3c41d2",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 545.718589,
+        "candidate_ms": 454.551232,
+        "change_ms": -91.16735699999992,
+        "change_percent": -16.70592844694171,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-d0fa893a9e3c41d2",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 313.612388,
+        "candidate_ms": 182.663771,
+        "change_ms": -130.948617,
+        "change_percent": -41.75492487241927,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-d2ad5b7104ac36dc",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 226.420785,
+        "candidate_ms": 160.401336,
+        "change_ms": -66.01944900000001,
+        "change_percent": -29.157857128708397,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-d2ad5b7104ac36dc",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 156.143319,
+        "candidate_ms": 90.504303,
+        "change_ms": -65.639016,
+        "change_percent": -42.03767181354714,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-d4f05aef2231ee04",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 416.153867,
+        "candidate_ms": 251.739355,
+        "change_ms": -164.414512,
+        "change_percent": -39.5081062649359,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-d4f05aef2231ee04",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 308.641978,
+        "candidate_ms": 187.437021,
+        "change_ms": -121.20495700000001,
+        "change_percent": -39.270405725562064,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-ec52c52e86985154",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "failed",
+        "candidate_status": "passed"
+      },
+      {
+        "identity": [
+          "media-ec52c52e86985154",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "failed",
+        "candidate_status": "passed"
+      },
+      {
+        "identity": [
+          "media-f37781f855ffe126",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 226.556134,
+        "candidate_ms": 198.020825,
+        "change_ms": -28.535308999999984,
+        "change_percent": -12.595248910806356,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-f37781f855ffe126",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 155.837236,
+        "candidate_ms": 112.555713,
+        "change_ms": -43.28152299999999,
+        "change_percent": -27.773543801816402,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-f59e785b6878973e",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 219.66174,
+        "candidate_ms": 210.767241,
+        "change_ms": -8.894498999999996,
+        "change_percent": -4.0491798890421205,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-f59e785b6878973e",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 156.052641,
+        "candidate_ms": 132.73261,
+        "change_ms": -23.320031,
+        "change_percent": -14.943695185523964,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-f73ab903b7f49ec8",
+          "browser",
+          "cold",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 683.32836,
+        "candidate_ms": 500.459446,
+        "change_ms": -182.86891399999996,
+        "change_percent": -26.761499259301925,
+        "regression": false
+      },
+      {
+        "identity": [
+          "media-f73ab903b7f49ec8",
+          "browser",
+          "warm",
+          0
+        ],
+        "baseline_status": "passed",
+        "candidate_status": "passed",
+        "metric": "ready_ms",
+        "baseline_ms": 306.346638,
+        "candidate_ms": 310.424158,
+        "change_ms": 4.077519999999993,
+        "change_percent": 1.3310150966957979,
+        "regression": false
+      }
+    ],
+    "paired_successes": 70,
+    "baseline_p50_ms": 313.6061605,
+    "candidate_p50_ms": 228.5393395,
+    "baseline_p95_ms": 1980.0717823999953,
+    "candidate_p95_ms": 1896.1130368499953,
+    "regressions": 0,
+    "missing": 0,
+    "baseline_failures": 10,
+    "candidate_failures": 0
+  },
+  "publication_to_response_p95_ms": {
+    "baseline": 144.5179966,
+    "candidate": 5.987445
+  },
+  "binary_sha256": {
+    "baseline": [
+      "9796d09a0625c52af0552eabc084053226c84367032711a46d573cbc829329f2"
+    ],
+    "candidate": [
+      "9cd66c8e71beb0cb903bec56475c4324e4a80c45f0a4f33fe0fb2f1992e6f592"
+    ]
+  },
+  "conditions": {
+    "fixtures": 40,
+    "cold_per_fixture": 1,
+    "warm_per_fixture": 1,
+    "cpu_limit": 4,
+    "memory_limit_gib": 3,
+    "qsv": true,
+    "vaapi": false
+  },
+  "limitations": [
+    "This screen predates the final HLS inspection and live-buffer changes.",
+    "It is not the required20cold/20warm campaign.",
+    "Gateway startup is not browser first-frame latency."
+  ]
+}

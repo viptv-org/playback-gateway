@@ -1,0 +1,227 @@
+{
+  "scope": "Focused controlled HDR pipeline experiment, not completed fleet qualification",
+  "input": {
+    "video": "HEVC Main10",
+    "width": 3840,
+    "height": 2160,
+    "transfer": "smpte2084",
+    "media_seconds": 30,
+    "owned_excerpt_sha256": "c1956392d0664c6fee422ba0b73eba275131b1c7d7009b694ef95578892958bf"
+  },
+  "resources": {
+    "cpu_limit": 4,
+    "memory_gib": 3,
+    "hardware": "Intel i5-9500 / UHD630 i915"
+  },
+  "ffmpeg_version": "9.0.2",
+  "ffmpeg_sha256": "c31043104db61a2c61b400306e93c34c16c1f47c2870d93bbca88757aefa3f0b",
+  "trials_per_pipeline": 2,
+  "baseline": "Software HEVC decode, CPU linear-light resize/Mobius tone map, QSV H264 encode",
+  "candidate": "QSV HEVC decode, native-bit-depth download, same CPU filters, QSV H264 encode",
+  "median_processing_seconds": {
+    "before": 50.25379438744858,
+    "after": 33.246679084491916,
+    "reduction_percent": 33.84245012791387
+  },
+  "median_cpu_seconds": {
+    "before": 199.30060250000005,
+    "after": 115.43393499999999,
+    "reduction_percent": 42.08048869295317
+  },
+  "decoded_output_psnr_db": 48.10928,
+  "trials": [
+    {
+      "mode": "cpu",
+      "trial": 0,
+      "returncode": 0,
+      "media_seconds": 30.0,
+      "wall_seconds": 48.852683926932514,
+      "status": "passed",
+      "cpu_seconds": 193.656532
+    },
+    {
+      "mode": "qsv",
+      "trial": 0,
+      "returncode": 0,
+      "media_seconds": 30.0,
+      "wall_seconds": 33.31310456292704,
+      "status": "passed",
+      "cpu_seconds": 115.85890400000004
+    },
+    {
+      "mode": "qsv",
+      "trial": 1,
+      "returncode": 0,
+      "media_seconds": 30.0,
+      "wall_seconds": 33.180253606056795,
+      "status": "passed",
+      "cpu_seconds": 115.00896599999994
+    },
+    {
+      "mode": "cpu",
+      "trial": 1,
+      "returncode": 0,
+      "media_seconds": 30.0,
+      "wall_seconds": 51.654904847964644,
+      "status": "passed",
+      "cpu_seconds": 204.9446730000001
+    }
+  ],
+  "vpp_experiment": {
+    "selected": false,
+    "psnr_db": 27.33102,
+    "reason": "Did not meet unchanged-output quality threshold; exploratory5s/6CPU run is not a matched throughput comparison"
+  },
+  "same_origin_six_cpu_control": {
+    "cpu_budget": 6,
+    "results": [
+      {
+        "origin": "owned",
+        "returncode": 0,
+        "wall_seconds": 33.47653437405825,
+        "media_seconds": 30.0,
+        "cpu_seconds": 115.95025600000001,
+        "publication": [
+          {
+            "wall_seconds": 1.4399941149167717,
+            "media_seconds": 1.001
+          },
+          {
+            "wall_seconds": 3.636856417870149,
+            "media_seconds": 3.0029999999999997
+          },
+          {
+            "wall_seconds": 5.841808867873624,
+            "media_seconds": 5.004999999999999
+          },
+          {
+            "wall_seconds": 8.053545210976154,
+            "media_seconds": 7.007
+          },
+          {
+            "wall_seconds": 10.305592503864318,
+            "media_seconds": 9.008999999999999
+          },
+          {
+            "wall_seconds": 12.528812263859436,
+            "media_seconds": 11.011
+          },
+          {
+            "wall_seconds": 14.761564258020371,
+            "media_seconds": 13.012999999999998
+          },
+          {
+            "wall_seconds": 16.961805467959493,
+            "media_seconds": 15.014999999999999
+          },
+          {
+            "wall_seconds": 19.178856994956732,
+            "media_seconds": 17.017
+          },
+          {
+            "wall_seconds": 21.39959528297186,
+            "media_seconds": 19.019
+          },
+          {
+            "wall_seconds": 23.601874890970066,
+            "media_seconds": 21.020999999999997
+          },
+          {
+            "wall_seconds": 25.81954911793582,
+            "media_seconds": 23.022999999999996
+          },
+          {
+            "wall_seconds": 28.042812295956537,
+            "media_seconds": 25.025
+          },
+          {
+            "wall_seconds": 30.233441299991682,
+            "media_seconds": 27.026999999999997
+          },
+          {
+            "wall_seconds": 32.385073706973344,
+            "media_seconds": 29.028999999999996
+          },
+          {
+            "wall_seconds": 33.46242018695921,
+            "media_seconds": 30.030066999999995
+          }
+        ]
+      },
+      {
+        "origin": "original_https",
+        "returncode": 0,
+        "wall_seconds": 36.07253359700553,
+        "media_seconds": 30.0,
+        "cpu_seconds": 116.38799199999998,
+        "publication": [
+          {
+            "wall_seconds": 3.780569937080145,
+            "media_seconds": 1.001
+          },
+          {
+            "wall_seconds": 5.981799028115347,
+            "media_seconds": 3.0029999999999997
+          },
+          {
+            "wall_seconds": 8.219612155109644,
+            "media_seconds": 5.004999999999999
+          },
+          {
+            "wall_seconds": 10.417717788135633,
+            "media_seconds": 7.007
+          },
+          {
+            "wall_seconds": 12.998575328150764,
+            "media_seconds": 9.008999999999999
+          },
+          {
+            "wall_seconds": 15.204803430009633,
+            "media_seconds": 11.011
+          },
+          {
+            "wall_seconds": 17.421420668018982,
+            "media_seconds": 13.012999999999998
+          },
+          {
+            "wall_seconds": 19.606006177142262,
+            "media_seconds": 15.014999999999999
+          },
+          {
+            "wall_seconds": 21.82582228607498,
+            "media_seconds": 17.017
+          },
+          {
+            "wall_seconds": 24.036899844184518,
+            "media_seconds": 19.019
+          },
+          {
+            "wall_seconds": 26.25389814400114,
+            "media_seconds": 21.020999999999997
+          },
+          {
+            "wall_seconds": 28.468896751990542,
+            "media_seconds": 23.022999999999996
+          },
+          {
+            "wall_seconds": 30.653896435163915,
+            "media_seconds": 25.025
+          },
+          {
+            "wall_seconds": 32.81288082199171,
+            "media_seconds": 27.026999999999997
+          },
+          {
+            "wall_seconds": 34.98462594812736,
+            "media_seconds": 29.028999999999996
+          },
+          {
+            "wall_seconds": 36.05703600007109,
+            "media_seconds": 30.030066999999995
+          }
+        ]
+      }
+    ]
+  },
+  "formal_qualification_complete": false
+}

@@ -1,0 +1,989 @@
+{
+  "compare-upstream": {
+    "planned": 30,
+    "completed": 30,
+    "passed": 30,
+    "results": [
+      {
+        "fixture": "media-0c1a887d3e09ee34",
+        "trial": 2,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 178.375059,
+        "media_seconds": 3.107744,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "copy",
+          "format": "hls",
+          "height": null,
+          "mode": "remux",
+          "video_mode": "copy",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-0c1a887d3e09ee34",
+        "trial": 2,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 88.816357,
+        "media_seconds": 3.066033,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "copy",
+          "format": "hls",
+          "height": null,
+          "mode": "remux",
+          "video_mode": "copy",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-0c1a887d3e09ee34",
+        "trial": 1,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 182.128296,
+        "media_seconds": 3.066033,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "copy",
+          "format": "hls",
+          "height": null,
+          "mode": "remux",
+          "video_mode": "copy",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-0c1a887d3e09ee34",
+        "trial": 1,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 86.171987,
+        "media_seconds": 3.066033,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "copy",
+          "format": "hls",
+          "height": null,
+          "mode": "remux",
+          "video_mode": "copy",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-e466ded6f7bad61c",
+        "trial": 1,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 957.774762,
+        "media_seconds": 3.054667,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "copy",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-e466ded6f7bad61c",
+        "trial": 1,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 619.391291,
+        "media_seconds": 3.054667,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "copy",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-cdd9b6f75ede2a02",
+        "trial": 1,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 329.34483,
+        "media_seconds": 3.2579,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-cdd9b6f75ede2a02",
+        "trial": 1,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 271.858478,
+        "media_seconds": 3.224533,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-cdd9b6f75ede2a02",
+        "trial": 0,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 399.223174,
+        "media_seconds": 3.191167,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-cdd9b6f75ede2a02",
+        "trial": 0,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 265.230248,
+        "media_seconds": 3.0577,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-a191d564a5958a3c",
+        "trial": 1,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 660.463211,
+        "media_seconds": 3.121333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-a191d564a5958a3c",
+        "trial": 1,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 535.223473,
+        "media_seconds": 3.054667,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-0c1a887d3e09ee34",
+        "trial": 0,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 176.332792,
+        "media_seconds": 3.066033,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "copy",
+          "format": "hls",
+          "height": null,
+          "mode": "remux",
+          "video_mode": "copy",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-0c1a887d3e09ee34",
+        "trial": 0,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 74.712904,
+        "media_seconds": 3.107744,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "copy",
+          "format": "hls",
+          "height": null,
+          "mode": "remux",
+          "video_mode": "copy",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-a191d564a5958a3c",
+        "trial": 0,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 640.807626,
+        "media_seconds": 3.054667,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-a191d564a5958a3c",
+        "trial": 0,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 552.023592,
+        "media_seconds": 3.054667,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-a191d564a5958a3c",
+        "trial": 2,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 612.678585,
+        "media_seconds": 3.054667,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-a191d564a5958a3c",
+        "trial": 2,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 515.280888,
+        "media_seconds": 3.121333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-a8a2e5970bc1c12e",
+        "trial": 2,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 343.928472,
+        "media_seconds": 3.061333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-a8a2e5970bc1c12e",
+        "trial": 2,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 229.191587,
+        "media_seconds": 3.301333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-cdd9b6f75ede2a02",
+        "trial": 2,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 365.363896,
+        "media_seconds": 3.224533,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-cdd9b6f75ede2a02",
+        "trial": 2,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 332.350861,
+        "media_seconds": 3.291267,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-a8a2e5970bc1c12e",
+        "trial": 0,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 312.797084,
+        "media_seconds": 3.061333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-a8a2e5970bc1c12e",
+        "trial": 0,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 252.134195,
+        "media_seconds": 3.101333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-e466ded6f7bad61c",
+        "trial": 0,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 942.377089,
+        "media_seconds": 3.054667,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "copy",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-e466ded6f7bad61c",
+        "trial": 0,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 681.777596,
+        "media_seconds": 3.054667,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "copy",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-e466ded6f7bad61c",
+        "trial": 2,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 891.38219,
+        "media_seconds": 3.054667,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "copy",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-e466ded6f7bad61c",
+        "trial": 2,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 661.313742,
+        "media_seconds": 3.221333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "copy",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-a8a2e5970bc1c12e",
+        "trial": 1,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 282.696024,
+        "media_seconds": 3.101333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-a8a2e5970bc1c12e",
+        "trial": 1,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 247.689105,
+        "media_seconds": 3.061333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      }
+    ]
+  },
+  "compare-jellyfin": {
+    "planned": 30,
+    "completed": 30,
+    "passed": 24,
+    "results": [
+      {
+        "fixture": "media-0c1a887d3e09ee34",
+        "trial": 2,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 261.690366,
+        "media_seconds": 3.029333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "copy",
+          "format": "hls",
+          "height": null,
+          "mode": "remux",
+          "video_mode": "copy",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-0c1a887d3e09ee34",
+        "trial": 2,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 88.616537,
+        "media_seconds": 3.029333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "copy",
+          "format": "hls",
+          "height": null,
+          "mode": "remux",
+          "video_mode": "copy",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-0c1a887d3e09ee34",
+        "trial": 1,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 173.678055,
+        "media_seconds": 3.029333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "copy",
+          "format": "hls",
+          "height": null,
+          "mode": "remux",
+          "video_mode": "copy",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-0c1a887d3e09ee34",
+        "trial": 1,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 113.27112,
+        "media_seconds": 3.029333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "copy",
+          "format": "hls",
+          "height": null,
+          "mode": "remux",
+          "video_mode": "copy",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-e466ded6f7bad61c",
+        "trial": 1,
+        "cache": "cold",
+        "status": "failed",
+        "failure": "gateway 502: source_preparation_failed"
+      },
+      {
+        "fixture": "media-e466ded6f7bad61c",
+        "trial": 1,
+        "cache": "warm",
+        "status": "failed",
+        "failure": "gateway 502: source_preparation_failed"
+      },
+      {
+        "fixture": "media-cdd9b6f75ede2a02",
+        "trial": 1,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 398.568059,
+        "media_seconds": 3.029333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-cdd9b6f75ede2a02",
+        "trial": 1,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 253.287027,
+        "media_seconds": 3.029333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-cdd9b6f75ede2a02",
+        "trial": 0,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 328.775325,
+        "media_seconds": 3.029333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-cdd9b6f75ede2a02",
+        "trial": 0,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 251.435822,
+        "media_seconds": 3.029333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-a191d564a5958a3c",
+        "trial": 1,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 618.568728,
+        "media_seconds": 3.029333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-a191d564a5958a3c",
+        "trial": 1,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 518.42839,
+        "media_seconds": 3.029333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-0c1a887d3e09ee34",
+        "trial": 0,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 181.610458,
+        "media_seconds": 3.029333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "copy",
+          "format": "hls",
+          "height": null,
+          "mode": "remux",
+          "video_mode": "copy",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-0c1a887d3e09ee34",
+        "trial": 0,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 96.47221,
+        "media_seconds": 3.029333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "copy",
+          "format": "hls",
+          "height": null,
+          "mode": "remux",
+          "video_mode": "copy",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-a191d564a5958a3c",
+        "trial": 0,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 608.382386,
+        "media_seconds": 3.029333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-a191d564a5958a3c",
+        "trial": 0,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 518.956462,
+        "media_seconds": 3.029333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-a191d564a5958a3c",
+        "trial": 2,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 599.987073,
+        "media_seconds": 3.029333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-a191d564a5958a3c",
+        "trial": 2,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 531.984897,
+        "media_seconds": 3.029333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-a8a2e5970bc1c12e",
+        "trial": 2,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 334.862382,
+        "media_seconds": 3.029333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-a8a2e5970bc1c12e",
+        "trial": 2,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 251.014355,
+        "media_seconds": 3.029333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-cdd9b6f75ede2a02",
+        "trial": 2,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 356.033675,
+        "media_seconds": 3.029333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-cdd9b6f75ede2a02",
+        "trial": 2,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 305.511834,
+        "media_seconds": 3.029333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-a8a2e5970bc1c12e",
+        "trial": 0,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 356.462788,
+        "media_seconds": 3.029333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-a8a2e5970bc1c12e",
+        "trial": 0,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 247.016445,
+        "media_seconds": 3.029333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-e466ded6f7bad61c",
+        "trial": 0,
+        "cache": "cold",
+        "status": "failed",
+        "failure": "gateway 502: source_preparation_failed"
+      },
+      {
+        "fixture": "media-e466ded6f7bad61c",
+        "trial": 0,
+        "cache": "warm",
+        "status": "failed",
+        "failure": "gateway 502: source_preparation_failed"
+      },
+      {
+        "fixture": "media-e466ded6f7bad61c",
+        "trial": 2,
+        "cache": "cold",
+        "status": "failed",
+        "failure": "gateway 502: source_preparation_failed"
+      },
+      {
+        "fixture": "media-e466ded6f7bad61c",
+        "trial": 2,
+        "cache": "warm",
+        "status": "failed",
+        "failure": "gateway 502: source_preparation_failed"
+      },
+      {
+        "fixture": "media-a8a2e5970bc1c12e",
+        "trial": 1,
+        "cache": "cold",
+        "status": "passed",
+        "ready_ms": 343.862227,
+        "media_seconds": 3.029333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      },
+      {
+        "fixture": "media-a8a2e5970bc1c12e",
+        "trial": 1,
+        "cache": "warm",
+        "status": "passed",
+        "ready_ms": 240.243584,
+        "media_seconds": 3.029333,
+        "consumer_mode": "copy",
+        "delivery": {
+          "audio_mode": "encode",
+          "format": "hls",
+          "height": null,
+          "mode": "transcode",
+          "video_mode": "encode",
+          "width": null
+        }
+      }
+    ]
+  },
+  "decision": "Retain the qualified upstream build while requalifying the correctly patched Jellyfin source candidate. The old source comparison cannot accept or reject Jellyfin; see source_candidate_validity.",
+  "jellyfin_source": "253db2a7b0a8045c54ce68ce33d7f601229b1822 with mandatory TLS-default patch",
+  "scope": "Five fixture profiles; three cold/warm repetitions each; Intel UHD630, four CPU quota, three GiB. This is a comparative screen, not full-corpus/soak acceptance.",
+  "coverage_correction": "The two profiles originally described as HDR contain 10-bit wide-gamut matrix metadata but lack PQ/HLG transfer and BT.2020 primaries. They count as unspecified-transfer compatibility only. This screen does not qualify HDR performance or quality. Corrected HDR recipes have new IDs and separate baseline/candidate runs.",
+  "source_candidate_validity": {
+    "valid_jellyfin_comparison": false,
+    "reason": "The old source-build recipe did not apply debian/patches/series. It tested the base FFmpeg tree with a TLS-default change, not the intended Jellyfin implementation. Raw trial results are preserved; they cannot support accepting or rejecting Jellyfin HDR optimizations.",
+    "discovered": "2026-10-24",
+    "corrected_recipe": "Dockerfile.jellyfin-source",
+    "requalification_required": true,
+    "official_package_tls_default_failure_still_valid": true
+  },
+  "original_decision": "Retain FFmpeg 9.0.2 with libxml2/dav1d; Jellyfin failed six large MP4 source-inspection trials and did not meet the startup improvement threshold on successful fixtures."
+}

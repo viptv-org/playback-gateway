@@ -1,0 +1,29 @@
+phase,case_id,title,failure,compatibility_passed,first_decoded_frame_ms,max_decoded_video_progress_gap_ms,capacity_reclaimed
+roku-roku50,roku-http-c98adc1d89c3,Oppenheimer,decoded_video_progress_gap,True,7363.601964985719,1601.49335800088,True
+roku-roku50,roku-http-e631ef02ba60,Interstellar,decoded_video_progress_gap,True,8111.961336020613,2001.988423988223,True
+roku-roku50,roku-http-3fe3fb278994,Pulp Fiction,decoded_video_progress_gap,True,7471.730321005452,1601.3605179905426,True
+roku-roku50,roku-http-0666d681ea22,Fight Club,decoded_video_progress_gap,True,7501.632292987779,1601.4437300036661,True
+roku-roku50,roku-http-7369507ade17,The Shawshank Redemption,decoded_video_progress_gap,True,7990.674100001343,1801.629594003316,True
+roku-roku50,roku-http-b39ad56e5006,The Dark Knight,decoded_video_progress_gap,True,7486.447310016956,1801.1294369935058,True
+roku-roku50,roku-http-1e00f4287595,Gladiator,decoded_video_progress_gap,True,7298.650210985215,1600.954179011751,True
+roku-roku50,roku-http-5117d4437fe1,Forrest Gump,decoded_video_progress_gap,True,6730.427413975121,2402.1399590128567,True
+roku-roku50,roku-http-d30220ae087e,Inception,decoded_video_progress_gap,True,6942.966222006362,1601.1455400148407,True
+roku-roku50,roku-http-5460d0fd1d40,Cloud Atlas,decoded_video_progress_gap,True,7337.901407998288,1801.3469769794028,True
+roku-roku50,roku-http-8bc71d857a60,Dune Part Two,decoded_video_progress_gap,True,6835.802210000111,1501.521698985016,True
+roku-roku50,roku-http-b8aa89ccef15,Inception,decoded_video_progress_gap,True,7925.1904980046675,2101.6445010027383,True
+roku-roku50,roku-http-9832a1d71166,Oppenheimer,decoded_video_progress_gap,True,7140.949090011418,1701.3776400126517,True
+roku-roku50,roku-http-a0024bad0134,The Matrix,decoded_video_progress_gap,True,7079.523585009156,1901.5473990002647,True
+roku-roku50,roku-http-75c2590730f4,The Godfather,playback_source_unavailable,False,,,True
+roku-roku50,roku-http-7157784b5d78,Forrest Gump,decoded_video_progress_gap,True,5995.976673992118,1201.31817102083,True
+roku-roku50,roku-http-eda765887b35,Forrest Gump,output_resolution_changed_from_source_fit,False,1657.563916000072,301.4951109944377,True
+roku-roku50,roku-http-46db511221b6,Gone Girl,output_resolution_changed_from_source_fit,False,3726.4703290129546,400.2485480159521,True
+roku-roku50,roku-http-3fd2054a03ec,Interstellar,decoded_video_progress_gap,True,8148.662452003919,1801.2634520127904,True
+roku-roku50,roku-http-778ad88098d2,Inception,decoded_video_progress_gap,True,8473.44609501306,2002.8091639978811,True
+roku-roku50,roku-http-b1ed5696ea34,Oppenheimer,decoded_video_progress_gap,True,8807.747867016587,1601.5309810172766,True
+roku-owned-formats,media-1d442c19a164a147,media-1d442c19a164a147,decoded_video_progress_gap,True,9564.975229994161,4304.132844001288,True
+roku-roku4k,roku-http-06562af8595a-roku4k,Dune Part Two,decoded_video_progress_gap,True,8096.940260002157,2201.80891797645,True
+roku-roku4k,roku-http-c98adc1d89c3-roku4k,Oppenheimer,decoded_video_progress_gap,True,9532.196825981373,2302.382382011274,True
+roku-roku4k,roku-http-b8aa89ccef15-roku4k,Inception,decoded_video_progress_gap,True,8409.605925000506,2201.6559400071856,True
+roku-roku-long-copy,roku-http-2a7db67f5534-roku-long-copy,Gladiator,output_resolution_changed_from_source_fit,False,3508.9618360216264,200.33245501690544,True
+roku-post-qualification,roku-http-c98adc1d89c3-hdr90,Oppenheimer,decoded_video_progress_gap,True,6617.812696000328,1902.0043519849423,True
+roku-post-qualification,roku-http-e631ef02ba60-audio-pcm_s24le,Interstellar,decoded_video_progress_gap,True,6940.605283016339,1701.7615359800402,True

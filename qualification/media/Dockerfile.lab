@@ -1,0 +1,7 @@
+ARG BASE_IMAGE=viptv-playback-gateway:torrent-runtime-20261010
+FROM ${BASE_IMAGE}
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends python3 iproute2 \
+    && rm -rf /var/lib/apt/lists/*
+COPY qualification/media /lab
+ENTRYPOINT ["python3", "/lab/container.py"]

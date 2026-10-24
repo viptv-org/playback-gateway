@@ -1,0 +1,42 @@
+# Research image only: do not select as a production default without the full
+# compatibility/TLS/quality/performance gates. No production driver is changed.
+ARG BASE_IMAGE=playback-media-lab:local-qualified-20261023
+FROM debian:trixie-slim AS build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential pkg-config nasm curl ca-certificates xz-utils \
+    libgnutls28-dev libx264-dev libzimg-dev libva-dev libdrm-dev libvpl-dev \
+    libdav1d-dev libxml2-dev libvulkan-dev libshaderc-dev glslang-tools \
+    ocl-icd-opencl-dev opencl-headers meson ninja-build python3-jinja2 python3-mako \
+    liblcms2-dev libxxhash-dev \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+ADD https://codeload.github.com/haasn/libplacebo/tar.gz/3188549fba13bbdf3a5a98de2a38c2e71f04e21e libplacebo.tar.gz
+RUN echo 'f191215d8d16b62fb09c488e9612998f9e68801b0c809e88dfdb949d67499d4f  libplacebo.tar.gz' | sha256sum -c - \
+    && mkdir placebo && tar -xf libplacebo.tar.gz -C placebo --strip-components=1 \
+    && meson setup placebo/build placebo --prefix=/opt/hdr-research --libdir=lib \
+       --wrap-mode=nodownload -Ddemos=false -Dtests=false -Dopengl=disabled \
+       -Dshaderc=enabled -Dglslang=disabled -Dvulkan=enabled \
+    && ninja -C placebo/build -j2 && ninja -C placebo/build install
+ENV PKG_CONFIG_PATH=/opt/hdr-research/lib/pkgconfig LD_LIBRARY_PATH=/opt/hdr-research/lib
+ADD https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz source.tar.xz
+# The same signed archive already qualified by the gateway's build.
+RUN echo '8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e  source.tar.xz' | sha256sum -c - \
+    && tar -xf source.tar.xz --strip-components=1 \
+    && ./configure --prefix=/opt/hdr-research --disable-debug --disable-doc --disable-ffplay \
+       --disable-autodetect --enable-gpl --enable-gnutls --enable-libx264 --enable-libzimg \
+       --enable-vaapi --enable-libdrm --enable-libvpl --enable-libxml2 --enable-libdav1d \
+       --enable-libplacebo --enable-vulkan --enable-opencl \
+    && make -j2 && make install \
+    && dpkg-query -W > /opt/hdr-research/build-packages.tsv \
+    && sha256sum /opt/hdr-research/bin/ffmpeg /opt/hdr-research/bin/ffprobe > /opt/hdr-research/binary-sha256.txt
+
+FROM ${BASE_IMAGE}
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libvulkan1 libshaderc1 liblcms2-2 libxxhash0 ocl-icd-libopencl1 mesa-vulkan-drivers \
+    vulkan-tools clinfo \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /opt/hdr-research /opt/hdr-research
+COPY --from=build /src/source.tar.xz /src/COPYING.GPLv2 /usr/share/doc/hdr-research/
+COPY --from=build /src/libplacebo.tar.gz /src/placebo/LICENSE /usr/share/doc/hdr-research/
+ENV LAB_FFMPEG=/opt/hdr-research/bin/ffmpeg LAB_FFPROBE=/opt/hdr-research/bin/ffprobe LD_LIBRARY_PATH=/opt/hdr-research/lib

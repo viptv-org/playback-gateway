@@ -1,0 +1,43 @@
+ARG BASE_IMAGE=playback-media-lab:20261023
+ARG HDR_RESEARCH_IMAGE=playback-media-lab:hdr-research-20261024
+FROM ${HDR_RESEARCH_IMAGE} AS hdr-dependencies
+FROM debian:trixie-slim AS build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential pkg-config nasm curl ca-certificates python3 patch \
+    libgnutls28-dev libx264-dev libzimg-dev libva-dev libdrm-dev libvpl-dev libdav1d-dev libxml2-dev \
+    ocl-icd-opencl-dev opencl-headers libvulkan-dev libshaderc-dev liblcms2-dev libxxhash-dev \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY --from=hdr-dependencies /opt/hdr-research /opt/hdr-research
+ENV PKG_CONFIG_PATH=/opt/hdr-research/lib/pkgconfig LD_LIBRARY_PATH=/opt/hdr-research/lib
+# Official v8.1.3-1 commit, pinned independently of the mutable tag/archive URL.
+ADD https://github.com/jellyfin/jellyfin-ffmpeg/archive/253db2a7b0a8045c54ce68ce33d7f601229b1822.tar.gz /src/source.tar.gz
+RUN echo '2d2619b15611f4f7b7bd73074b50039f4d1c4953888ac9e19bc47d95c95f0281  source.tar.gz' | sha256sum -c - \
+    && tar -xf source.tar.gz --strip-components=1
+# This repository stores Jellyfin's changes as a quilt series. Configuring the
+# unpatched archive tests the FFmpeg base, not Jellyfin's media implementation.
+RUN while IFS= read -r patch_name; do \
+      case "$patch_name" in ''|'#'*) continue ;; esac; \
+      patch --batch --forward -p1 < "debian/patches/$patch_name" || exit 1; \
+    done < debian/patches/series \
+    && test -f libavfilter/vf_tonemapx.c \
+    && sha256sum debian/patches/*.patch > /src/applied-patch-sha256.txt
+# Preserve the gateway's existing TLS guarantee for top-level and nested HTTPS.
+# FFmpeg 9 enables this by default; Jellyfin's 8.x compatibility macro does not.
+RUN python3 -c 'from pathlib import Path; p=Path("libavformat/tls.h"); s=p.read_text(); old="#if FF_API_NO_DEFAULT_TLS_VERIFY\n#define TLS_VERIFY_DEFAULT 0\n#else\n#define TLS_VERIFY_DEFAULT 1\n#endif"; assert s.count(old)==1; p.write_text(s.replace(old,"#define TLS_VERIFY_DEFAULT 1"))'
+RUN ./configure --prefix=/opt/jellyfin-ffmpeg --disable-debug --disable-doc --disable-ffplay \
+    --disable-autodetect --enable-gpl --enable-gnutls --enable-libx264 --enable-libzimg \
+    --enable-vaapi --enable-libdrm --enable-libvpl --enable-libdav1d --enable-libxml2 \
+    --enable-opencl --enable-libplacebo --enable-vulkan --enable-libshaderc \
+    && make -j2 && make install
+
+FROM ${BASE_IMAGE}
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends libdav1d7 libxml2 \
+    libvulkan1 libshaderc1 liblcms2-2 libxxhash0 ocl-icd-libopencl1 mesa-vulkan-drivers \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /opt/jellyfin-ffmpeg /opt/jellyfin-ffmpeg
+COPY --from=hdr-dependencies /opt/hdr-research /opt/hdr-research
+COPY --from=build /src/source.tar.gz /src/COPYING.GPLv2 /usr/share/doc/media-lab-jellyfin/
+COPY --from=build /src/applied-patch-sha256.txt /src/debian/patches/series /usr/share/doc/media-lab-jellyfin/
+ENV LAB_FFMPEG=/opt/jellyfin-ffmpeg/bin/ffmpeg LAB_FFPROBE=/opt/jellyfin-ffmpeg/bin/ffprobe LD_LIBRARY_PATH=/opt/hdr-research/lib

@@ -1,0 +1,21 @@
+# Owned research runtime only. Target the Coffee Lake/UHD 630 legacy platform;
+# never install these drivers on the host running the frozen campaign.
+ARG BASE_IMAGE=playback-media-lab:hdr-research-20261024
+FROM ${BASE_IMAGE}
+USER root
+# The already-pinned official package supplies the legacy MediaSDK runtime and
+# Intel VA driver. Its stock ffmpeg/ffprobe are NOT selected for playback.
+ADD https://github.com/jellyfin/jellyfin-ffmpeg/releases/download/v8.1.3-1/jellyfin-ffmpeg8_8.1.3-1-trixie_amd64.deb /tmp/jellyfin.deb
+# Official legacy1 runtime for Gen8/9/11, with its matching compiler packages.
+# Checksums are published in the Intel 24.35.30872.22 release notes.
+ADD https://github.com/intel/compute-runtime/releases/download/24.35.30872.22/intel-opencl-icd-legacy1_24.35.30872.22_amd64.deb /tmp/intel-opencl.deb
+ADD https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17537.20/intel-igc-core_1.0.17537.20_amd64.deb /tmp/intel-igc-core.deb
+ADD https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17537.20/intel-igc-opencl_1.0.17537.20_amd64.deb /tmp/intel-igc-opencl.deb
+RUN echo 'fbef9f81a53e175194e3f67832618a86111f7bd37197df21a5d748c34289f9c0  /tmp/jellyfin.deb\n1ac4639c148ab6c9db6bc5a7733ca40bac3782cccc5b3da8e8cb7da8e8f20b1b  /tmp/intel-opencl.deb\n7f2af5b0e567a43625a748effb744d0b3c96acf805467d099e46eee617e11b2a  /tmp/intel-igc-core.deb\nac2088331d55c7de15bd57373f73630e95b40e1275934bcfd96bf0c3e03769a7  /tmp/intel-igc-opencl.deb' | sha256sum -c - \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends /tmp/jellyfin.deb \
+       /tmp/intel-igc-core.deb /tmp/intel-igc-opencl.deb /tmp/intel-opencl.deb \
+    && dpkg-query -W > /usr/share/doc/hdr-research-intel-packages.tsv \
+    && rm -rf /var/lib/apt/lists/* /tmp/*.deb
+ENV LD_LIBRARY_PATH=/opt/hdr-research/lib:/usr/lib/jellyfin-ffmpeg/lib \
+    LIBVA_DRIVERS_PATH=/usr/lib/jellyfin-ffmpeg/lib/dri LIBVA_DRIVER_NAME=iHD

@@ -1,0 +1,86 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Owned gateway browser qualification</title>
+<style>body{background:#111;color:#eee;font:18px sans-serif;margin:24px}video,canvas.player-canvas{display:block;width:960px;max-width:100%;background:black}button{padding:12px;margin:12px}pre{white-space:pre-wrap}</style>
+<h1>Media laboratory</h1><div id="catalog"></div><button id="play" hidden>Play selected source</button>
+<video playsinline></video><canvas class="player-canvas"></canvas><button id="stop" hidden>Stop</button><pre id="status">Loading real backend…</pre>
+<script type="module">
+import {Html5FallbackAdapter,VizioHtml5Adapter} from '/lab/player.mjs';
+// Test-only driver for the current backend contract. All responses and media are real.
+const status=document.querySelector('#status'),catalog=document.querySelector('#catalog'),video=document.querySelector('video');
+const m=window.__mediaLab??={draws:[],audio:[],videos:[]};m.videoMarkers=[];m.audioMarkers=[];
+let card,source,lease,renewTimer,context,lastWhite=false,audioNode;
+const profile=window.__labPlayerProfile??'browser';
+if(profile==='mse')video.canPlayType=()=>''; // Explicit non-native-HLS capability profile; media and decoder stay real.
+const player=profile==='browser'?new Html5FallbackAdapter(video,document.querySelector('.player-canvas')):new VizioHtml5Adapter(video);
+window.__labPlayer=player;
+const call=async(path,method='GET',body)=>{
+ const r=await fetch(path,{method,credentials:'omit',headers:{Authorization:'Bearer member-token-1',...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});
+ const data=await r.text();const value=data?JSON.parse(data):{};
+ if(!r.ok)throw Error(path.split('?')[0]+' returned '+r.status+' '+String(value.error_code??'request_failed'));
+ return value;
+};
+const fail=e=>{status.textContent=String(e.message);window.__labFailure=String(e.message);};
+player.subscribe(snapshot=>{if(snapshot.error)fail(new Error(snapshot.error.message));});
+const fields=c=>c.metadata_origin?{metadata_origin:c.metadata_origin,card:c}:{metadata_provider_id:c.provider_id.startsWith('addon:')?'stremio':c.provider_id,...(c.provider_id.startsWith('addon:')?{metadata_addon_id:Number(c.provider_id.slice(6))}:{})};
+const markerCanvas=document.createElement('canvas');markerCanvas.width=1;markerCanvas.height=1;const markerContext=markerCanvas.getContext('2d',{willReadFrequently:true});
+const tick=(callbackTime,meta)=>{
+ const now=meta.expectedDisplayTime??callbackTime;
+ m.draws.push({t:now,pts:meta.mediaTime});
+ try{markerContext.drawImage(video,10,10,1,1,0,0,1,1);const p=markerContext.getImageData(0,0,1,1).data;const white=p[0]>220&&p[1]>220&&p[2]>220;if(white&&!lastWhite)m.videoMarkers.push({t:now,pts:meta.mediaTime});lastWhite=white;}catch{}
+ video.requestVideoFrameCallback(tick);
+};video.requestVideoFrameCallback(tick);
+async function observeAudio(){
+ context=new AudioContext();await context.resume();
+ const code=`class Marker extends AudioWorkletProcessor{constructor(){super();this.high=false;this.last=-1;this.started=false;this.quietPeak=Infinity;}process(inputs,outputs){const input=inputs[0],output=outputs[0];for(let c=0;c<output.length;c++)if(input[c])output[c].set(input[c]);const a=input[0];let peak=0;if(a)for(const x of a)peak=Math.max(peak,Math.abs(x));if(peak>.0001)this.quietPeak=Math.min(this.quietPeak,peak);const threshold=Math.max(.0002,2*this.quietPeak);if(a)for(let n=0;n<a.length;n++){if(!this.started&&Math.abs(a[n])>.001){this.started=true;this.port.postMessage({kind:'start',contextTime:currentTime+n/sampleRate});}const high=Math.abs(a[n])>threshold;if(high&&!this.high&&currentTime-this.last>.5){this.last=currentTime;this.port.postMessage({kind:'marker',contextTime:currentTime+n/sampleRate});}this.high=high;}return true;}}registerProcessor('marker',Marker);`;
+ const url=URL.createObjectURL(new Blob([code],{type:'text/javascript'}));
+ try{await context.audioWorklet.addModule(url);}finally{URL.revokeObjectURL(url);}
+ audioNode=new AudioWorkletNode(context,'marker');
+ audioNode.port.onmessage=({data})=>{if(!context)return;const stamp=context.getOutputTimestamp();const t=stamp.performanceTime+(data.contextTime-stamp.contextTime)*1000;if(data.kind==='marker')m.audioMarkers.push({t,contextTime:data.contextTime});if(data.kind==='start')m.firstAudioSignal??=t;m.audio.push({t,when:0,contextTime:0,state:context.state});};
+ context.createMediaElementSource(video).connect(audioNode).connect(context.destination);
+}
+async function stop(){clearTimeout(renewTimer);await player.stop();if(lease){const id=lease.id;lease=undefined;await call('/api/playback/'+id,'DELETE');}await context?.close();context=undefined;document.querySelector('#stop').hidden=true;status.textContent='Released';}
+function renew(){const current=lease;if(!current)return;renewTimer=setTimeout(async()=>{try{const updated=await call('/api/playback/'+current.id+'/heartbeat','POST');if(lease!==current)return;if(updated.status!=='ready')throw Error('lease no longer ready');lease=updated;renew();}catch(e){if(lease===current){await player.pause();fail(e);}}},current.renew_after_seconds*1000);}
+document.querySelector('#stop').onclick=()=>stop().catch(fail);
+document.querySelector('#play').onclick=async()=>{try{
+ window.__labPlayRequested=performance.now();
+ if(profile!=='browser')await observeAudio();
+ const fixture=window.__labFixture;
+ lease=await call('/api/playback','POST',{request_id:crypto.randomUUID(),stream_id:source.id,client:{platform:'web',max_width:1920,max_height:1080,can_play_direct:false,video_codecs:['h264'],audio_codecs:['aac']},force_gateway:true,resume:false,position:0,
+  ...(fixture?.subtitles&&profile!=='browser'?{subtitle_track:2}:{subtitles_off:true}),...(fixture?.multi_audio?{audio_track:2}:{})});
+ const until=Date.now()+45000;
+ while(lease.status==='starting'&&Date.now()<until){await new Promise(r=>setTimeout(r,100));lease=await call('/api/playback/'+lease.id);}
+ if(lease.status!=='ready'||lease.delivery?.kind!=='gateway')throw Error('gateway not ready');
+ renew();const delivery=lease.delivery;
+ video.textTracks.onaddtrack=event=>{if(fixture?.subtitles)event.track.mode='showing';};
+ await player.open({url:delivery.url,kind:delivery.live?'live':'vod',startAtSeconds:delivery.position??0,timelineOffsetSeconds:delivery.timeline_offset_seconds??0,timelineDurationSeconds:delivery.duration,deliveryMode:'managed',deliveryFormat:delivery.format});
+ document.querySelector('#stop').hidden=false;await player.play();status.textContent='Playing through real backend, gateway and shared browser adapter';
+}catch(e){fail(e);}};
+async function select(c){card=c;status.textContent='Resolving approved sources';
+ let sources=[];
+ if(c.channelId){
+  await call('/api/profiles/1/live/'+encodeURIComponent(c.channelId)+'/guide');
+  sources=(await call('/api/profiles/1/live/'+encodeURIComponent(c.channelId)+'/sources','POST',{})).streams??[];
+ }else{
+ const f=fields(c);const query=new URLSearchParams(c.metadata_origin?{metadata_origin:JSON.stringify(c.metadata_origin),card:JSON.stringify(c)}:{provider_id:f.metadata_provider_id,...(f.metadata_addon_id?{addon_id:f.metadata_addon_id}:{})});
+ await call('/api/meta/'+encodeURIComponent(c.identity.kind)+'/'+encodeURIComponent(c.identity.id)+'?'+query);
+ const job=await call('/api/streams','POST',{type:c.identity.kind,id:c.identity.id,...f});let after=0;const until=Date.now()+60000;
+ while(Date.now()<until){const page=await call('/api/streams/'+job.id+'?after='+after+'&wait_ms=10000');for(const event of page.events)for(const stream of event.streams??[])sources.push(stream);after+=page.events.length;if(page.done)break;}
+ }
+ if(!sources.length)throw Error('No approved fixture source');
+ const ranked=await call('/api/profiles/1/source-ranking','POST',{ids:sources.map(s=>s.id),device_max_height:1080});source=ranked.streams[0];if(!source)throw Error('No ranked source');
+ document.querySelector('#play').hidden=false;status.textContent='Source ready';
+}
+try{const boot=await call('/api/bootstrap');if(boot.contract_version!==3)throw Error('Unexpected backend contract');
+ let cards=[];
+ if(window.__labFixture?.live){const live=await call('/api/profiles/1/live/channels');cards=live.channels.map(channel=>({...channel.card,channelId:channel.id}));}
+ else{
+ let home=boot.home;const until=Date.now()+30000;
+ while(!home?.rows?.some(r=>r.cards.length)&&Date.now()<until){await new Promise(r=>setTimeout(r,250));home=await call('/api/profiles/1/home');}
+ cards=home.rows.flatMap(r=>r.cards);
+ }
+ const unique=new Map(cards.map(c=>[c.identity.id,c]));
+ if(!unique.size)throw Error('No fixture catalog cards');
+ for(const c of unique.values()){const b=document.createElement('button');b.className='media-card';b.textContent=c.title;b.onclick=()=>select(c).catch(fail);catalog.append(b);}status.textContent='Catalog ready';
+}catch(e){fail(e);}
+</script>

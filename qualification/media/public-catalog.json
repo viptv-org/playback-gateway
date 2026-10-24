@@ -1,0 +1,3569 @@
+{
+  "verified_on": "2026-10-23",
+  "verified_assets": 111,
+  "scope": "Reachability, stream inspection and two-second decode; not gateway/browser acceptance. Do not load-test third-party origins.",
+  "assets": [
+    {
+      "id": "public-1e06c9786928ac50",
+      "url": "https://samples.ffmpeg.org/V-codecs/WVC1/FlightSimX_720p60_51_15Mbps.wmv",
+      "catalog": "https://samples.ffmpeg.org/V-codecs/WVC1/",
+      "license": "reference-only; redistribution not established",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792752266.7125895,
+      "http_status": 206,
+      "final_url": "https://samples.ffmpeg.org/V-codecs/WVC1/FlightSimX_720p60_51_15Mbps.wmv",
+      "initial_bytes_sha256": "00fa7a56ae23a2d40d121e7f8cc4f4fd9a84e467a803e2246ac6bfdb72a4878d",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "vc1"
+        ],
+        "audio_codecs": [
+          "wmapro"
+        ],
+        "video_dimensions": [
+          "1280x720"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          6
+        ]
+      }
+    },
+    {
+      "id": "public-80cfe48d3a4f513d",
+      "url": "https://samples.ffmpeg.org/V-codecs/WVC1/Test_1440x576_WVC1_6Mbps.wmv",
+      "catalog": "https://samples.ffmpeg.org/V-codecs/WVC1/",
+      "license": "reference-only; redistribution not established",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792752266.7127879,
+      "http_status": 206,
+      "final_url": "https://samples.ffmpeg.org/V-codecs/WVC1/Test_1440x576_WVC1_6Mbps.wmv",
+      "initial_bytes_sha256": "620dc9f68d3292d4a8789adb60bf5e78877125192337f808159bb790c6111f8b",
+      "media": {
+        "stream_count": 1,
+        "video_codecs": [
+          "vc1"
+        ],
+        "audio_codecs": [],
+        "video_dimensions": [
+          "1440x576"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": []
+      }
+    },
+    {
+      "id": "public-85091a7d45f88716",
+      "url": "https://samples.ffmpeg.org/V-codecs/WVC1/vc1-interlaced-bframes.m2ts",
+      "catalog": "https://samples.ffmpeg.org/V-codecs/WVC1/",
+      "license": "reference-only; redistribution not established",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792752269.100017,
+      "http_status": 206,
+      "final_url": "https://samples.ffmpeg.org/V-codecs/WVC1/vc1-interlaced-bframes.m2ts",
+      "initial_bytes_sha256": "3b77c02a131de522f3d1ac282423342af2eadf62bbf6bae5531b751e8647c625",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "vc1"
+        ],
+        "audio_codecs": [
+          "dts"
+        ],
+        "video_dimensions": [
+          "1920x1080"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          6
+        ]
+      }
+    },
+    {
+      "id": "public-d442b8d4d61489d5",
+      "url": "https://storage.googleapis.com/shaka-demo-assets/bbb-dark-truths/dash.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749256.4238923,
+      "http_status": 206,
+      "final_url": "https://storage.googleapis.com/shaka-demo-assets/bbb-dark-truths/dash.mpd",
+      "initial_bytes_sha256": "743671087846f3b1e02bd46d431b8804aa58718c3fe1f2eda5ed0eddb11df1b5",
+      "media": {
+        "stream_count": 14,
+        "video_codecs": [
+          "h264",
+          "vp9"
+        ],
+        "audio_codecs": [
+          "aac",
+          "opus"
+        ],
+        "video_dimensions": [
+          "1002x576",
+          "1252x720",
+          "250x144",
+          "418x240",
+          "626x360",
+          "834x480"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-ab84b0a76ca63e83",
+      "url": "https://storage.googleapis.com/shaka-demo-assets/bbb-dark-truths-hls/hls.m3u8",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749256.424478,
+      "http_status": 206,
+      "final_url": "https://storage.googleapis.com/shaka-demo-assets/bbb-dark-truths-hls/hls.m3u8",
+      "initial_bytes_sha256": "0a1f2a343e7f1e02c0539fa8635763392bb7ef21a28a9a9d0c5c4fc90edb80e3",
+      "media": {
+        "stream_count": 7,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1002x576",
+          "1252x720",
+          "250x144",
+          "418x240",
+          "626x360",
+          "834x480"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-5a38e807620c48c4",
+      "url": "https://storage.googleapis.com/shaka-demo-assets/hls-interstitials/interstitial.m3u8",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749264.3050282,
+      "http_status": 206,
+      "final_url": "https://storage.googleapis.com/shaka-demo-assets/hls-interstitials/interstitial.m3u8",
+      "initial_bytes_sha256": "c20ca58f590529184e63e18fd98dd5eec2d8e4d68b5570ba300b9889ffadc2a1",
+      "media": {
+        "stream_count": 1,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [],
+        "video_dimensions": [
+          "1252x720"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": []
+      }
+    },
+    {
+      "id": "public-29ed02d71ccc4013",
+      "url": "https://storage.googleapis.com/shaka-demo-assets/angel-one/dash.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749265.9965565,
+      "http_status": 206,
+      "final_url": "https://storage.googleapis.com/shaka-demo-assets/angel-one/dash.mpd",
+      "initial_bytes_sha256": "7b34d72a1544d90fac70be29fa28b951d049caf15aa63c72bc06a2eb1b6696fe",
+      "media": {
+        "stream_count": 24,
+        "video_codecs": [
+          "h264",
+          "vp9"
+        ],
+        "audio_codecs": [
+          "aac",
+          "opus"
+        ],
+        "video_dimensions": [
+          "180x144",
+          "300x240",
+          "450x360",
+          "600x480",
+          "720x576"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-8a5c8bc6d4124722",
+      "url": "https://storage.googleapis.com/shaka-demo-assets/angel-one/dash_chaining.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749266.6584425,
+      "http_status": 206,
+      "final_url": "https://storage.googleapis.com/shaka-demo-assets/angel-one/dash_chaining.mpd",
+      "initial_bytes_sha256": "7b34d72a1544d90fac70be29fa28b951d049caf15aa63c72bc06a2eb1b6696fe",
+      "media": {
+        "stream_count": 24,
+        "video_codecs": [
+          "h264",
+          "vp9"
+        ],
+        "audio_codecs": [
+          "aac",
+          "opus"
+        ],
+        "video_dimensions": [
+          "180x144",
+          "300x240",
+          "450x360",
+          "600x480",
+          "720x576"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-63b94af2767e17e5",
+      "url": "https://storage.googleapis.com/shaka-demo-assets/angel-one-hls/hls.m3u8",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749275.6172514,
+      "http_status": 206,
+      "final_url": "https://storage.googleapis.com/shaka-demo-assets/angel-one-hls/hls.m3u8",
+      "initial_bytes_sha256": "9ec5e34af0356a8d8835a58dd60dce68a319ee27360db0d0836dda16179d03fe",
+      "media": {
+        "stream_count": 15,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "192x144",
+          "320x240",
+          "480x360",
+          "640x480",
+          "768x576"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2,
+          6
+        ]
+      }
+    },
+    {
+      "id": "public-c8683026107f31d9",
+      "url": "https://storage.googleapis.com/shaka-demo-assets/angel-one-hls/playlist_v-0480p-1000k-libx264.mp4.m3u8",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749276.2157094,
+      "http_status": 206,
+      "final_url": "https://storage.googleapis.com/shaka-demo-assets/angel-one-hls/playlist_v-0480p-1000k-libx264.mp4.m3u8",
+      "initial_bytes_sha256": "8d2b259cd4aa4af7188ba74fc7b77651a25fe39eff1b8b7b4e300147697d1252",
+      "media": {
+        "stream_count": 1,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [],
+        "video_dimensions": [
+          "640x480"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": []
+      }
+    },
+    {
+      "id": "public-3395704c0757926f",
+      "url": "https://storage.googleapis.com/shaka-demo-assets/sintel/dash.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749277.746921,
+      "http_status": 206,
+      "final_url": "https://storage.googleapis.com/shaka-demo-assets/sintel/dash.mpd",
+      "initial_bytes_sha256": "30fb37eda98b4d41f728627c01153bbe8b12668a745376ab8c5a91ec64444f5f",
+      "media": {
+        "stream_count": 30,
+        "video_codecs": [
+          "h264",
+          "vp9"
+        ],
+        "audio_codecs": [
+          "aac",
+          "opus"
+        ],
+        "video_dimensions": [
+          "1024x436",
+          "1280x546",
+          "1920x818",
+          "2560x1090",
+          "256x110",
+          "3840x1636",
+          "426x182",
+          "640x272",
+          "854x364"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-a98e9eaff8f5898d",
+      "url": "https://storage.googleapis.com/shaka-demo-assets/sintel-trickplay/dash.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749291.5943978,
+      "http_status": 206,
+      "final_url": "https://storage.googleapis.com/shaka-demo-assets/sintel-trickplay/dash.mpd",
+      "initial_bytes_sha256": "cc4008fd2076d5fe73cb401e60b7bbc76b9c56d0d7f903d0940f4881732ad81a",
+      "media": {
+        "stream_count": 18,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1024x436",
+          "1280x546",
+          "256x110",
+          "426x182",
+          "640x272",
+          "854x364"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-0aca13db3a6451f1",
+      "url": "https://storage.googleapis.com/shaka-demo-assets/sintel-webm-only/dash.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749292.8113768,
+      "http_status": 206,
+      "final_url": "https://storage.googleapis.com/shaka-demo-assets/sintel-webm-only/dash.mpd",
+      "initial_bytes_sha256": "7d91d37050b44371baded3086e0099e6d2d6eda8a5595c7994c9f396f38fe4c7",
+      "media": {
+        "stream_count": 20,
+        "video_codecs": [
+          "vp9"
+        ],
+        "audio_codecs": [
+          "opus"
+        ],
+        "video_dimensions": [
+          "1024x436",
+          "1280x546",
+          "1920x818",
+          "2560x1090",
+          "256x110",
+          "3840x1636",
+          "426x182",
+          "640x272",
+          "854x364"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-8bc72ffb91499334",
+      "url": "https://storage.googleapis.com/shaka-demo-assets/sintel-mp4-only/dash.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749301.622291,
+      "http_status": 206,
+      "final_url": "https://storage.googleapis.com/shaka-demo-assets/sintel-mp4-only/dash.mpd",
+      "initial_bytes_sha256": "3a42b5f032af4fc6ab083f78c8309abc7e4614d596ecb5cdb088ef80c764722d",
+      "media": {
+        "stream_count": 20,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1024x436",
+          "1280x546",
+          "1920x818",
+          "2560x1090",
+          "256x110",
+          "3840x1636",
+          "426x182",
+          "640x272",
+          "854x364"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-5c55b5fb72f5a78c",
+      "url": "https://storage.googleapis.com/shaka-demo-assets/Sintel.mkv/Sintel.2010.720p.mkv",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749302.62627,
+      "http_status": 206,
+      "final_url": "https://storage.googleapis.com/shaka-demo-assets/Sintel.mkv/Sintel.2010.720p.mkv",
+      "initial_bytes_sha256": "0894225d05ee95b6bcb1fd1de2637a4c9fd8155b4f75711d139a88746cd855f5",
+      "media": {
+        "stream_count": 12,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "ac3"
+        ],
+        "video_dimensions": [
+          "1280x544"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          6
+        ]
+      }
+    },
+    {
+      "id": "public-d2f2d253a01518b6",
+      "url": "https://storage.googleapis.com/shaka-demo-assets/Sintel.mkv/Sintel.2010.4k.mkv",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749303.4316163,
+      "http_status": 206,
+      "final_url": "https://storage.googleapis.com/shaka-demo-assets/Sintel.mkv/Sintel.2010.4k.mkv",
+      "initial_bytes_sha256": "cae9c9dcefb7c9d71638394446ca9a45e457c296ecfe57b4ee6ed1facb560d63",
+      "media": {
+        "stream_count": 12,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "ac3"
+        ],
+        "video_dimensions": [
+          "4096x1744"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          6
+        ]
+      }
+    },
+    {
+      "id": "public-54e45391524e14a2",
+      "url": "https://storage.googleapis.com/shaka-demo-assets/sintel-mp4-wvtt/dash.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749305.362268,
+      "http_status": 206,
+      "final_url": "https://storage.googleapis.com/shaka-demo-assets/sintel-mp4-wvtt/dash.mpd",
+      "initial_bytes_sha256": "c036b69754076f60883f999b93538f6ebaa9b8fc0cd2a6085c12df9699b5a719",
+      "media": {
+        "stream_count": 20,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1024x436",
+          "1280x546",
+          "1920x818",
+          "2560x1090",
+          "256x110",
+          "3840x1636",
+          "426x182",
+          "640x272",
+          "854x364"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-f336dcfb87863194",
+      "url": "https://storage.googleapis.com/shaka-demo-assets/sintel-many-subs/dash.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749311.732058,
+      "http_status": 206,
+      "final_url": "https://storage.googleapis.com/shaka-demo-assets/sintel-many-subs/dash.mpd",
+      "initial_bytes_sha256": "7979312d7c86435e3dfd74caaec5499dd6a64b0d777cf2778f2340232944b7c0",
+      "media": {
+        "stream_count": 47,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "854x364"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2,
+          6
+        ]
+      }
+    },
+    {
+      "id": "public-502b6dcbf76a1e54",
+      "url": "https://storage.googleapis.com/shaka-demo-assets/heliocentrism-mixed-codec/heliocentrism.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749315.681435,
+      "http_status": 206,
+      "final_url": "https://storage.googleapis.com/shaka-demo-assets/heliocentrism-mixed-codec/heliocentrism.mpd",
+      "initial_bytes_sha256": "0be4feecdd9130832c13f524c3889f7de1059954b1af9650cb2249580affc0d7",
+      "media": {
+        "stream_count": 4,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [],
+        "video_dimensions": [
+          "192x144",
+          "320x240",
+          "480x360",
+          "640x480"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": []
+      }
+    },
+    {
+      "id": "public-ae428df7820529f8",
+      "url": "https://storage.googleapis.com/shaka-demo-assets/tos-surround/dash.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749327.3239865,
+      "http_status": 206,
+      "final_url": "https://storage.googleapis.com/shaka-demo-assets/tos-surround/dash.mpd",
+      "initial_bytes_sha256": "5536025817e8ed0df45930e94e9337b3e44e0ee9b7e507e7612ef04cf8574f47",
+      "media": {
+        "stream_count": 12,
+        "video_codecs": [
+          "h264",
+          "vp9"
+        ],
+        "audio_codecs": [
+          "aac",
+          "opus"
+        ],
+        "video_dimensions": [
+          "256x114",
+          "426x190",
+          "640x286",
+          "854x382"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2,
+          6
+        ]
+      }
+    },
+    {
+      "id": "public-9fbc4a0cf5c0b3aa",
+      "url": "https://storage.googleapis.com/shaka-live-assets/player-source.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749330.83308,
+      "http_status": 206,
+      "final_url": "https://storage.googleapis.com/shaka-live-assets/player-source.mpd",
+      "initial_bytes_sha256": "85a4fca45f5e45cf9bcb71cff090ffa3606f9462cf69d9e57f98352609d6795d",
+      "media": {
+        "stream_count": 12,
+        "video_codecs": [
+          "av1",
+          "h264",
+          "hevc",
+          "vp9"
+        ],
+        "audio_codecs": [
+          "aac",
+          "ac3",
+          "flac",
+          "opus"
+        ],
+        "video_dimensions": [
+          "1280x720",
+          "854x480"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-d40121c447266000",
+      "url": "https://storage.googleapis.com/shaka-live-assets/player-source.m3u8",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749334.0580838,
+      "http_status": 206,
+      "final_url": "https://storage.googleapis.com/shaka-live-assets/player-source.m3u8",
+      "initial_bytes_sha256": "c731e09bf6abc01ef90b59dbd89ba561ff7b0046286bca11024afa41b22b9d32",
+      "media": {
+        "stream_count": 12,
+        "video_codecs": [
+          "av1",
+          "h264",
+          "hevc",
+          "vp9"
+        ],
+        "audio_codecs": [
+          "aac",
+          "ac3",
+          "flac",
+          "opus"
+        ],
+        "video_dimensions": [
+          "1280x720",
+          "854x480"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-71c06ebe2d757d77",
+      "url": "https://media.axprod.net/TestVectors/v7-Clear/Manifest.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749352.6954494,
+      "http_status": 206,
+      "final_url": "https://media.axprod.net/TestVectors/v7-Clear/Manifest.mpd",
+      "initial_bytes_sha256": "2e00ac85b35d17748254e18c8623b8d8b4836192e961c1c3abd7b0ca19bc950f",
+      "media": {
+        "stream_count": 17,
+        "video_codecs": [
+          "h264",
+          "hevc"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720",
+          "1920x1080",
+          "2560x1440",
+          "3840x2160",
+          "512x288",
+          "640x360",
+          "852x480"
+        ],
+        "pixel_formats": [
+          "yuv420p",
+          "yuv420p10le"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-a91ad9f4340d0c7d",
+      "url": "https://media.axprod.net/TestVectors/v7-Clear/Manifest_MultiPeriod.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749359.3935168,
+      "http_status": 206,
+      "final_url": "https://media.axprod.net/TestVectors/v7-Clear/Manifest_MultiPeriod.mpd",
+      "initial_bytes_sha256": "3cfb8a580b089c38365757fea41037ef70ff860e50465b0cb8960d58eb20cbb8",
+      "media": {
+        "stream_count": 17,
+        "video_codecs": [
+          "h264",
+          "hevc"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720",
+          "1920x1080",
+          "2560x1440",
+          "3840x2160",
+          "512x288",
+          "640x360",
+          "852x480"
+        ],
+        "pixel_formats": [
+          "yuv420p",
+          "yuv420p10le"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-8073d10b7e86030e",
+      "url": "https://dash.akamaized.net/dash264/TestCases/1c/qualcomm/2/MultiRate.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749400.1885,
+      "http_status": 200,
+      "final_url": "https://dash.akamaized.net/dash264/TestCases/1c/qualcomm/2/MultiRate.mpd",
+      "initial_bytes_sha256": "ded44936257656b3d02716d39334af083af956fc636e6f1b0cbfa266b14854b5",
+      "media": {
+        "stream_count": 4,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-c496e1c5e3ae46b0",
+      "url": "https://livesim2.dashif.org/livesim2/segtimeline_1/utc_head/testpic_6s/Manifest.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749405.1946764,
+      "http_status": 200,
+      "final_url": "https://livesim2.dashif.org/livesim2/segtimeline_1/utc_head/testpic_6s/Manifest.mpd",
+      "initial_bytes_sha256": "b3e29cb24e42149a702ccba511f13dc0f323d36440d87a77eab46807ca6b85b0",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "640x360"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-82f2807d4e43cc7d",
+      "url": "https://livesim2.dashif.org/livesim2/segtimelinenr_1/utc_head/testpic_6s/Manifest.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749413.6040683,
+      "http_status": 200,
+      "final_url": "https://livesim2.dashif.org/livesim2/segtimelinenr_1/utc_head/testpic_6s/Manifest.mpd",
+      "initial_bytes_sha256": "98a81c9c20d1be2509d75089245f78918221fd53c9e90cd578412a69358be2a9",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "640x360"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-c0505a8b583ec32b",
+      "url": "https://livesim2.dashif.org/livesim2/chunkdur_1/ato_7/testpic4_8s/Manifest300.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749467.8995564,
+      "http_status": 200,
+      "final_url": "https://livesim2.dashif.org/livesim2/chunkdur_1/ato_7/testpic4_8s/Manifest300.mpd",
+      "initial_bytes_sha256": "0a2e516b376b4a7197016dbe2ce730eb959c3436095feea032b6126b1df232eb",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "640x360"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-5018b8b5bfb98be3",
+      "url": "https://livesim2.dashif.org/vod/testpic_2s/cea608.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749479.087203,
+      "http_status": 206,
+      "final_url": "https://livesim2.dashif.org/vod/testpic_2s/cea608.mpd",
+      "initial_bytes_sha256": "faf149b420a4bd7f5519e80d276f3fbca82b21dca23fe18e77fd04796daf4d19",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "640x360"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-bd8f6c565faf5fa9",
+      "url": "https://akamaibroadcasteruseast.akamaized.net/cmaf/live/657078/akasource/out.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749485.5501194,
+      "http_status": 200,
+      "final_url": "https://akamaibroadcasteruseast.akamaized.net/cmaf/live/657078/akasource/out.mpd",
+      "initial_bytes_sha256": "1d2f382c48effec7f09af445d95a7c56fd9ae5c4ef3e97133fc95e104df50eb6",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-c776076a12c1c574",
+      "url": "https://dash.akamaized.net/akamai/bbb_30fps/bbb_with_tiled_thumbnails.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749489.2945755,
+      "http_status": 200,
+      "final_url": "https://dash.akamaized.net/akamai/bbb_30fps/bbb_with_tiled_thumbnails.mpd",
+      "initial_bytes_sha256": "6bb9d52826f0ddea2dd5797dd566cb6815cf83d81a2471f1a8b3b5bb4fd7fa0a",
+      "media": {
+        "stream_count": 11,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1024x576",
+          "1280x720",
+          "1920x1080",
+          "320x180",
+          "3840x2160",
+          "480x270",
+          "640x360",
+          "768x432"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-ccc39d593ba87d81",
+      "url": "https://dash.akamaized.net/akamai/bbb_30fps/bbb_with_4_tiles_thumbnails.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749493.620835,
+      "http_status": 200,
+      "final_url": "https://dash.akamaized.net/akamai/bbb_30fps/bbb_with_4_tiles_thumbnails.mpd",
+      "initial_bytes_sha256": "870762bfcd635fc433d7dd6e35f487801f60ae70228ada30b4e5d306a570774b",
+      "media": {
+        "stream_count": 11,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1024x576",
+          "1280x720",
+          "1920x1080",
+          "320x180",
+          "3840x2160",
+          "480x270",
+          "640x360",
+          "768x432"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-18d72b5df7405873",
+      "url": "https://dash.akamaized.net/akamai/bbb_30fps/bbb_with_tiled_thumbnails_2.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749495.757238,
+      "http_status": 200,
+      "final_url": "https://dash.akamaized.net/akamai/bbb_30fps/bbb_with_tiled_thumbnails_2.mpd",
+      "initial_bytes_sha256": "ece2fa3a8ad073de97b264ae63b289039b41939a8c8ca1183357c7664a6cb626",
+      "media": {
+        "stream_count": 11,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1024x576",
+          "1280x720",
+          "1920x1080",
+          "320x180",
+          "3840x2160",
+          "480x270",
+          "640x360",
+          "768x432"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-b38386af10712501",
+      "url": "https://dash.akamaized.net/akamai/bbb_30fps/bbb_with_multiple_tiled_thumbnails.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749497.8882499,
+      "http_status": 200,
+      "final_url": "https://dash.akamaized.net/akamai/bbb_30fps/bbb_with_multiple_tiled_thumbnails.mpd",
+      "initial_bytes_sha256": "a765b739d806592ab682d38c0904a99115b3c954f4356644d0eccfc455603916",
+      "media": {
+        "stream_count": 11,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1024x576",
+          "1280x720",
+          "1920x1080",
+          "320x180",
+          "3840x2160",
+          "480x270",
+          "640x360",
+          "768x432"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-4e8152fef6b962c8",
+      "url": "https://livesim2.dashif.org/livesim2/patch_60/segtimelinenr_1/testpic_2s/Manifest.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749542.5922682,
+      "http_status": 200,
+      "final_url": "https://livesim2.dashif.org/livesim2/patch_60/segtimelinenr_1/testpic_2s/Manifest.mpd",
+      "initial_bytes_sha256": "8a25b527a962225f0a0b1a6ed6411faa04a2aa05e35060f31bda44e0f6944116",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "640x360"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-2d3f494d1423cea4",
+      "url": "https://livesim2.dashif.org/livesim2/patch_60/segtimelinenr_1/periods_60/testpic_2s/Manifest.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749550.938196,
+      "http_status": 200,
+      "final_url": "https://livesim2.dashif.org/livesim2/patch_60/segtimelinenr_1/periods_60/testpic_2s/Manifest.mpd",
+      "initial_bytes_sha256": "4ae5b3b6ddb37b6dca2f69102629f2edfd74072fc56aa1cea34dc26c06f77bb8",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "640x360"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-72d1641f25b70e39",
+      "url": "https://livesim2.dashif.org/livesim2/patch_60/segtimeline_1/testpic_2s/Manifest.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749560.2660272,
+      "http_status": 200,
+      "final_url": "https://livesim2.dashif.org/livesim2/patch_60/segtimeline_1/testpic_2s/Manifest.mpd",
+      "initial_bytes_sha256": "1d70d2250e0f2c0cb65f3ad10d44a553c29a6d7c0b599503f584e5348ee9cba4",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "640x360"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-3d905b8bdc54a762",
+      "url": "https://livesim2.dashif.org/livesim2/patch_60/segtimeline_1/periods_60/testpic_2s/Manifest.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749560.8222363,
+      "http_status": 200,
+      "final_url": "https://livesim2.dashif.org/livesim2/patch_60/segtimeline_1/periods_60/testpic_2s/Manifest.mpd",
+      "initial_bytes_sha256": "db75a0a499c5be371667972bdd676aae12d3055c7554f467b4d1c6000daeb87b",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "640x360"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-d2a1c9f64017714e",
+      "url": "https://dash.akamaized.net/dash264/TestCasesIOP33/MPDChaining/regular_chain/1/manifest_regular_MPDChaining_live.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749569.696231,
+      "http_status": 200,
+      "final_url": "https://dash.akamaized.net/dash264/TestCasesIOP33/MPDChaining/regular_chain/1/manifest_regular_MPDChaining_live.mpd",
+      "initial_bytes_sha256": "4ea15b255a118adb940c9d4633ff365a81a4a1443c7c19f3fae814993df555bf",
+      "media": {
+        "stream_count": 3,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-770c064a9e762e5e",
+      "url": "https://livesim2.dashif.org/vod/testpic_2s/imsc1_img.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749570.1747518,
+      "http_status": 206,
+      "final_url": "https://livesim2.dashif.org/vod/testpic_2s/imsc1_img.mpd",
+      "initial_bytes_sha256": "61605107c3d1d451a4387beed3c3c24d647a367d6d18f2e2311525bc8d002d73",
+      "media": {
+        "stream_count": 4,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "640x360"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-5cb9997f8e166e0b",
+      "url": "https://livesim2.dashif.org/vod/testpic_2s/Manifest_trickmode.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749582.4854188,
+      "http_status": 206,
+      "final_url": "https://livesim2.dashif.org/vod/testpic_2s/Manifest_trickmode.mpd",
+      "initial_bytes_sha256": "94144f19c3f94fced4b892d6d4e3c2a0f39f8cd0c6f97b6e92c656c6e9c22e59",
+      "media": {
+        "stream_count": 3,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "640x360"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-328fd8115da90073",
+      "url": "https://livesim2.dashif.org/livesim2/segtimeline_pattern/testpic_2s/Manifest.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749598.3708053,
+      "http_status": 200,
+      "final_url": "https://livesim2.dashif.org/livesim2/segtimeline_pattern/testpic_2s/Manifest.mpd",
+      "initial_bytes_sha256": "c0acd9e811db0179a12a851b3cfb91bb67d5e1f8cd512f0ab8595a8bb771110b",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "640x360"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-4184f4c635b6ea41",
+      "url": "https://livesim2.dashif.org/livesim2/segtimelinenr_pattern/testpic_2s/Manifest.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749602.2101433,
+      "http_status": 200,
+      "final_url": "https://livesim2.dashif.org/livesim2/segtimelinenr_pattern/testpic_2s/Manifest.mpd",
+      "initial_bytes_sha256": "55939a4811226538a22c670e8dd3b574264a47666e0c964c8ff7ffb02866e6ef",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "640x360"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-07b5b61d35aebfb1",
+      "url": "https://cf-sf-video.wmspanel.com/local/raw/BigBuckBunny_320x180.mp4/manifest.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749644.4879494,
+      "http_status": 200,
+      "final_url": "https://cf-sf-video.wmspanel.com/local/raw/BigBuckBunny_320x180.mp4/manifest.mpd",
+      "initial_bytes_sha256": "39db0bd9988574c88996bd72dd3e7bd31ec3c8d6145e5b135bc2ce3287c77c21",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "320x180"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-3924f655bf89be5b",
+      "url": "https://cf-sf-video.wmspanel.com/local/raw/BigBuckBunny_320x180.mp4/playlist.m3u8",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749648.859739,
+      "http_status": 200,
+      "final_url": "https://cf-sf-video.wmspanel.com/local/raw/BigBuckBunny_320x180.mp4/playlist.m3u8",
+      "initial_bytes_sha256": "05fe1eb2deb9b8d6b18e559d98ca71e78e587c003fa4d2c066b7ed1ccd439b65",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "320x180"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-b700538fef762c31",
+      "url": "https://download.tsi.telecom-paristech.fr/gpac/DASH_CONFORMANCE/TelecomParisTech/mp4-live-periods/mp4-live-periods-mpd.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749650.4420962,
+      "http_status": 206,
+      "final_url": "https://download.tsi.telecom-paristech.fr/gpac/DASH_CONFORMANCE/TelecomParisTech/mp4-live-periods/mp4-live-periods-mpd.mpd",
+      "initial_bytes_sha256": "4598cab71236f34742697f8763cf61c4bc7d41246d79db1fba385b6106ef43a5",
+      "media": {
+        "stream_count": 5,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720",
+          "1920x1080",
+          "320x180",
+          "640x360"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          1
+        ]
+      }
+    },
+    {
+      "id": "public-63c8be23af8112f6",
+      "url": "https://download.tsi.telecom-paristech.fr/gpac/DASH_CONFORMANCE/TelecomParisTech/mp4-onDemand/mp4-onDemand-mpd-AV.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749668.3339267,
+      "http_status": 206,
+      "final_url": "https://download.tsi.telecom-paristech.fr/gpac/DASH_CONFORMANCE/TelecomParisTech/mp4-onDemand/mp4-onDemand-mpd-AV.mpd",
+      "initial_bytes_sha256": "d4c27db83796af86813aa2695d206877b9b32092bcf1646163659c4a8ba2eef0",
+      "media": {
+        "stream_count": 6,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720",
+          "1920x1080",
+          "320x180",
+          "640x360"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          1
+        ]
+      }
+    },
+    {
+      "id": "public-b8993e0b7b256d95",
+      "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/bipbop_16x9_variant.m3u8",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749669.389782,
+      "http_status": 206,
+      "final_url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/bipbop_16x9_variant.m3u8",
+      "initial_bytes_sha256": "abccb34314f7228107ed03077c5150424a3aecff0275767a6b7f64c0fd99ff36",
+      "media": {
+        "stream_count": 25,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720",
+          "1920x1080",
+          "416x234",
+          "640x360",
+          "960x540"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-73e2856ebfa63d39",
+      "url": "https://storage.googleapis.com/shaka-demo-assets/apple-advanced-stream-fmp4/master.m3u8",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749678.9708743,
+      "http_status": 206,
+      "final_url": "https://storage.googleapis.com/shaka-demo-assets/apple-advanced-stream-fmp4/master.m3u8",
+      "initial_bytes_sha256": "cda30a84816f79b48a82339a52db7b0d8838ac5422f3159e293ac4dd1800dfe8",
+      "media": {
+        "stream_count": 12,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac",
+          "ac3",
+          "eac3"
+        ],
+        "video_dimensions": [
+          "1280x720",
+          "1920x1080",
+          "480x270",
+          "640x360",
+          "768x432",
+          "960x540"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2,
+          6
+        ]
+      }
+    },
+    {
+      "id": "public-5156d259be1cab36",
+      "url": "https://storage.googleapis.com/shaka-demo-assets/apple-advanced-stream-ts/master.m3u8",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749693.632795,
+      "http_status": 206,
+      "final_url": "https://storage.googleapis.com/shaka-demo-assets/apple-advanced-stream-ts/master.m3u8",
+      "initial_bytes_sha256": "c5f740a16c48c3ebbae31cae1b82d5acfbdd8901b97564ce27451173a2c28353",
+      "media": {
+        "stream_count": 12,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac",
+          "ac3",
+          "eac3"
+        ],
+        "video_dimensions": [
+          "1280x720",
+          "1920x1080",
+          "480x270",
+          "640x360",
+          "768x432",
+          "960x540"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2,
+          6
+        ]
+      }
+    },
+    {
+      "id": "public-023f774c1330127b",
+      "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749710.6003833,
+      "http_status": 206,
+      "final_url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+      "initial_bytes_sha256": "c5f740a16c48c3ebbae31cae1b82d5acfbdd8901b97564ce27451173a2c28353",
+      "media": {
+        "stream_count": 12,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac",
+          "ac3",
+          "eac3"
+        ],
+        "video_dimensions": [
+          "1280x720",
+          "1920x1080",
+          "480x270",
+          "640x360",
+          "768x432",
+          "960x540"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2,
+          6
+        ]
+      }
+    },
+    {
+      "id": "public-088fc4939cfa7ff9",
+      "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/interstitial-sample/mvp_interstitial_sample.m3u8",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749741.3323054,
+      "http_status": 206,
+      "final_url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/interstitial-sample/mvp_interstitial_sample.m3u8",
+      "initial_bytes_sha256": "e42fe693f5793e21340436f32a772c2224e7911cebe123a405ad51bd1fbddd3f",
+      "media": {
+        "stream_count": 15,
+        "video_codecs": [
+          "h264",
+          "hevc"
+        ],
+        "audio_codecs": [
+          "aac",
+          "ac3",
+          "eac3"
+        ],
+        "video_dimensions": [
+          "1024x576",
+          "1920x1080",
+          "3840x2160"
+        ],
+        "pixel_formats": [
+          "yuv420p",
+          "yuv420p10le"
+        ],
+        "audio_channel_counts": [
+          2,
+          6
+        ]
+      }
+    },
+    {
+      "id": "public-51e913e3049ade3d",
+      "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/historic_planet_content_2023-10-26-3d-video/main.m3u8",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749756.3167562,
+      "http_status": 206,
+      "final_url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/historic_planet_content_2023-10-26-3d-video/main.m3u8",
+      "initial_bytes_sha256": "37e187c687f616a24826cb96095648c91c487e66271ebab743a1aba796d3c0ea",
+      "media": {
+        "stream_count": 14,
+        "video_codecs": [
+          "hevc"
+        ],
+        "audio_codecs": [
+          "ac3",
+          "eac3"
+        ],
+        "video_dimensions": [
+          "1280x720",
+          "1920x1080",
+          "2560x1440",
+          "3840x2160",
+          "640x360",
+          "768x432",
+          "960x540"
+        ],
+        "pixel_formats": [
+          "yuv420p10le"
+        ],
+        "audio_channel_counts": [
+          6
+        ]
+      }
+    },
+    {
+      "id": "public-af28d3f5a4c74375",
+      "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/immersive-media/spatialLighthouseFlowersWaves/mvp.m3u8",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749760.0462947,
+      "http_status": 206,
+      "final_url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/immersive-media/spatialLighthouseFlowersWaves/mvp.m3u8",
+      "initial_bytes_sha256": "17dcccc81a5817f0b58fdd9cca2ddf30c2b8044dafedb8ed6397cac43453e269",
+      "media": {
+        "stream_count": 5,
+        "video_codecs": [
+          "hevc"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1072x1072",
+          "1280x1280",
+          "752x752",
+          "896x896"
+        ],
+        "pixel_formats": [
+          "yuv420p10le"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-34fe45aa82451f95",
+      "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/immersive-media/180Lighthouse/mvp.m3u8",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749785.0378847,
+      "http_status": 206,
+      "final_url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/immersive-media/180Lighthouse/mvp.m3u8",
+      "initial_bytes_sha256": "efdff85122f4125ec27ee5c61f84a0ec8fb6aa48f7668160d5832b04db392d83",
+      "media": {
+        "stream_count": 10,
+        "video_codecs": [
+          "hevc"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "2048x2048",
+          "2880x2880",
+          "4096x4096"
+        ],
+        "pixel_formats": [
+          "yuv420p10le"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-5651623fd2554fd1",
+      "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/immersive-media/360Lighthouse/mvp.m3u8",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749790.2036777,
+      "http_status": 206,
+      "final_url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/immersive-media/360Lighthouse/mvp.m3u8",
+      "initial_bytes_sha256": "e6f26737950ced2b9aac407730a905ed0e2acaebd3ec16f2097ae0d9b61c013d",
+      "media": {
+        "stream_count": 8,
+        "video_codecs": [
+          "hevc"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "4096x2048",
+          "5760x2880",
+          "7680x3840"
+        ],
+        "pixel_formats": [
+          "yuv420p10le"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-2346fe4b44e35de3",
+      "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/immersive-media/wfovCausewayWalk/mvp.m3u8",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749799.4193075,
+      "http_status": 206,
+      "final_url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/immersive-media/wfovCausewayWalk/mvp.m3u8",
+      "initial_bytes_sha256": "9431b48264b31ee34b3e987e9e899998e33f9c647cada0bd5d6dc59ca59882e3",
+      "media": {
+        "stream_count": 10,
+        "video_codecs": [
+          "hevc"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "2048x2048",
+          "2880x2880",
+          "3840x3840"
+        ],
+        "pixel_formats": [
+          "yuv420p10le"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-8466fbf85f50282a",
+      "url": "https://d3mfda3gpj3dw1.cloudfront.net/vn9s0p86SVbJorX6/master.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749804.5059235,
+      "http_status": 206,
+      "final_url": "https://d3mfda3gpj3dw1.cloudfront.net/vn9s0p86SVbJorX6/master.mpd",
+      "initial_bytes_sha256": "9783bf9e0b8ad4adb4a273d4a58588a91c545fd8b9bafc3fd31faf96b1788607",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "960x540"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-00e1e7ac19bf7534",
+      "url": "https://d3mfda3gpj3dw1.cloudfront.net/vn2LvEps745ShGtQ/master.m3u8",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749810.4093153,
+      "http_status": 206,
+      "final_url": "https://d3mfda3gpj3dw1.cloudfront.net/vn2LvEps745ShGtQ/master.m3u8",
+      "initial_bytes_sha256": "2e3fddf865975c5b9b5b00fc44050ce377f580d91990f0d939fd839ade874411",
+      "media": {
+        "stream_count": 8,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "428x356",
+          "640x268",
+          "960x400"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-72529cb909e80962",
+      "url": "https://d3mfda3gpj3dw1.cloudfront.net/vnmITf0oAwlErGf9/master.m3u8",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749815.2433667,
+      "http_status": 206,
+      "final_url": "https://d3mfda3gpj3dw1.cloudfront.net/vnmITf0oAwlErGf9/master.m3u8",
+      "initial_bytes_sha256": "d284bf30029e678253d1b7cc7d6d33767a119028ce8336fa9e30563428c3ec1f",
+      "media": {
+        "stream_count": 8,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "428x480",
+          "640x360",
+          "960x540"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-ac1b10457710896c",
+      "url": "https://d3mfda3gpj3dw1.cloudfront.net/vnCTVqNpUs9400xP/master.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749824.2206345,
+      "http_status": 206,
+      "final_url": "https://d3mfda3gpj3dw1.cloudfront.net/vnCTVqNpUs9400xP/master.mpd",
+      "initial_bytes_sha256": "8703b114d2913e476992aad653b86b2d46c2e149ee060407ccf72a55909ac6f1",
+      "media": {
+        "stream_count": 8,
+        "video_codecs": [
+          "hevc"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "428x480",
+          "640x360",
+          "960x540"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-38b6962d04cf9c08",
+      "url": "https://s3.eu-west-1.amazonaws.com/origin-prod-lon-v-nova.com/lcevcDualTrack/1080p30_4Mbps_no_dR/master.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749829.4124255,
+      "http_status": 206,
+      "final_url": "https://s3.eu-west-1.amazonaws.com/origin-prod-lon-v-nova.com/lcevcDualTrack/1080p30_4Mbps_no_dR/master.mpd",
+      "initial_bytes_sha256": "68e8d44a195802241be3c03a946304070dd4d24a026685e52ea39cc306d74b89",
+      "media": {
+        "stream_count": 3,
+        "video_codecs": [
+          "h264",
+          "lcevc"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1920x1080",
+          "960x540"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-7b8bcfe8f8c69317",
+      "url": "https://s3.eu-west-1.amazonaws.com/origin-prod-lon-v-nova.com/lcevcDualTrack/1080p30_4Mbps_with_dR/master.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749832.4722142,
+      "http_status": 206,
+      "final_url": "https://s3.eu-west-1.amazonaws.com/origin-prod-lon-v-nova.com/lcevcDualTrack/1080p30_4Mbps_with_dR/master.mpd",
+      "initial_bytes_sha256": "68e8d44a195802241be3c03a946304070dd4d24a026685e52ea39cc306d74b89",
+      "media": {
+        "stream_count": 3,
+        "video_codecs": [
+          "h264",
+          "lcevc"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1920x1080",
+          "960x540"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-d4fd3a79254955a5",
+      "url": "https://demo.theoplayer.com/hubfs/videos/natgeo/playlist.m3u8",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749845.6118047,
+      "http_status": 206,
+      "final_url": "https://demo.theoplayer.com/hubfs/videos/natgeo/playlist.m3u8",
+      "initial_bytes_sha256": "e287f916e48fdacf657dd8078f3ac3ea07e816e41dd8cbec969bdb662a5c9fd3",
+      "media": {
+        "stream_count": 8,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1350x720",
+          "2026x1080",
+          "3840x2048",
+          "900x480"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-c23acaa2397023b9",
+      "url": "https://videos.electroteque.org/360/ultra_light_flight_cubemap.mp4",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749845.617773,
+      "http_status": 206,
+      "final_url": "https://videos.electroteque.org/360/ultra_light_flight_cubemap.mp4",
+      "initial_bytes_sha256": "1240bce1909d2ce134e3527d1a7698b0a14d9dc46761f04ec2657d5e35ca7cb0",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1536x1024"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-0c197fa3563ad7e0",
+      "url": "https://videos.electroteque.org/360/dragster_4k_720p.mp4",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749849.9816716,
+      "http_status": 206,
+      "final_url": "https://videos.electroteque.org/360/dragster_4k_720p.mp4",
+      "initial_bytes_sha256": "e1d0f98b7900e6d0766ef9524699a03e75f8facd4985da503dd5c873396f4bad",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x640"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-74bbfe530cfcf2b2",
+      "url": "https://rdmedia.bbc.co.uk/testcard/vod/manifests/avc-ctv-stereo-en-sfdt-woff.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749850.6522896,
+      "http_status": 206,
+      "final_url": "https://vod-dash-ww-rd-live.akamaized.net/testcard/2/manifests/avc-ctv-stereo-en-sfdt-woff.mpd",
+      "initial_bytes_sha256": "42c551b64b7dc4132555bdb12d523d9a9e3303f7a53fbd9f52d3c7166b672f4c",
+      "media": {
+        "stream_count": 7,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720",
+          "1920x1080",
+          "704x396"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-ca9b831cca1817af",
+      "url": "https://rdmedia.bbc.co.uk/testcard/vod/manifests/avc-ctv-stereo-en-efdt-woff.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749857.4424036,
+      "http_status": 206,
+      "final_url": "https://vod-dash-ww-rd-live.akamaized.net/testcard/2/manifests/avc-ctv-stereo-en-efdt-woff.mpd",
+      "initial_bytes_sha256": "d518dd863b7325410c3674efe74a3477d3b04b1a013d49f1f3c71caa0e5b172d",
+      "media": {
+        "stream_count": 7,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720",
+          "1920x1080",
+          "704x396"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-3a47a9494498a34e",
+      "url": "https://rdmedia.bbc.co.uk/testcard/vod/manifests/avc-ctv-stereo-en-efdt-woff-bur.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749868.7239463,
+      "http_status": 206,
+      "final_url": "https://vod-dash-ww-rd-live.akamaized.net/testcard/2/manifests/avc-ctv-stereo-en-efdt-woff-bur.mpd",
+      "initial_bytes_sha256": "185ffc6b60dd067ed48b333a58a01e9dff4b9cc0fc9aef7b5ed2c454c24387ea",
+      "media": {
+        "stream_count": 7,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720",
+          "1920x1080",
+          "704x396"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-2c8f604d57d66971",
+      "url": "https://rdmedia.bbc.co.uk/elephants_dream/1/client_manifest-all.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749905.2946641,
+      "http_status": 206,
+      "final_url": "https://vod-dash-ww-rd-live.akamaized.net/elephants_dream/1/client_manifest-all.mpd",
+      "initial_bytes_sha256": "2c930ca77324acb38cb48f65cb3c1203daeb3fb46e098603621680c8b45bc8e4",
+      "media": {
+        "stream_count": 7,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720",
+          "1920x1080",
+          "512x288",
+          "704x396",
+          "896x504"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-802b4a60fe578cdc",
+      "url": "https://rdmedia.bbc.co.uk/elephants_dream/1/client_manifest-snake.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749908.0305605,
+      "http_status": 206,
+      "final_url": "https://vod-dash-ww-rd-live.akamaized.net/elephants_dream/1/client_manifest-snake.mpd",
+      "initial_bytes_sha256": "7219ea5287c10f14b6bbf249c0e733ab42ea72845c486f7bc326ea7c32beddf9",
+      "media": {
+        "stream_count": 7,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720",
+          "1920x1080",
+          "512x288",
+          "704x396",
+          "896x504"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-909fc646ac27cd21",
+      "url": "https://ott.dolby.com/webapi/testasset_dashjs/multiAudio.mpd",
+      "catalog": "https://raw.githubusercontent.com/shaka-project/shaka-player/main/demo/common/assets.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749930.231356,
+      "http_status": 206,
+      "final_url": "https://ott.dolby.com/webapi/testasset_dashjs/multiAudio.mpd",
+      "initial_bytes_sha256": "71f1c7fcfaa130909814e64353085742b0270c6f16d3ee153542c16307c1d3e5",
+      "media": {
+        "stream_count": 8,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac",
+          "ac4",
+          "eac3"
+        ],
+        "video_dimensions": [
+          "1920x1080"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2,
+          6,
+          10
+        ]
+      }
+    },
+    {
+      "id": "public-5b1eda8cb78636bc",
+      "url": "https://media.xiph.org/video/misc/BreatheOut-StealingHeather-ForResearchOnly.mov",
+      "catalog": "https://media.xiph.org/video/misc/",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749930.299141,
+      "http_status": 206,
+      "final_url": "https://media.xiph.org/video/misc/BreatheOut-StealingHeather-ForResearchOnly.mov",
+      "initial_bytes_sha256": "6f120316b2426470704dd6c77dfd863cc00c69f4acb0db3d89cbdbe5e75620b9",
+      "media": {
+        "stream_count": 1,
+        "video_codecs": [
+          "rawvideo"
+        ],
+        "audio_codecs": [],
+        "video_dimensions": [
+          "580x326"
+        ],
+        "pixel_formats": [
+          "uyvy422"
+        ],
+        "audio_channel_counts": []
+      }
+    },
+    {
+      "id": "public-224a24542f8d9668",
+      "url": "https://download.blender.org/durian/trailer/Sintel_Trailer.1080p.DivX_Plus_HD.mkv",
+      "catalog": "https://download.blender.org/durian/trailer/",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749932.1715407,
+      "http_status": 206,
+      "final_url": "https://download.blender.org/durian/trailer/Sintel_Trailer.1080p.DivX_Plus_HD.mkv",
+      "initial_bytes_sha256": "4a7d961a7a0ab84eb0b805b9c60d7fad3b1f7a164815ea67a733f71e058c5035",
+      "media": {
+        "stream_count": 4,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1920x818"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-fcb00579f7e8a9b3",
+      "url": "https://download.blender.org/durian/trailer/Sintel_Trailer.480p.DivX_Plus_HD.mkv",
+      "catalog": "https://download.blender.org/durian/trailer/",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749937.1771207,
+      "http_status": 206,
+      "final_url": "https://download.blender.org/durian/trailer/Sintel_Trailer.480p.DivX_Plus_HD.mkv",
+      "initial_bytes_sha256": "c876198459c06c4140ad9b96edb3583a47df4d1b65d9efc5b1fd7811a9b9c7c0",
+      "media": {
+        "stream_count": 4,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "848x360"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-4bf48ef531b53c68",
+      "url": "https://download.blender.org/durian/trailer/Sintel_Trailer.720p.DivX_Plus_HD.mkv",
+      "catalog": "https://download.blender.org/durian/trailer/",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792749938.0936923,
+      "http_status": 206,
+      "final_url": "https://download.blender.org/durian/trailer/Sintel_Trailer.720p.DivX_Plus_HD.mkv",
+      "initial_bytes_sha256": "7dd4542c37b144b56917464461055a2b97b976cff72f3a382dc663438c1a1a88",
+      "media": {
+        "stream_count": 4,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x544"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-b40501a15823b820",
+      "url": "https://download.blender.org/durian/trailer/Sintel_Trailer1.1080p.DivX_Plus_HD.mkv",
+      "catalog": "https://download.blender.org/durian/trailer/",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750926.9813302,
+      "http_status": 206,
+      "final_url": "https://download.blender.org/durian/trailer/Sintel_Trailer1.1080p.DivX_Plus_HD.mkv",
+      "initial_bytes_sha256": "5f642cf51cbb77ce4801be3511e0736dc20d154da1434f1059fea5b343067a21",
+      "media": {
+        "stream_count": 10,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1920x818"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-5e3eb0ee63fe1d13",
+      "url": "https://download.blender.org/durian/trailer/Sintel_Trailer1.480p.DivX_Plus_HD.mkv",
+      "catalog": "https://download.blender.org/durian/trailer/",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750926.9814832,
+      "http_status": 206,
+      "final_url": "https://download.blender.org/durian/trailer/Sintel_Trailer1.480p.DivX_Plus_HD.mkv",
+      "initial_bytes_sha256": "529e9ab2f7f9c18177d552ebd2b61712e486ef4446990baafc258651b5235f39",
+      "media": {
+        "stream_count": 10,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "848x360"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-95b279020e3cdceb",
+      "url": "https://download.blender.org/durian/trailer/Sintel_Trailer1.720p.DivX_Plus_HD.mkv",
+      "catalog": "https://download.blender.org/durian/trailer/",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750929.3659058,
+      "http_status": 206,
+      "final_url": "https://download.blender.org/durian/trailer/Sintel_Trailer1.720p.DivX_Plus_HD.mkv",
+      "initial_bytes_sha256": "1b068d7ec7b32085cce99a854703b10ca76bf2ac2c751d003cec0b240076a688",
+      "media": {
+        "stream_count": 10,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x544"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-be48c53f20c42687",
+      "url": "https://download.blender.org/durian/trailer/sintel_trailer-1080p.mp4",
+      "catalog": "https://download.blender.org/durian/trailer/",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750930.0346856,
+      "http_status": 206,
+      "final_url": "https://download.blender.org/durian/trailer/sintel_trailer-1080p.mp4",
+      "initial_bytes_sha256": "a44748ad008b3a56253261df736943cf0badd49cd3fbe9a844ddbccb778dba5c",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1920x1080"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-aae4f7e6bf4d0160",
+      "url": "https://download.blender.org/durian/trailer/sintel_trailer-1080p.ogv",
+      "catalog": "https://download.blender.org/durian/trailer/",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750931.6391234,
+      "http_status": 206,
+      "final_url": "https://download.blender.org/durian/trailer/sintel_trailer-1080p.ogv",
+      "initial_bytes_sha256": "c71490c1050229e00bf36ff356decd039c54068848a5d85b50bc5f51cbb28c37",
+      "media": {
+        "stream_count": 4,
+        "video_codecs": [
+          "theora"
+        ],
+        "audio_codecs": [
+          "vorbis"
+        ],
+        "video_dimensions": [
+          "1920x1080"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-399cffbc2ac20fcd",
+      "url": "https://download.blender.org/durian/trailer/sintel_trailer-480p.mp4",
+      "catalog": "https://download.blender.org/durian/trailer/",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750931.8213544,
+      "http_status": 206,
+      "final_url": "https://download.blender.org/durian/trailer/sintel_trailer-480p.mp4",
+      "initial_bytes_sha256": "8b4951a7ce03c96dbbbcceae1a63eb6f5089ceb0e3518c5f17fc75944a22efb2",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "854x480"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-154e1f63fd0fb6aa",
+      "url": "https://download.blender.org/durian/trailer/sintel_trailer-480p.ogv",
+      "catalog": "https://download.blender.org/durian/trailer/",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750933.497744,
+      "http_status": 206,
+      "final_url": "https://download.blender.org/durian/trailer/sintel_trailer-480p.ogv",
+      "initial_bytes_sha256": "1fef24ef7fb11dad4af011232b70433609d40d8543f54b35ed88a68f85210eb8",
+      "media": {
+        "stream_count": 4,
+        "video_codecs": [
+          "theora"
+        ],
+        "audio_codecs": [
+          "vorbis"
+        ],
+        "video_dimensions": [
+          "854x480"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-62d1ed11d7a015c7",
+      "url": "https://download.blender.org/durian/trailer/sintel_trailer-720p.mp4",
+      "catalog": "https://download.blender.org/durian/trailer/",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750934.037352,
+      "http_status": 206,
+      "final_url": "https://download.blender.org/durian/trailer/sintel_trailer-720p.mp4",
+      "initial_bytes_sha256": "80878a1c7450078b2e35ab34667070d3785a09419eab16b1861ecc6495d7fd4b",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-af11f7f5fde147a6",
+      "url": "https://download.blender.org/durian/trailer/sintel_trailer-720p.ogv",
+      "catalog": "https://download.blender.org/durian/trailer/",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750935.6327457,
+      "http_status": 206,
+      "final_url": "https://download.blender.org/durian/trailer/sintel_trailer-720p.ogv",
+      "initial_bytes_sha256": "b51fae3601db35294eefd6cd1ad1d347062376b4c13f1b8bab8114716e6dc09c",
+      "media": {
+        "stream_count": 4,
+        "video_codecs": [
+          "theora"
+        ],
+        "audio_codecs": [
+          "vorbis"
+        ],
+        "video_dimensions": [
+          "1280x720"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-d6347874ccd4b656",
+      "url": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750935.650954,
+      "http_status": 206,
+      "final_url": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+      "initial_bytes_sha256": "f6cd6ff83097063b6ba86ab6dcb739fe55eff1c8402569448b2994f8e7a455f2",
+      "media": {
+        "stream_count": 10,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720",
+          "1920x1080",
+          "320x184",
+          "512x288",
+          "848x480"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-eabc2e4dc979e970",
+      "url": "https://cdn.jwplayer.com/manifests/pZxWPRg4.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750937.6410685,
+      "http_status": 206,
+      "final_url": "https://cdn.jwplayer.com/manifests/pZxWPRg4.m3u8",
+      "initial_bytes_sha256": "785fa3a29ad029dd11381688800e5e02da76bb7ac0d025155d73ffa65ae38993",
+      "media": {
+        "stream_count": 13,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720",
+          "1920x1080",
+          "320x180",
+          "480x270",
+          "640x360",
+          "960x540"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-9e185ea5592d3b41",
+      "url": "https://test-streams.mux.dev/x36xhzz/url_6/193039199_mp4_h264_aac_hq_7.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750938.5584621,
+      "http_status": 206,
+      "final_url": "https://test-streams.mux.dev/x36xhzz/url_6/193039199_mp4_h264_aac_hq_7.m3u8",
+      "initial_bytes_sha256": "973afa7e49938a73f11edf1009ad54004e6545148fb1677c8b96bfc29f72511b",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "848x480"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-6383c69a1e157c40",
+      "url": "https://test-streams.mux.dev/test_001/stream.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750938.9236915,
+      "http_status": 206,
+      "final_url": "https://test-streams.mux.dev/test_001/stream.m3u8",
+      "initial_bytes_sha256": "c808eae0f9856b07bd51ed2e9d3e891bab5dc478d909ee3acf61e39911d2e6bf",
+      "media": {
+        "stream_count": 12,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "416x234",
+          "640x360"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-7e035da1e37ea283",
+      "url": "https://test-streams.mux.dev/dai-discontinuity-deltatre/manifest.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750940.9248226,
+      "http_status": 206,
+      "final_url": "https://test-streams.mux.dev/dai-discontinuity-deltatre/manifest.m3u8",
+      "initial_bytes_sha256": "562886ef7f038fa304a57f3c49bd3439284b225cc966f395363d154f397ee7a9",
+      "media": {
+        "stream_count": 3,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-0daa6e94ca7a35f7",
+      "url": "https://playertest.longtailvideo.com/adaptive/issue666/playlists/cisq0gim60007xzvi505emlxx.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750941.5217915,
+      "http_status": 206,
+      "final_url": "https://playertest.longtailvideo.com/adaptive/issue666/playlists/cisq0gim60007xzvi505emlxx.m3u8",
+      "initial_bytes_sha256": "e47b8139a5bea6cf7c59a88832aeab0430bfe517df5dc1b674cd7f1872d68f42",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-7c2cf11bdc1e24a5",
+      "url": "https://playertest.longtailvideo.com/adaptive/captions/playlist.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750942.2359304,
+      "http_status": 206,
+      "final_url": "https://playertest.longtailvideo.com/adaptive/captions/playlist.m3u8",
+      "initial_bytes_sha256": "3031ec35523c6bfbc089f1a85e1b6859d8bd2afd6f39fea0555d4a048ca776dc",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "416x234"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          1
+        ]
+      }
+    },
+    {
+      "id": "public-02511bd0149c60ce",
+      "url": "https://playertest.longtailvideo.com/adaptive/customIV/prog_index.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750942.873183,
+      "http_status": 206,
+      "final_url": "https://playertest.longtailvideo.com/adaptive/customIV/prog_index.m3u8",
+      "initial_bytes_sha256": "f91566ab4f9d07a736b054b9765a3d8c2d872e82f92af6b63291181ce1b65e2f",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "854x480"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          6
+        ]
+      }
+    },
+    {
+      "id": "public-66774a91b677764f",
+      "url": "https://playertest.longtailvideo.com/adaptive/oceans_aes/oceans_aes.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750943.4259396,
+      "http_status": 206,
+      "final_url": "https://playertest.longtailvideo.com/adaptive/oceans_aes/oceans_aes.m3u8",
+      "initial_bytes_sha256": "ac05bb5915f1ddf2bb09e6524717b607d31df5fee4dc2a76f22acfb0c601b880",
+      "media": {
+        "stream_count": 13,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1264x528",
+          "304x128",
+          "384x160",
+          "544x224",
+          "736x304",
+          "960x400"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-073ba7754cc43f4a",
+      "url": "https://playertest.longtailvideo.com/adaptive/aes-with-tracks/master.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750943.9113483,
+      "http_status": 206,
+      "final_url": "https://playertest.longtailvideo.com/adaptive/aes-with-tracks/master.m3u8",
+      "initial_bytes_sha256": "a0ab6c188994e4e29b718845f0b293fe79ff6e8583742a54ce5757ddc2055935",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          6
+        ]
+      }
+    },
+    {
+      "id": "public-b23a3591d095fefa",
+      "url": "https://playertest.longtailvideo.com/adaptive/vod-with-mp3/manifest.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750945.853801,
+      "http_status": 206,
+      "final_url": "https://playertest.longtailvideo.com/adaptive/vod-with-mp3/manifest.m3u8",
+      "initial_bytes_sha256": "fa1ba486d1ea9970c444553ac862ac809db36f11a04728bae6bf7687dfae88cb",
+      "media": {
+        "stream_count": 3,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "mp3"
+        ],
+        "video_dimensions": [
+          "1280x720"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-35c10148ec9fa6e1",
+      "url": "https://test-streams.mux.dev/pts_shift/master.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750949.6148043,
+      "http_status": 206,
+      "final_url": "https://test-streams.mux.dev/pts_shift/master.m3u8",
+      "initial_bytes_sha256": "b26507b583680104a1483a086c5ebc43010127720d95ef2a1f6fbe18fbe99904",
+      "media": {
+        "stream_count": 24,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720",
+          "480x270",
+          "768x432",
+          "864x486"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-cd33283d85f7a507",
+      "url": "https://storage.googleapis.com/shaka-demo-assets/angel-one-widevine-hls/hls.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750952.31644,
+      "http_status": 206,
+      "final_url": "https://storage.googleapis.com/shaka-demo-assets/angel-one-widevine-hls/hls.m3u8",
+      "initial_bytes_sha256": "3f10358a3c8381b7b0d7dbffc1e0aea8e9fb8ecc1a78b07732b949c5a2a654a3",
+      "media": {
+        "stream_count": 15,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "192x144",
+          "320x240",
+          "480x360",
+          "640x480",
+          "768x576"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2,
+          6
+        ]
+      }
+    },
+    {
+      "id": "public-7de86f82a3d308da",
+      "url": "https://playertest.longtailvideo.com/adaptive/artbeats/manifest.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750955.3053582,
+      "http_status": 206,
+      "final_url": "https://playertest.longtailvideo.com/adaptive/artbeats/manifest.m3u8",
+      "initial_bytes_sha256": "8b1da497f9ec30cd36ce6d3472051c67101758512f307509877349828d093ed9",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "640x352"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-359760f82fa89552",
+      "url": "https://playertest.longtailvideo.com/adaptive/boxee/playlist.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750956.7565444,
+      "http_status": 206,
+      "final_url": "https://playertest.longtailvideo.com/adaptive/boxee/playlist.m3u8",
+      "initial_bytes_sha256": "9746158bbdb8241848649d18574d484cc8b2076709a3cb8e26d670d5d8cba657",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1024x576"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-cee183845a7b9c9b",
+      "url": "https://playertest.longtailvideo.com/adaptive/progdatime/playlist2.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750957.6220875,
+      "http_status": 206,
+      "final_url": "https://playertest.longtailvideo.com/adaptive/progdatime/playlist2.m3u8",
+      "initial_bytes_sha256": "9de8a060bd96d1ee3c67ad75d65c71f9a7d946097bdab8d46489ae6baa991370",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "640x360"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": []
+      }
+    },
+    {
+      "id": "public-3c874a22ec3eda68",
+      "url": "https://playertest.longtailvideo.com/adaptive/aviion/manifest.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750958.5245712,
+      "http_status": 206,
+      "final_url": "https://playertest.longtailvideo.com/adaptive/aviion/manifest.m3u8",
+      "initial_bytes_sha256": "7e604320146e1132f8e64ba27dfb0d8cd35ecdb26dbd05972fd563da0f33bf55",
+      "media": {
+        "stream_count": 1,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [],
+        "video_dimensions": [
+          "640x360"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": []
+      }
+    },
+    {
+      "id": "public-fb3dd0c52deb5f48",
+      "url": "https://s3.amazonaws.com/qa.jwplayer.com/~alex/123633/new_master.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750959.5908647,
+      "http_status": 206,
+      "final_url": "https://s3.amazonaws.com/qa.jwplayer.com/~alex/123633/new_master.m3u8",
+      "initial_bytes_sha256": "a2b5b1a42f98cd26e9d03323e21705d4e50186beb2c88dd742c4ba28d8791313",
+      "media": {
+        "stream_count": 3,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "640x360"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-df2f96d1d2aef65d",
+      "url": "https://playertest.longtailvideo.com/adaptive/elephants_dream_v4/index.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750961.428012,
+      "http_status": 206,
+      "final_url": "https://playertest.longtailvideo.com/adaptive/elephants_dream_v4/index.m3u8",
+      "initial_bytes_sha256": "c4f38ad415a042a108bf0f269e91dc81f6f807b6f381ac2512f610a2c63fa39d",
+      "media": {
+        "stream_count": 13,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720",
+          "284x160",
+          "448x252",
+          "768x432"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-f6a83b54ab5fce62",
+      "url": "https://s3.amazonaws.com/qa.jwplayer.com/hlsjs/muxed-fmp4/hls.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750969.0367482,
+      "http_status": 206,
+      "final_url": "https://s3.amazonaws.com/qa.jwplayer.com/hlsjs/muxed-fmp4/hls.m3u8",
+      "initial_bytes_sha256": "fdedef8a03ab9a3577f9239939c748e15258e56207426e8b433f2887d1776832",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-120160f5d8e45a1b",
+      "url": "https://playertest.longtailvideo.com/adaptive/hls-test-streams/test-audio-pdt/playlist.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750971.810236,
+      "http_status": 206,
+      "final_url": "https://playertest.longtailvideo.com/adaptive/hls-test-streams/test-audio-pdt/playlist.m3u8",
+      "initial_bytes_sha256": "a13692abde52de6270ce47a799173795b8868f6c67bf4ecdc0a27f4802767c23",
+      "media": {
+        "stream_count": 12,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720",
+          "640x360",
+          "854x480"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-b6a3b6d603d865e9",
+      "url": "https://stream.mux.com/v69RSHhFelSm4701snP22dYz2jICy4E4FUyk02rW4gxRM.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750972.9013112,
+      "http_status": 200,
+      "final_url": "https://stream.mux.com/v69RSHhFelSm4701snP22dYz2jICy4E4FUyk02rW4gxRM.m3u8",
+      "initial_bytes_sha256": "847734293e8fd151c8a1f85e5c8c169889e7442d6a50f3e197ce6b0fc6372733",
+      "media": {
+        "stream_count": 6,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720",
+          "1920x1080",
+          "480x270",
+          "640x360",
+          "960x540"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-792b9fc484edec5d",
+      "url": "https://mtoczko.github.io/hls-test-streams/test-group/playlist.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750977.4828176,
+      "http_status": 206,
+      "final_url": "https://mtoczko.github.io/hls-test-streams/test-group/playlist.m3u8",
+      "initial_bytes_sha256": "55c716538bbdcf256be3290f1aded40465b8b32dac101a35cffab9892bd29a58",
+      "media": {
+        "stream_count": 9,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720",
+          "1920x1080",
+          "960x540"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-0ad4767973436af5",
+      "url": "https://playertest.longtailvideo.com/adaptive/elephants_dream_v4/redundant.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750978.0337715,
+      "http_status": 206,
+      "final_url": "https://playertest.longtailvideo.com/adaptive/elephants_dream_v4/redundant.m3u8",
+      "initial_bytes_sha256": "6439e4e044efa672f4e7561ff828b2bc4fed780e67232c0e82c655f2a7a9623e",
+      "media": {
+        "stream_count": 26,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1280x720",
+          "284x160",
+          "448x252",
+          "768x432"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-352f49d04c8d7f21",
+      "url": "https://wistia.github.io/hlsjs-test-streams/assets/start-delimiter.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750980.8029733,
+      "http_status": 206,
+      "final_url": "https://wistia.github.io/hlsjs-test-streams/assets/start-delimiter.m3u8",
+      "initial_bytes_sha256": "6170a5705c35ff5c7b0fd89da1064aeba8a836bd4010aef2c0f24da23f41d02e",
+      "media": {
+        "stream_count": 3,
+        "video_codecs": [
+          "h264"
+        ],
+        "audio_codecs": [
+          "aac"
+        ],
+        "video_dimensions": [
+          "1920x1080"
+        ],
+        "pixel_formats": [
+          "yuv420p"
+        ],
+        "audio_channel_counts": [
+          2
+        ]
+      }
+    },
+    {
+      "id": "public-6246b3d3da84e367",
+      "url": "https://devoldemar.github.io/streams/hls/bipbop/hevc.m3u8",
+      "catalog": "https://raw.githubusercontent.com/video-dev/hls.js/master/tests/test-streams.js",
+      "license": "reference-only; redistribution requires asset-specific license verification",
+      "mirror_allowed": false,
+      "status": "verified",
+      "checked_at": 1792750982.996363,
+      "http_status": 206,
+      "final_url": "https://devoldemar.github.io/streams/hls/bipbop/hevc.m3u8",
+      "initial_bytes_sha256": "1add0eb4f45c319a6dd919c2b9fe746c286547ce1638d602aa2ea17beae191b1",
+      "media": {
+        "stream_count": 2,
+        "video_codecs": [
+          "hevc"
+        ],
+        "audio_codecs": [],
+        "video_dimensions": [
+          "1920x1080",
+          "640x360"
+        ],
+        "pixel_formats": [
+          "yuv420p10le"
+        ],
+        "audio_channel_counts": []
+      }
+    }
+  ]
+}

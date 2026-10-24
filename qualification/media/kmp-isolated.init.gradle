@@ -1,0 +1,22 @@
+// Test-only build isolation. Never write the distribution served to a TV.
+def source = System.getenv('VIPTV_MEDIA_APP_SOURCE')
+def output = System.getenv('VIPTV_MEDIA_APP_BUILD')
+if (!source || !output || !new File(output).isAbsolute()) {
+    throw new GradleException('Explicit private app source and absolute build output are required')
+}
+gradle.settingsEvaluated { settings ->
+    if (settings.settingsDir.canonicalFile != new File(source).canonicalFile) {
+        throw new GradleException('Refusing a build outside the owned app snapshot')
+    }
+}
+gradle.beforeProject { project ->
+    def relative = project.path == ':' ? 'root' : project.path.substring(1).replace(':', '/')
+    project.layout.buildDirectory.set(new File(output, relative))
+}
+gradle.projectsEvaluated {
+    gradle.rootProject.allprojects.each { project ->
+        if (!project.layout.buildDirectory.get().asFile.canonicalPath.startsWith(new File(output).canonicalPath + File.separator)) {
+            throw new GradleException('A project escaped the isolated build output')
+        }
+    }
+}

@@ -1,0 +1,10 @@
+ARG BASE_IMAGE=playback-media-lab:intel-20261023
+FROM ${BASE_IMAGE}
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends libdav1d7 libxml2 \
+    && rm -rf /var/lib/apt/lists/*
+ARG MEDIA_VARIANT=upstream
+# Both binaries are extracted from a checksum-pinned source build; stage them
+# with its receipt. This overlay never changes a production container.
+COPY media/${MEDIA_VARIANT}/ /opt/qualified-ffmpeg/
+ENV LAB_FFMPEG=/opt/qualified-ffmpeg/bin/ffmpeg LAB_FFPROBE=/opt/qualified-ffmpeg/bin/ffprobe

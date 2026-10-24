@@ -6,3 +6,5 @@
 *.log
 
 ffi/generated/android/
+__pycache__/
+*.pyc
