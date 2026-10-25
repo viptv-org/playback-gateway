@@ -28,6 +28,15 @@ and PSNR runs. Summary:
 - **libplacebo over Vulkan**: visually matches the current path on real
   content and is vivid on the synthetic pattern, but adds a Vulkan/shaderc
   dependency class and was not needed by the acceptance gates. Deferred.
+- **jellyfin `tonemap_opencl` (OpenCL GPU tone map)**: measured on the Intel
+  UHD 630. It runs (unlike VPP) and is ~46% faster than the CPU path on 4K PQ
+  (41s vs 76s for 30s), and renders the saturated synthetic pattern vividly
+  where the current path washes out. But it is not shippable here: the
+  QSV<->OpenCL zero-copy surface mapping is unusable on Gen 9.5, so frames must
+  take a download->upload->download detour, and the kernel hard-fails on
+  non-mod-16 chroma heights (3840x1606 letterboxed content errors out). Kept
+  out of C4; a dimension guard plus a real-content quality pass could revisit
+  it later.
 - **Current CPU Mobius path**: correct on real content; washes out only the
   extreme synthetic saturated pattern. Heavy full-frame 4K HDR stays below
   real time on the i5-9500; direct FFmpeg reproduces the limit, so it is an
