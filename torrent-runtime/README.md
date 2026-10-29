@@ -81,11 +81,14 @@ python3 scripts/check-upstream-wakeup.py
 python3 scripts/build-native.py host
 python3 scripts/build-native.py windows
 ANDROID_NDK_HOME=/path/to/ndk python3 scripts/build-native.py android
+ANDROID_NDK_HOME=/path/to/ndk python3 scripts/build-native.py android --abis x86_64
 ```
 
 Set `GO` when the executable is not on PATH. Windows cross-compilation requires
-MinGW. Android uses API 24 for arm64-v8a, armeabi-v7a and x86_64; the build script
-checks 16 KiB ELF segment alignment and packages the Java byte-array JNI wrapper.
+MinGW. Android uses API 24 for arm64-v8a, armeabi-v7a and x86_64; `--abis` takes a
+comma list of those to build instead of all three and drops ABI directories left
+by an earlier build in the same output. The build script checks 16 KiB ELF
+segment alignment and packages the Java byte-array JNI wrapper.
 The Android parent must host this wrapper in an app-private worker process.
 Only the Go library owns C++ code in that process; its C++ runtime is statically
 linked and the JNI bridge is pure C. Every emitted library is checked for
@@ -108,10 +111,10 @@ and tests its real peer writer; it never edits the Go module cache. Running it
 with `--version v1.61.0` intentionally demonstrates the earlier lost-wake-up
 failure. The updated exact pin fixes that race without a local engine patch.
 
-`build.json` records the owning Git revision, dirty-tree flag and artifact
-checksums. Dirty artifacts are qualification-only. Release artifacts must all
-come from one clean immutable revision; this module alone does not enforce a
-consumer's release inventory.
+`build.json` records the owning Git revision, dirty-tree flag, built Android ABIs
+and artifact checksums. Dirty artifacts are qualification-only. Release artifacts
+must all come from one clean immutable revision; this module alone does not
+enforce a consumer's release inventory.
 
 The Windows storage/peer/process fixtures can run without giving a consumer's
 workflow access to this repository. Build their race-enabled capsule from an

@@ -11,10 +11,24 @@ import shutil
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
+ANDROID_TARGETS = {'arm64-v8a': ('arm64', 'aarch64-linux-android'),
+                   'armeabi-v7a': ('arm', 'armv7a-linux-androideabi'),
+                   'x86_64': ('amd64', 'x86_64-linux-android')}
 parser = argparse.ArgumentParser()
 parser.add_argument('platform', choices=['host', 'windows', 'android'])
 parser.add_argument('--output', type=Path)
+parser.add_argument('--abis', help='comma-separated Android ABIs to build (android only)')
 args = parser.parse_args()
+abis = list(ANDROID_TARGETS)
+if args.abis is not None:
+    if args.platform != 'android':
+        parser.error('--abis applies to android builds only')
+    requested = [abi.strip() for abi in args.abis.split(',') if abi.strip()]
+    unknown = sorted(set(requested) - set(ANDROID_TARGETS))
+    if not requested or unknown:
+        parser.error('--abis: unknown ABI ' + (', '.join(unknown) or '(empty)')
+                     + '; supported: ' + ', '.join(ANDROID_TARGETS))
+    abis = [abi for abi in ANDROID_TARGETS if abi in requested]
 out = (args.output or ROOT / 'target' / 'artifacts' / args.platform).resolve()
 out.mkdir(parents=True, exist_ok=True)
 go = os.environ.get('GO') or shutil.which('go')
@@ -49,9 +63,9 @@ else:
         raise SystemExit('ANDROID_NDK_HOME is required')
     tools = Path(ndk) / 'toolchains/llvm/prebuilt/linux-x86_64/bin'
     shutil.copyfile(tools.parent / 'NOTICE', out / 'NDK-TOOLCHAIN-NOTICE.txt')
-    for abi, arch, target in [('arm64-v8a', 'arm64', 'aarch64-linux-android'),
-                              ('armeabi-v7a', 'arm', 'armv7a-linux-androideabi'),
-                              ('x86_64', 'amd64', 'x86_64-linux-android')]:
+    shutil.rmtree(out / 'jni', ignore_errors=True)
+    for abi in abis:
+        arch, target = ANDROID_TARGETS[abi]
         dest = out / 'jni' / abi
         dest.mkdir(parents=True, exist_ok=True)
         native = dict(env, GOOS='android', GOARCH=arch, GOARM='7',
@@ -95,5 +109,6 @@ dirty = bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT,
 files = {str(p.relative_to(out)): hashlib.sha256(p.read_bytes()).hexdigest()
          for p in sorted(out.rglob('*')) if p.is_file() and p.name != 'build.json'}
 (out / 'build.json').write_text(json.dumps({'revision': revision, 'dirty': dirty,
-    'platform': args.platform, 'qualification': 'candidate-only', 'files': files}, indent=2) + '\n')
+    'platform': args.platform, 'abis': abis if args.platform == 'android' else [],
+    'qualification': 'candidate-only', 'files': files}, indent=2) + '\n')
 print('Candidate artifacts and checksums:', out)
