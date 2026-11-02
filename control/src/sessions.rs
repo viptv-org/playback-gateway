@@ -66,6 +66,7 @@ struct Job {
 struct OwnedViewer {
     view: Viewer,
     owner: String,
+    request: Option<CreateSession>,
     request_hash: [u8; 32],
     client_frame_ack: bool,
     namespace: String,
@@ -339,8 +340,6 @@ impl Sessions {
         }
         self.reserve_new(principal, request, plan, idempotency, now, None)
     }
-    /// Opt-in deferred viewer: a renewable lease and stored plan that reserves
-    /// no input, output or provider work until it is activated.
     pub fn prepare(
         &mut self,
         principal: &Principal,
@@ -379,6 +378,7 @@ impl Sessions {
             OwnedViewer {
                 view: view.clone(),
                 owner: principal.key.id.clone(),
+                request: Some(request.clone()),
                 request_hash: hash(&body),
                 client_frame_ack: request.client_frame_ack,
                 namespace: request.namespace.clone(),
@@ -390,34 +390,44 @@ impl Sessions {
         );
         Ok(view)
     }
-    /// Adopt a prepared viewer and reserve its input/output as a starting job,
-    /// reusing the viewer id and the plan recorded at preparation.
     pub fn activate(
         &mut self,
         principal: &Principal,
         id: &str,
-        request: &CreateSession,
         plan: &ExecutionPlan,
+        pending: Option<&str>,
         now: u64,
     ) -> Result<Reservation, &'static str> {
+        self.can_activate(principal, id, now)?;
+        let (request, idempotency) = self.activation(principal, id, now)?;
+        let removed = pending.and_then(|pending| self.preparing.remove(pending));
+        let result =
+            self.reserve_new(principal, &request, plan, &idempotency, now, Some(id.to_owned()));
+        if result.is_err() {
+            if let (Some(pending), Some(record)) = (pending, removed) {
+                self.preparing.insert(pending.to_owned(), record);
+            }
+        }
+        result
+    }
+    pub fn activation(
+        &self,
+        principal: &Principal,
+        id: &str,
+        now: u64,
+    ) -> Result<(CreateSession, String), &'static str> {
         self.can_activate(principal, id, now)?;
         let viewer = self
             .viewers
             .get(id)
             .filter(|v| v.owner == principal.key.id)
             .ok_or("session_not_found")?;
-        let namespace = viewer.namespace.clone();
-        let request_hash = viewer.request_hash;
-        let idempotency = viewer.idempotency.clone();
-        let body = serde_json::to_string(&(request, request.client_frame_ack))
-            .map_err(|_| "invalid_request")?;
-        if request_hash != hash(&body) || namespace != request.namespace {
-            return Err("idempotency_conflict");
-        }
-        self.reserve_new(principal, request, plan, &idempotency, now, Some(id.to_owned()))
+        let request = viewer
+            .request
+            .clone()
+            .ok_or("session_not_found")?;
+        Ok((request, viewer.idempotency.clone()))
     }
-    /// Eligibility check without mutating state, so the caller can reject a
-    /// foreign or terminal viewer before touching its stored inputs.
     pub fn can_activate(&self, principal: &Principal, id: &str, now: u64) -> Result<(), &'static str> {
         let viewer = self
             .viewers
@@ -577,6 +587,7 @@ impl Sessions {
             OwnedViewer {
                 view: view.clone(),
                 owner: principal.key.id.clone(),
+                request: None,
                 request_hash,
                 client_frame_ack: request.client_frame_ack,
                 namespace: request.namespace.clone(),
@@ -876,24 +887,6 @@ impl Sessions {
         for id in ids {
             self.detach(&id, Status::Released, now);
         }
-    }
-    /// A prepared viewer that cannot be activated becomes terminal and holds
-    /// nothing to release; it only needs its lease record retired.
-    pub fn fail_prepared(&mut self, principal: &Principal, id: &str, now: u64) {
-        let Some(viewer) = self.viewers.get(id) else {
-            return;
-        };
-        if viewer.owner == principal.key.id && viewer.view.status == Status::Prepared {
-            self.detach(id, Status::Failed, now);
-        }
-    }
-    /// Viewer ids still holding a prepared lease, for pruning stored inputs.
-    pub fn prepared_viewers(&self) -> BTreeSet<String> {
-        self.viewers
-            .iter()
-            .filter(|(_, v)| v.view.status == Status::Prepared)
-            .map(|(id, _)| id.clone())
-            .collect()
     }
     /// Returns jobs whose teardown must be completed, without freeing admission.
     pub fn reap(&mut self, now: u64) -> Vec<String> {
@@ -1614,7 +1607,7 @@ mod tests {
         assert_eq!(renewed.status, Status::Prepared);
         assert!(renewed.expires_at >= 80);
         let reservation = sessions
-            .activate(&p, &prepared.id, &request("family"), &plan(), 21)
+            .activate(&p, &prepared.id, &plan(), None, 21)
             .unwrap();
         assert!(reservation.start_job);
         assert_eq!(reservation.viewer.id, prepared.id);
@@ -1634,12 +1627,12 @@ mod tests {
             Status::Expired
         );
         assert!(sessions
-            .activate(&p, &expired.id, &request("family"), &plan(), 62)
+            .activate(&p, &expired.id, &plan(), None, 62)
             .is_err());
         let released = sessions.prepare(&p, &request("family"), "r", 62).unwrap();
         sessions.release(&p, &released.id, 62).unwrap();
         assert!(sessions
-            .activate(&p, &released.id, &request("family"), &plan(), 63)
+            .activate(&p, &released.id, &plan(), None, 63)
             .is_err());
     }
     #[test]
@@ -1651,7 +1644,7 @@ mod tests {
         assert_eq!(first.id, replay.id);
         assert_eq!(replay.status, Status::Prepared);
         let reservation = sessions
-            .activate(&p, &first.id, &request("family"), &plan(), 2)
+            .activate(&p, &first.id, &plan(), None, 2)
             .unwrap();
         assert_eq!(reservation.viewer.id, first.id);
         assert_eq!(sessions.available(&p, 2).viewers, 9);

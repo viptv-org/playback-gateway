@@ -3,7 +3,7 @@ use crate::{
     credentials::{Credentials, Principal, Scope},
     network::{EgressProxy, NetworkPolicy, TrustedRange},
     protocol::{CreateSession, OutputProtocol},
-    sessions::{ExecutionPlan, Failure, Sessions, Status, Viewer},
+    sessions::{Failure, Sessions, Status, Viewer},
     sources::{ResolvedSource, Sources},
 };
 use playback_engine::{Capabilities, PlaybackManager, PlaybackResponse, TrackSelection};
@@ -46,7 +46,6 @@ pub struct Workers {
     sources: Arc<Sources>,
     input_sources: Mutex<BTreeMap<String, Arc<ResolvedSource>>>,
     input_routes: Mutex<BTreeMap<String, Arc<TrustedRange>>>,
-    prepared: Mutex<BTreeMap<String, PreparedInput>>,
     preparation_progress: ProgressRecords,
     preparation_cancelled: tokio::sync::Notify,
     cancelled_preparations: Mutex<HashMap<(String, String), (String, Instant)>>,
@@ -117,9 +116,6 @@ impl Workers {
         if let Ok(mut sources) = self.input_sources.lock() {
             sources.clear();
         }
-        if let Ok(mut prepared) = self.prepared.lock() {
-            prepared.clear();
-        }
         let _ = self.sources.reap().await;
         let _ = self.sources.shutdown().await;
         if let Ok(mut routes) = self.input_routes.lock() {
@@ -165,7 +161,6 @@ impl Workers {
             sources,
             input_sources: Mutex::new(BTreeMap::new()),
             input_routes: Mutex::new(BTreeMap::new()),
-            prepared: Mutex::new(BTreeMap::new()),
             preparation_progress: Arc::new(Mutex::new(HashMap::new())),
             preparation_cancelled: tokio::sync::Notify::new(),
             cancelled_preparations: Mutex::new(HashMap::new()),
@@ -190,8 +185,6 @@ impl Workers {
         )
         .await
     }
-    /// Opt-in deferred creation: inspect and plan, then hold a renewable
-    /// `prepared` lease without starting a job or reserving an input/output.
     pub async fn create_prepared(
         &self,
         principal: &Principal,
@@ -199,17 +192,21 @@ impl Workers {
         idempotency: &str,
         now: u64,
     ) -> Result<Viewer, &'static str> {
-        self.guarded(
-            principal,
-            request,
-            idempotency,
-            now,
+        let observation = service_telemetry::observe(service_telemetry::Operation::GatewayPrepare);
+        let context = observation.context();
+        let outcome = service_telemetry::in_context(
+            context,
             self.prepare_inner(principal, request, idempotency, now),
         )
-        .await
+        .await;
+        observation.finish(match &outcome {
+            Ok(_) => service_telemetry::Outcome::Success,
+            Err(code) => {
+                service_telemetry::Outcome::Failed(service_telemetry::Failure::from_code(code))
+            }
+        });
+        outcome
     }
-    /// Adopt a prepared viewer at handoff: reserve its input/output and start
-    /// ingest from the plan recorded at preparation.
     pub async fn activate(
         &self,
         principal: &Principal,
@@ -280,6 +277,17 @@ impl Workers {
         {
             return Ok(viewer);
         }
+        self.create_core(principal, request, idempotency, now, None)
+            .await
+    }
+    async fn create_core(
+        &self,
+        principal: &Principal,
+        request: &CreateSession,
+        idempotency: &str,
+        now: u64,
+        adopt: Option<String>,
+    ) -> Result<Viewer, &'static str> {
         if request.input.torrent()
             && self.cancelled_preparation_id(principal, idempotency, &request.namespace)
         {
@@ -471,22 +479,35 @@ impl Workers {
                 .sessions
                 .lock()
                 .map_err(|_| "session_store_unavailable")?;
-            match &pending {
-                Some(pending) => {
-                    let reservation = sessions.reserve_prepared_source(
-                        &pending.id,
-                        principal,
-                        request,
-                        plan,
-                        idempotency,
-                        timestamp,
-                    )?;
-                    pending
-                        .promoted
-                        .store(true, std::sync::atomic::Ordering::Release);
+            match &adopt {
+                Some(id) => {
+                    let pending_id = pending.as_ref().map(|pending| pending.id.as_str());
+                    let reservation =
+                        sessions.activate(principal, id, plan, pending_id, timestamp)?;
+                    if let Some(pending) = &pending {
+                        pending
+                            .promoted
+                            .store(true, std::sync::atomic::Ordering::Release);
+                    }
                     reservation
                 }
-                None => sessions.reserve(principal, request, plan, idempotency, timestamp)?,
+                None => match &pending {
+                    Some(pending) => {
+                        let reservation = sessions.reserve_prepared_source(
+                            &pending.id,
+                            principal,
+                            request,
+                            plan,
+                            idempotency,
+                            timestamp,
+                        )?;
+                        pending
+                            .promoted
+                            .store(true, std::sync::atomic::Ordering::Release);
+                        reservation
+                    }
+                    None => sessions.reserve(principal, request, plan, idempotency, timestamp)?,
+                },
             }
         };
         if !reservation.start_job {
@@ -581,8 +602,6 @@ impl Workers {
             .get(principal, &reservation.viewer.id, timestamp)
     }
 
-    /// Inspect and plan without starting a job or reserving an input/output.
-    /// Holds only a renewable prepared lease plus the stored plan and source.
     async fn prepare_inner(
         &self,
         principal: &Principal,
@@ -590,176 +609,13 @@ impl Workers {
         idempotency: &str,
         now: u64,
     ) -> Result<Viewer, &'static str> {
-        request.validate()?;
-        principal.require(&request.namespace, Scope::Create)?;
         self.require_active(principal, now).await?;
-        if let Some(viewer) = self
-            .sessions
+        self.sessions
             .lock()
             .map_err(|_| "session_store_unavailable")?
-            .replay(principal, request, idempotency, now)?
-        {
-            return Ok(viewer);
-        }
-        if request.input.torrent()
-            && self.cancelled_preparation_id(principal, idempotency, &request.namespace)
-        {
-            return Err("source_preparation_cancelled");
-        }
-        let started = Instant::now();
-        let deadline = Duration::from_secs(request.input.startup_seconds());
-        let mediate_http = request.output.protocol == OutputProtocol::NativeMp4;
-        let owned = request.input.owned_source() || mediate_http;
-        if owned && (request.input.torrent() || request.input.archive()) && !self.sources.enabled() {
-            return Err("unsupported_output");
-        }
-        // Resolve without input admission: a prepared viewer reserves nothing.
-        let resolved = if owned {
-            let result = tokio::time::timeout(
-                deadline,
-                self.sources.resolve_with_http(
-                    &request.namespace,
-                    &request.input,
-                    None,
-                    request.client_frame_ack,
-                    mediate_http,
-                ),
-            )
-            .await
-            .map_err(|_| "startup_timeout")?;
-            match result {
-                Ok(source) => Some(source),
-                Err("unsupported_output" | "source_preparation_failed")
-                    if mediate_http && request.input.headers.is_empty() =>
-                {
-                    None
-                }
-                Err(code) => return Err(code),
-            }
-        } else {
-            None
-        };
-        let has = |codecs: &[String], name: &str| codecs.iter().any(|codec| codec == name);
-        let progressive = request.output.protocol == OutputProtocol::Progressive;
-        let native_mp4 = request.output.protocol == OutputProtocol::NativeMp4;
-        let caps = Capabilities {
-            h264: has(&request.output.video_codecs, "h264"),
-            aac: has(&request.output.audio_codecs, "aac"),
-            hevc: !native_mp4 && has(&request.output.video_codecs, "hevc"),
-            hevc_sdr: !native_mp4 && has(&request.output.video_codecs, "hevc"),
-            max_width: request.output.max_width,
-            max_height: request.output.max_height,
-            direct_play: true,
-            direct_files: Some(progressive),
-            direct_mp4: Some(progressive || native_mp4),
-            direct_hls: Some(!progressive && !native_mp4),
-            direct_video_codecs: Some(request.output.video_codecs.clone()),
-            direct_audio_codecs: Some(request.output.audio_codecs.clone()),
-            ..Capabilities::default()
-        };
-        let mut headers: HashMap<_, _> = request
-            .input
-            .headers
-            .iter()
-            .map(|(key, value)| (key.to_ascii_lowercase(), value.clone()))
-            .collect();
-        if headers.len() != request.input.headers.len() {
-            return Err("invalid_headers");
-        }
-        let route = resolved
-            .as_ref()
-            .map(|source| self.proxy.register_range(&source.url))
-            .transpose()
-            .map_err(|_| "source_preparation_failed")?;
-        let source_url = match &resolved {
-            Some(source) => {
-                headers.clear();
-                source.url.clone()
-            }
-            None => request.input.url.clone(),
-        };
-        headers.insert("x-playback-egress-proxy".into(), self.proxy.url());
-        let selection = TrackSelection {
-            conversion_reason: match request.output.conversion {
-                crate::protocol::Conversion::Audio => Some("audio-codec".into()),
-                crate::protocol::Conversion::Video => Some("video-codec".into()),
-                _ => None,
-            },
-            audio_track_index: request.output.audio_track,
-            required_audio_index: request.output.required_audio_index,
-            subtitle_track_index: request.output.subtitle_track,
-            audio_language: request.output.audio_language.clone(),
-            preferred_audio_language: request.output.preferred_audio_language.clone(),
-            preferred_subtitle_language: request.output.preferred_subtitle_language.clone(),
-        };
-        let prepared = tokio::time::timeout(
-            deadline.saturating_sub(started.elapsed()),
-            self.engine.prepare_shared_with_selection(
-                source_url.clone(),
-                headers.clone(),
-                request.position_seconds,
-                Some(caps.clone()),
-                request.output.conversion != crate::protocol::Conversion::Auto,
-                request.input.live,
-                selection.clone(),
-                request.namespace.clone(),
-            ),
-        )
-        .await
-        .map_err(|_| "startup_timeout")?
-        .map_err(|_| "source_preparation_failed")?;
-        let plan = prepared.plan.as_ref().ok_or("unsupported_output")?;
-        let accepted = if native_mp4 {
-            (plan.mode == "direct"
-                && plan.format == "mp4"
-                && plan.video_codec == "h264"
-                && plan
-                    .audio_codec
-                    .as_deref()
-                    .is_none_or(|codec| codec == "aac")
-                && plan.shareable)
-                || (plan.format == "hls" && plan.shareable)
-        } else if progressive && request.input.live {
-            crate::sessions::single_consumer(plan)
-        } else if progressive {
-            plan.format != "hls" && plan.shareable
-        } else {
-            plan.format == "hls" && plan.shareable
-        };
-        if !accepted {
-            return Err("unsupported_output");
-        }
-        let timestamp = now.saturating_add(started.elapsed().as_secs());
-        self.require_active(principal, timestamp).await?;
-        let viewer = self
-            .sessions
-            .lock()
-            .map_err(|_| "session_store_unavailable")?
-            .prepare(principal, request, idempotency, timestamp)?;
-        self.prepared
-            .lock()
-            .map_err(|_| "session_store_unavailable")?
-            .insert(
-                viewer.id.clone(),
-                PreparedInput {
-                    request: request.clone(),
-                    plan: plan.clone(),
-                    source: resolved,
-                    route,
-                    source_url,
-                    headers,
-                    caps,
-                    selection,
-                    force: request.output.conversion != crate::protocol::Conversion::Auto,
-                    live: request.input.live,
-                    namespace: request.namespace.clone(),
-                },
-            );
-        Ok(viewer)
+            .prepare(principal, request, idempotency, now)
     }
 
-    /// Adopt a prepared viewer: reserve its input/output from the stored plan
-    /// and start ingest via a cache-warm re-inspection, reusing the viewer id.
     async fn activate_inner(
         &self,
         principal: &Principal,
@@ -767,163 +623,13 @@ impl Workers {
         now: u64,
     ) -> Result<Viewer, &'static str> {
         self.require_active(principal, now).await?;
-        self.sessions
-            .lock()
-            .map_err(|_| "session_store_unavailable")?
-            .can_activate(principal, id, now)?;
-        let record = self
-            .prepared
-            .lock()
-            .map_err(|_| "session_store_unavailable")?
-            .get(id)
-            .cloned()
-            .ok_or("session_not_found")?;
-        let started = Instant::now();
-        let deadline = Duration::from_secs(record.request.input.startup_seconds());
-        let prepared = tokio::time::timeout(
-            deadline,
-            self.engine.prepare_shared_with_selection(
-                record.source_url.clone(),
-                record.headers.clone(),
-                record.request.position_seconds,
-                Some(record.caps.clone()),
-                record.force,
-                record.live,
-                record.selection.clone(),
-                record.namespace.clone(),
-            ),
-        )
-        .await
-        .map_err(|_| "startup_timeout")?
-        .map_err(|_| "source_preparation_failed")?;
-        let timestamp = now.saturating_add(started.elapsed().as_secs());
-        self.require_active(principal, timestamp).await?;
-        let reservation = match self
+        let (request, idempotency) = self
             .sessions
             .lock()
             .map_err(|_| "session_store_unavailable")?
-            .activate(principal, id, &record.request, &record.plan, timestamp)
-        {
-            Ok(reservation) => reservation,
-            Err(code) => {
-                self.sessions
-                    .lock()
-                    .map_err(|_| "session_store_unavailable")?
-                    .fail_prepared(principal, id, timestamp);
-                self.prepared
-                    .lock()
-                    .map_err(|_| "session_store_unavailable")?
-                    .remove(id);
-                return Err(code);
-            }
-        };
-        if !reservation.start_job {
-            self.prepared
-                .lock()
-                .map_err(|_| "session_store_unavailable")?
-                .remove(id);
-            return Ok(reservation.viewer);
-        }
-        let job = reservation.viewer.job_id.clone();
-        if let Some(route) = record.route.clone() {
-            self.input_routes
-                .lock()
-                .map_err(|_| "session_store_unavailable")?
-                .insert(job.clone(), route);
-        }
-        if let Some(source) = record.source.clone() {
-            self.input_sources
-                .lock()
-                .map_err(|_| "session_store_unavailable")?
-                .insert(job.clone(), source);
-        }
-        self.starting
-            .lock()
-            .map_err(|_| "session_store_unavailable")?
-            .insert(job.clone());
-        let mut guard = Startup {
-            workers: self,
-            job: job.clone(),
-            timestamp,
-            complete: false,
-        };
-        let remaining = deadline.saturating_sub(started.elapsed());
-        let operation = service_telemetry::observe(service_telemetry::Operation::EngineStart);
-        let opening = tokio::time::timeout(remaining, prepared.start());
-        tokio::pin!(opening);
-        let mut renewal = tokio::time::interval(Duration::from_secs(20));
-        renewal.tick().await;
-        let outcome = loop {
-            tokio::select! {
-                outcome = &mut opening => break outcome,
-                _ = renewal.tick() => {
-                    let timestamp = now.saturating_add(started.elapsed().as_secs());
-                    self.require_active(principal, timestamp).await?;
-                    self.sessions.lock().map_err(|_| "session_store_unavailable")?.renew(principal, &reservation.viewer.id, timestamp)?;
-                }
-            }
-        };
-        match &outcome {
-            Ok(Ok(response)) => {
-                operation.processing(&response.video_mode, &response.audio_mode);
-                operation.finish(service_telemetry::Outcome::Success);
-            }
-            _ => operation.finish(service_telemetry::Outcome::Failed(
-                service_telemetry::Failure::Decode,
-            )),
-        }
-        let response = match outcome {
-            Ok(Ok(response)) => response,
-            _ => {
-                self.sessions
-                    .lock()
-                    .map_err(|_| "session_store_unavailable")?
-                    .fail_prepared(principal, id, timestamp);
-                self.prepared
-                    .lock()
-                    .map_err(|_| "session_store_unavailable")?
-                    .remove(id);
-                return Err("processing_failed");
-            }
-        };
-        let timestamp = now.saturating_add(started.elapsed().as_secs());
-        self.active
-            .lock()
-            .map_err(|_| "session_store_unavailable")?
-            .insert(job.clone(), response);
-        let source = self
-            .input_sources
-            .lock()
-            .map_err(|_| "session_store_unavailable")?
-            .get(&job)
-            .cloned();
-        if let Some(source) = source.filter(|source| !source.client_frame_ack) {
-            self.sources.output_ready(&source).await?;
-        }
-        if self.require_active(principal, timestamp).await.is_err() {
-            return Err("unauthorized");
-        }
-        if !self
-            .sessions
-            .lock()
-            .map_err(|_| "session_store_unavailable")?
-            .ready(&job, timestamp)
-        {
-            return Err("session_expired");
-        }
-        guard.complete = true;
-        self.starting
-            .lock()
-            .map_err(|_| "session_store_unavailable")?
-            .remove(&job);
-        self.prepared
-            .lock()
-            .map_err(|_| "session_store_unavailable")?
-            .remove(id);
-        self.sessions
-            .lock()
-            .map_err(|_| "session_store_unavailable")?
-            .get(principal, &reservation.viewer.id, timestamp)
+            .activation(principal, id, now)?;
+        self.create_core(principal, &request, &idempotency, now, Some(id.to_owned()))
+            .await
     }
 
     pub async fn first_frame(
@@ -1098,18 +804,14 @@ impl Workers {
                     .fail(&job, Failure::ProcessingFailed, now);
             }
         }
-        let (jobs, prepared) = {
+        let jobs = {
             let mut sessions = self
                 .sessions
                 .lock()
                 .map_err(|_| "session_store_unavailable")?;
             sessions.reap(now);
-            (sessions.stopping_jobs(), sessions.prepared_viewers())
+            sessions.stopping_jobs()
         };
-        self.prepared
-            .lock()
-            .map_err(|_| "session_store_unavailable")?
-            .retain(|id, _| prepared.contains(id));
         for job in jobs {
             if self
                 .starting
@@ -1282,21 +984,6 @@ struct SourcePreparation {
     runtime: tokio::runtime::Handle,
     id: String,
     promoted: std::sync::atomic::AtomicBool,
-}
-/// Inspected inputs and plan held by a prepared viewer until activation.
-#[derive(Clone)]
-struct PreparedInput {
-    request: CreateSession,
-    plan: ExecutionPlan,
-    source: Option<Arc<ResolvedSource>>,
-    route: Option<Arc<TrustedRange>>,
-    source_url: String,
-    headers: HashMap<String, String>,
-    caps: Capabilities,
-    selection: TrackSelection,
-    force: bool,
-    live: bool,
-    namespace: String,
 }
 impl Drop for SourcePreparation {
     fn drop(&mut self) {

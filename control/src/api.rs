@@ -731,7 +731,7 @@ mod tests {
 
     #[tokio::test]
     async fn deferred_viewer_prepares_then_activates_without_occupying_input_until_handoff() {
-        let (_root, workers, p) = fixture(false).await;
+        let (root, workers, p) = fixture(false).await;
         let app = router(Api {
             workers: workers.clone(),
             ready: Arc::new(AtomicBool::new(true)),
@@ -772,6 +772,10 @@ mod tests {
         let available: Value = serde_json::from_slice(&available).unwrap();
         assert_eq!(available["available"]["inputs"], 1);
         assert_eq!(available["available"]["outputs"], 1);
+        assert!(
+            !root.path().join("encoder.count").exists(),
+            "deferred create must not start an ingest or open the upstream source"
+        );
 
         let (status, _, renewed) = call(
             &app,
@@ -799,6 +803,10 @@ mod tests {
         let ready: Value = serde_json::from_slice(&ready).unwrap();
         assert!(matches!(ready["status"].as_str().unwrap(), "ready" | "starting"));
         assert_eq!(ready["playback"]["id"], id);
+        assert!(
+            root.path().join("encoder.count").exists(),
+            "activation must start the ingest"
+        );
 
         let (status, _, _) = call(
             &app,

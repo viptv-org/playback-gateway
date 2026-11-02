@@ -223,9 +223,6 @@ impl Output {
 pub struct CreateSession {
     #[serde(skip)]
     pub client_frame_ack: bool,
-    /// Opt-in deferred creation: inspect and plan now, then return a renewable
-    /// `prepared` lease without starting a job or reserving an input/output
-    /// until `POST /v1/sessions/:id/activate`.
     #[serde(default)]
     pub deferred: bool,
     pub namespace: String,
