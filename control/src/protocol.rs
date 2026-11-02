@@ -223,6 +223,8 @@ impl Output {
 pub struct CreateSession {
     #[serde(skip)]
     pub client_frame_ack: bool,
+    #[serde(default)]
+    pub deferred: bool,
     pub namespace: String,
     pub input: Input,
     pub output: Output,

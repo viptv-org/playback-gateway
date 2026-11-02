@@ -22,11 +22,15 @@ pub fn single_consumer(plan: &ExecutionPlan) -> bool {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
+    Prepared,
     Starting,
     Ready,
     Failed,
     Released,
     Expired,
+}
+fn alive(status: Status, expires_at: u64, now: u64) -> bool {
+    expires_at > now && matches!(status, Status::Prepared | Status::Starting | Status::Ready)
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct Viewer {
@@ -62,6 +66,7 @@ struct Job {
 struct OwnedViewer {
     view: Viewer,
     owner: String,
+    request: Option<CreateSession>,
     request_hash: [u8; 32],
     client_frame_ack: bool,
     namespace: String,
@@ -251,8 +256,7 @@ impl Sessions {
             .values()
             .filter(|viewer| {
                 viewer.owner == principal.key.id
-                    && viewer.view.expires_at > now
-                    && matches!(viewer.view.status, Status::Starting | Status::Ready)
+                    && alive(viewer.view.status, viewer.view.expires_at, now)
             })
             .count() as u32;
         let (pending_inputs, pending_outputs, pending_viewers) = self.pending_counts(principal);
@@ -310,7 +314,12 @@ impl Sessions {
             return Err("idempotency_conflict");
         }
         let mut view = existing.view.clone();
-        if view.expires_at <= now && matches!(view.status, Status::Starting | Status::Ready) {
+        if view.expires_at <= now
+            && matches!(
+                view.status,
+                Status::Prepared | Status::Starting | Status::Ready
+            )
+        {
             view.status = Status::Expired;
         }
         Ok(Some(view))
@@ -329,6 +338,120 @@ impl Sessions {
                 start_job: false,
             });
         }
+        self.reserve_new(principal, request, plan, idempotency, now, None)
+    }
+    pub fn prepare(
+        &mut self,
+        principal: &Principal,
+        request: &CreateSession,
+        idempotency: &str,
+        now: u64,
+    ) -> Result<Viewer, &'static str> {
+        if let Some(viewer) = self.replay(principal, request, idempotency, now)? {
+            return Ok(viewer);
+        }
+        if self.viewers.len() >= self.max_records {
+            return Err("session_capacity");
+        }
+        let own = self
+            .viewers
+            .values()
+            .filter(|v| v.owner == principal.key.id && alive(v.view.status, v.view.expires_at, now))
+            .count();
+        if own + self.pending_counts(principal).2 as usize
+            >= principal.key.spec.quotas.viewers as usize
+        {
+            return Err("viewer_capacity");
+        }
+        let body = serde_json::to_string(&(request, request.client_frame_ack))
+            .map_err(|_| "invalid_request")?;
+        let id = format!("viewer_{}", random_hex(16));
+        let view = Viewer {
+            id: id.clone(),
+            job_id: String::new(),
+            status: Status::Prepared,
+            expires_at: now + VIEWER_LEASE_SECONDS,
+            error_code: None,
+        };
+        self.viewers.insert(
+            id,
+            OwnedViewer {
+                view: view.clone(),
+                owner: principal.key.id.clone(),
+                request: Some(request.clone()),
+                request_hash: hash(&body),
+                client_frame_ack: request.client_frame_ack,
+                namespace: request.namespace.clone(),
+                idempotency: idempotency.into(),
+                media_hash: None,
+                media_token: None,
+                captions: BTreeMap::new(),
+            },
+        );
+        Ok(view)
+    }
+    pub fn activate(
+        &mut self,
+        principal: &Principal,
+        id: &str,
+        plan: &ExecutionPlan,
+        pending: Option<&str>,
+        now: u64,
+    ) -> Result<Reservation, &'static str> {
+        self.can_activate(principal, id, now)?;
+        let (request, idempotency) = self.activation(principal, id, now)?;
+        let removed = pending.and_then(|pending| self.preparing.remove(pending));
+        let result =
+            self.reserve_new(principal, &request, plan, &idempotency, now, Some(id.to_owned()));
+        if result.is_err() {
+            if let (Some(pending), Some(record)) = (pending, removed) {
+                self.preparing.insert(pending.to_owned(), record);
+            }
+        }
+        result
+    }
+    pub fn activation(
+        &self,
+        principal: &Principal,
+        id: &str,
+        now: u64,
+    ) -> Result<(CreateSession, String), &'static str> {
+        self.can_activate(principal, id, now)?;
+        let viewer = self
+            .viewers
+            .get(id)
+            .filter(|v| v.owner == principal.key.id)
+            .ok_or("session_not_found")?;
+        let request = viewer
+            .request
+            .clone()
+            .ok_or("session_not_found")?;
+        Ok((request, viewer.idempotency.clone()))
+    }
+    pub fn can_activate(&self, principal: &Principal, id: &str, now: u64) -> Result<(), &'static str> {
+        let viewer = self
+            .viewers
+            .get(id)
+            .filter(|v| v.owner == principal.key.id)
+            .ok_or("session_not_found")?;
+        if viewer.view.status != Status::Prepared || viewer.view.expires_at <= now {
+            return Err(if viewer.view.status == Status::Prepared {
+                "session_expired"
+            } else {
+                "session_not_found"
+            });
+        }
+        principal.require(&viewer.namespace, Scope::Create)
+    }
+    fn reserve_new(
+        &mut self,
+        principal: &Principal,
+        request: &CreateSession,
+        plan: &ExecutionPlan,
+        idempotency: &str,
+        now: u64,
+        adopt: Option<String>,
+    ) -> Result<Reservation, &'static str> {
         let single = single_consumer(plan);
         if !plan.shareable && !(single && request.input.live) {
             return Err("unsupported_output");
@@ -336,23 +459,27 @@ impl Sessions {
         let body = serde_json::to_string(&(request, request.client_frame_ack))
             .map_err(|_| "invalid_request")?;
         let request_hash = hash(&body);
-        if self.viewers.len() >= self.max_records {
-            return Err("session_capacity");
-        }
-        let own: Vec<_> = self
-            .viewers
-            .values()
-            .filter(|v| {
-                v.owner == principal.key.id
-                    && matches!(v.view.status, Status::Starting | Status::Ready)
-                    && v.view.expires_at > now
-            })
-            .collect();
-        if own.len() + self.pending_counts(principal).2 as usize
-            >= principal.key.spec.quotas.viewers as usize
-        {
-            return Err("viewer_capacity");
-        }
+        let id = match &adopt {
+            Some(id) => id.clone(),
+            None => {
+                if self.viewers.len() >= self.max_records {
+                    return Err("session_capacity");
+                }
+                let own = self
+                    .viewers
+                    .values()
+                    .filter(|v| {
+                        v.owner == principal.key.id && alive(v.view.status, v.view.expires_at, now)
+                    })
+                    .count();
+                if own + self.pending_counts(principal).2 as usize
+                    >= principal.key.spec.quotas.viewers as usize
+                {
+                    return Err("viewer_capacity");
+                }
+                format!("viewer_{}", random_hex(16))
+            }
+        };
         // Headers are case-insensitive. Structural validation rejects duplicate
         // spellings so identity cannot depend on an ambiguous wire representation.
         let headers: BTreeMap<_, _> = request
@@ -441,7 +568,6 @@ impl Sessions {
             viewers: BTreeSet::new(),
             reservations: BTreeSet::new(),
         });
-        let id = format!("viewer_{}", random_hex(16));
         let view = Viewer {
             id: id.clone(),
             job_id,
@@ -461,6 +587,7 @@ impl Sessions {
             OwnedViewer {
                 view: view.clone(),
                 owner: principal.key.id.clone(),
+                request: None,
                 request_hash,
                 client_frame_ack: request.client_frame_ack,
                 namespace: request.namespace.clone(),
@@ -509,7 +636,12 @@ impl Sessions {
             .filter(|v| v.owner == principal.key.id)
             .ok_or("session_not_found")?;
         let mut view = viewer.view.clone();
-        if matches!(view.status, Status::Starting | Status::Ready) && view.expires_at <= now {
+        if view.expires_at <= now
+            && matches!(
+                view.status,
+                Status::Prepared | Status::Starting | Status::Ready
+            )
+        {
             view.status = Status::Expired;
         }
         Ok(view)
@@ -688,7 +820,7 @@ impl Sessions {
             .filter(|v| v.owner == principal.key.id)
             .ok_or("session_not_found")?;
         if viewer.view.expires_at <= now
-            || !matches!(viewer.view.status, Status::Starting | Status::Ready)
+            || !alive(viewer.view.status, viewer.view.expires_at, now)
         {
             return Err("session_expired");
         }
@@ -718,7 +850,10 @@ impl Sessions {
         let Some(viewer) = self.viewers.get_mut(id) else {
             return;
         };
-        if !matches!(viewer.view.status, Status::Starting | Status::Ready) {
+        if !matches!(
+            viewer.view.status,
+            Status::Prepared | Status::Starting | Status::Ready
+        ) {
             return;
         }
         viewer.view.status = status;
@@ -760,7 +895,10 @@ impl Sessions {
             .iter()
             .filter(|(_, v)| {
                 v.view.expires_at <= now
-                    && matches!(v.view.status, Status::Starting | Status::Ready)
+                    && matches!(
+                        v.view.status,
+                        Status::Prepared | Status::Starting | Status::Ready
+                    )
             })
             .map(|(id, _)| id.clone())
             .collect();
@@ -819,7 +957,12 @@ impl Sessions {
     pub fn active_owners(&self) -> Vec<String> {
         self.viewers
             .values()
-            .filter(|viewer| matches!(viewer.view.status, Status::Starting | Status::Ready))
+            .filter(|viewer| {
+                matches!(
+                    viewer.view.status,
+                    Status::Prepared | Status::Starting | Status::Ready
+                )
+            })
             .map(|viewer| viewer.owner.clone())
             .collect::<BTreeSet<_>>()
             .into_iter()
@@ -997,6 +1140,7 @@ mod tests {
     fn request(namespace: &str) -> CreateSession {
         CreateSession {
             client_frame_ack: false,
+            deferred: false,
             namespace: namespace.into(),
             input: Input {
                 url: "https://provider.invalid/channel".into(),
@@ -1447,5 +1591,62 @@ mod tests {
                 .unwrap()
                 .start_job
         );
+    }
+    #[test]
+    fn prepared_viewer_holds_a_renewable_lease_without_input_or_output() {
+        let p = principal("one", "family");
+        let mut sessions = Sessions::default();
+        let prepared = sessions.prepare(&p, &request("family"), "pre", 0).unwrap();
+        assert_eq!(prepared.status, Status::Prepared);
+        assert_eq!(prepared.job_id, "");
+        let available = sessions.available(&p, 0);
+        assert_eq!(available.inputs, 2);
+        assert_eq!(available.outputs, 3);
+        assert_eq!(available.viewers, 9);
+        let renewed = sessions.renew(&p, &prepared.id, 20).unwrap();
+        assert_eq!(renewed.status, Status::Prepared);
+        assert!(renewed.expires_at >= 80);
+        let reservation = sessions
+            .activate(&p, &prepared.id, &plan(), None, 21)
+            .unwrap();
+        assert!(reservation.start_job);
+        assert_eq!(reservation.viewer.id, prepared.id);
+        assert_eq!(reservation.viewer.status, Status::Starting);
+        let available = sessions.available(&p, 21);
+        assert_eq!(available.inputs, 1);
+        assert_eq!(available.outputs, 2);
+    }
+    #[test]
+    fn expired_or_released_prepared_viewers_cannot_activate() {
+        let p = principal("one", "family");
+        let mut sessions = Sessions::default();
+        let expired = sessions.prepare(&p, &request("family"), "e", 0).unwrap();
+        sessions.reap(61);
+        assert_eq!(
+            sessions.get(&p, &expired.id, 61).unwrap().status,
+            Status::Expired
+        );
+        assert!(sessions
+            .activate(&p, &expired.id, &plan(), None, 62)
+            .is_err());
+        let released = sessions.prepare(&p, &request("family"), "r", 62).unwrap();
+        sessions.release(&p, &released.id, 62).unwrap();
+        assert!(sessions
+            .activate(&p, &released.id, &plan(), None, 63)
+            .is_err());
+    }
+    #[test]
+    fn prepare_reuses_idempotency_and_activate_replays_the_same_viewer() {
+        let p = principal("one", "family");
+        let mut sessions = Sessions::default();
+        let first = sessions.prepare(&p, &request("family"), "same", 0).unwrap();
+        let replay = sessions.prepare(&p, &request("family"), "same", 1).unwrap();
+        assert_eq!(first.id, replay.id);
+        assert_eq!(replay.status, Status::Prepared);
+        let reservation = sessions
+            .activate(&p, &first.id, &plan(), None, 2)
+            .unwrap();
+        assert_eq!(reservation.viewer.id, first.id);
+        assert_eq!(sessions.available(&p, 2).viewers, 9);
     }
 }

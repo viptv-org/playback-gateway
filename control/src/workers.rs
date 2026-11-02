@@ -176,13 +176,67 @@ impl Workers {
         idempotency: &str,
         now: u64,
     ) -> Result<Viewer, &'static str> {
+        self.guarded(
+            principal,
+            request,
+            idempotency,
+            now,
+            self.create_inner(principal, request, idempotency, now),
+        )
+        .await
+    }
+    pub async fn create_prepared(
+        &self,
+        principal: &Principal,
+        request: &CreateSession,
+        idempotency: &str,
+        now: u64,
+    ) -> Result<Viewer, &'static str> {
+        let observation = service_telemetry::observe(service_telemetry::Operation::GatewayPrepare);
+        let context = observation.context();
+        let outcome = service_telemetry::in_context(
+            context,
+            self.prepare_inner(principal, request, idempotency, now),
+        )
+        .await;
+        observation.finish(match &outcome {
+            Ok(_) => service_telemetry::Outcome::Success,
+            Err(code) => {
+                service_telemetry::Outcome::Failed(service_telemetry::Failure::from_code(code))
+            }
+        });
+        outcome
+    }
+    pub async fn activate(
+        &self,
+        principal: &Principal,
+        id: &str,
+        now: u64,
+    ) -> Result<Viewer, &'static str> {
+        let observation = service_telemetry::observe(service_telemetry::Operation::GatewayPrepare);
+        let context = observation.context();
+        let outcome =
+            service_telemetry::in_context(context, self.activate_inner(principal, id, now)).await;
+        observation.finish(match &outcome {
+            Ok(_) => service_telemetry::Outcome::Success,
+            Err(code) => {
+                service_telemetry::Outcome::Failed(service_telemetry::Failure::from_code(code))
+            }
+        });
+        outcome
+    }
+    async fn guarded(
+        &self,
+        principal: &Principal,
+        request: &CreateSession,
+        idempotency: &str,
+        now: u64,
+        operation: impl std::future::Future<Output = Result<Viewer, &'static str>>,
+    ) -> Result<Viewer, &'static str> {
         let observation = service_telemetry::observe(service_telemetry::Operation::GatewayPrepare);
         let context = observation.context();
         let started = Instant::now();
-        let operation = service_telemetry::in_context(
-            context,
-            self.create_inner(principal, request, idempotency, now),
-        );
+        let operation = service_telemetry::in_context(context, operation);
         tokio::pin!(operation);
         let mut authorization = tokio::time::interval(Duration::from_secs(1));
         let outcome = loop {
@@ -223,6 +277,17 @@ impl Workers {
         {
             return Ok(viewer);
         }
+        self.create_core(principal, request, idempotency, now, None)
+            .await
+    }
+    async fn create_core(
+        &self,
+        principal: &Principal,
+        request: &CreateSession,
+        idempotency: &str,
+        now: u64,
+        adopt: Option<String>,
+    ) -> Result<Viewer, &'static str> {
         if request.input.torrent()
             && self.cancelled_preparation_id(principal, idempotency, &request.namespace)
         {
@@ -414,22 +479,35 @@ impl Workers {
                 .sessions
                 .lock()
                 .map_err(|_| "session_store_unavailable")?;
-            match &pending {
-                Some(pending) => {
-                    let reservation = sessions.reserve_prepared_source(
-                        &pending.id,
-                        principal,
-                        request,
-                        plan,
-                        idempotency,
-                        timestamp,
-                    )?;
-                    pending
-                        .promoted
-                        .store(true, std::sync::atomic::Ordering::Release);
+            match &adopt {
+                Some(id) => {
+                    let pending_id = pending.as_ref().map(|pending| pending.id.as_str());
+                    let reservation =
+                        sessions.activate(principal, id, plan, pending_id, timestamp)?;
+                    if let Some(pending) = &pending {
+                        pending
+                            .promoted
+                            .store(true, std::sync::atomic::Ordering::Release);
+                    }
                     reservation
                 }
-                None => sessions.reserve(principal, request, plan, idempotency, timestamp)?,
+                None => match &pending {
+                    Some(pending) => {
+                        let reservation = sessions.reserve_prepared_source(
+                            &pending.id,
+                            principal,
+                            request,
+                            plan,
+                            idempotency,
+                            timestamp,
+                        )?;
+                        pending
+                            .promoted
+                            .store(true, std::sync::atomic::Ordering::Release);
+                        reservation
+                    }
+                    None => sessions.reserve(principal, request, plan, idempotency, timestamp)?,
+                },
             }
         };
         if !reservation.start_job {
@@ -522,6 +600,36 @@ impl Workers {
             .lock()
             .map_err(|_| "session_store_unavailable")?
             .get(principal, &reservation.viewer.id, timestamp)
+    }
+
+    async fn prepare_inner(
+        &self,
+        principal: &Principal,
+        request: &CreateSession,
+        idempotency: &str,
+        now: u64,
+    ) -> Result<Viewer, &'static str> {
+        self.require_active(principal, now).await?;
+        self.sessions
+            .lock()
+            .map_err(|_| "session_store_unavailable")?
+            .prepare(principal, request, idempotency, now)
+    }
+
+    async fn activate_inner(
+        &self,
+        principal: &Principal,
+        id: &str,
+        now: u64,
+    ) -> Result<Viewer, &'static str> {
+        self.require_active(principal, now).await?;
+        let (request, idempotency) = self
+            .sessions
+            .lock()
+            .map_err(|_| "session_store_unavailable")?
+            .activation(principal, id, now)?;
+        self.create_core(principal, &request, &idempotency, now, Some(id.to_owned()))
+            .await
     }
 
     pub async fn first_frame(
@@ -2796,6 +2904,7 @@ exec sleep 30
     pub(crate) fn request(width: u32) -> CreateSession {
         CreateSession {
             client_frame_ack: false,
+            deferred: false,
             namespace: "fixture".into(),
             input: Input {
                 url: "https://fixture.invalid/source".into(),

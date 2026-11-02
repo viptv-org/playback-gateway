@@ -154,6 +154,23 @@ Independent fallback or VOD output pipelines each consume an input reservation;
 viewers joining an identical existing job do not reserve another input. This
 accounting does not promise universal single-ingest for every source/transport.
 
+### Deferred prepared viewer
+
+When `GET /v1/capabilities` reports `prepared_viewer: true`, `POST /v1/sessions`
+accepts an opt-in `"deferred": true`. It validates the request and records it,
+then returns `201` with `status: "prepared"`, a viewer `id`, a renewable
+`expires_at` and no `playback`; it makes no upstream connection and reserves no
+input, output or provider connection yet. `POST /v1/sessions/:id/renew` and
+`DELETE /v1/sessions/:id` behave exactly as for starting viewers.
+
+`POST /v1/sessions/:id/activate` adopts that viewer at handoff: it reserves the
+input/output, inspects the source, plans the output and starts ingest then,
+returning `200` when ready or `202` while still starting. Provider connection
+accounting begins at activation, not preparation. An expired, released or
+failed preparation frees its lease immediately and cannot be activated.
+Idempotent retries of a `deferred` create reuse the same prepared viewer;
+changing the body under the same key still returns `409`.
+
 Header-free disguised HLS inputs (segments named or typed as images/stylesheets, or with
 an image/CSS prefix before the media) need no integration change: the engine
 reads them through a private loopback sanitizer that applies the input's
