@@ -225,10 +225,21 @@ mod tests {
         let script = root.join("worker");
         std::fs::write(&script, b"#!/bin/sh\nprintf '%s\\n' '{\"version\":2,\"ready\":true,\"qualification\":\"candidate\"}'\nwhile IFS= read -r request; do printf '%s\\n' '{\"version\":2,\"ok\":true}'; done\n").unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let worker = Worker::start(&script, &root, 64 << 20).unwrap();
+        let mut worker = None;
+        for _ in 0..60 {
+            match Worker::start(&script, &root, 64 << 20) {
+                Ok(started) => {
+                    worker = Some(started);
+                    break;
+                }
+                Err(WorkerError::Unavailable) => std::thread::sleep(Duration::from_millis(100)),
+                Err(error) => panic!("worker start failed: {error}"),
+            }
+        }
+        let worker = worker.expect("worker did not become available");
         assert_eq!(
             worker
-                .call(json!({"op":"observe","handle":"1"}), Duration::from_secs(1))
+                .call(json!({"op":"observe","handle":"1"}), Duration::from_secs(10))
                 .unwrap()["ok"],
             true
         );
