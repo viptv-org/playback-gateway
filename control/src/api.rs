@@ -54,6 +54,7 @@ pub fn router(state: Api) -> Router {
         )
         .route("/v1/sessions/:id", get(session).delete(release))
         .route("/v1/sessions/:id/renew", post(renew))
+        .route("/v1/sessions/:id/activate", post(activate))
         .route(
             "/v1/sessions/:id/captions",
             post(caption).layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
@@ -201,11 +202,19 @@ async fn create_session(
         .get("idempotency-key")
         .and_then(|value| value.to_str().ok())
         .ok_or(ApiError("invalid_idempotency_key"))?;
-    let viewer = state
-        .workers
-        .create(&principal, &request, idempotency, now()?)
-        .await
-        .map_err(ApiError)?;
+    let viewer = if request.deferred {
+        state
+            .workers
+            .create_prepared(&principal, &request, idempotency, now()?)
+            .await
+            .map_err(ApiError)?
+    } else {
+        state
+            .workers
+            .create(&principal, &request, idempotency, now()?)
+            .await
+            .map_err(ApiError)?
+    };
     let status = if viewer.status == Status::Starting {
         StatusCode::ACCEPTED
     } else {
@@ -242,6 +251,24 @@ async fn renew(
         .renew(&principal, &id, timestamp)
         .map_err(ApiError)?;
     Ok(Json(reply(&state, &principal, viewer, timestamp)?))
+}
+async fn activate(
+    State(state): State<Api>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let timestamp = now()?;
+    let viewer = state
+        .workers
+        .activate(&principal, &id, timestamp)
+        .await
+        .map_err(ApiError)?;
+    let status = if viewer.status == Status::Starting {
+        StatusCode::ACCEPTED
+    } else {
+        StatusCode::OK
+    };
+    Ok((status, Json(reply(&state, &principal, viewer, now()?)?)).into_response())
 }
 async fn release(
     State(state): State<Api>,
@@ -302,7 +329,7 @@ async fn capabilities(
         .available(&principal, now()?)
         .map_err(ApiError)?;
     Ok(Json(
-        serde_json::json!({"version":API_VERSION, "ready":state.ready.load(Ordering::Acquire) && state.workers.media_storage_available(), "protocols":["hls","progressive","native_mp4"],"external_captions":["srt"], "required_audio_index":true, "torrent":state.workers.torrent_enabled(), "viewer_lease_seconds":VIEWER_LEASE_SECONDS, "renew_after_seconds":RENEW_AFTER_SECONDS, "namespaces":principal.key.spec.namespaces, "scopes":principal.key.spec.scopes,"limits":principal.key.spec.quotas,"available":available}),
+        serde_json::json!({"version":API_VERSION, "ready":state.ready.load(Ordering::Acquire) && state.workers.media_storage_available(), "protocols":["hls","progressive","native_mp4"],"external_captions":["srt"], "required_audio_index":true, "prepared_viewer":true, "torrent":state.workers.torrent_enabled(), "viewer_lease_seconds":VIEWER_LEASE_SECONDS, "renew_after_seconds":RENEW_AFTER_SECONDS, "namespaces":principal.key.spec.namespaces, "scopes":principal.key.spec.scopes,"limits":principal.key.spec.quotas,"available":available}),
     ))
 }
 async fn caption(
@@ -699,6 +726,91 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+        workers.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn deferred_viewer_prepares_then_activates_without_occupying_input_until_handoff() {
+        let (_root, workers, p) = fixture(false).await;
+        let app = router(Api {
+            workers: workers.clone(),
+            ready: Arc::new(AtomicBool::new(true)),
+        });
+        let mut spec = p.key.spec.clone();
+        spec.scopes.push(Scope::Capabilities);
+        let (status, _, issued) = call(
+            &app,
+            "POST",
+            "/v1/keys",
+            BOOTSTRAP,
+            None,
+            serde_json::to_string(&spec).unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let issued: Value = serde_json::from_slice(&issued).unwrap();
+        let key = issued["secret"].as_str().unwrap();
+        let (_, _, capabilities) =
+            call(&app, "GET", "/v1/capabilities", key, None, String::new()).await;
+        let capabilities: Value = serde_json::from_slice(&capabilities).unwrap();
+        assert_eq!(capabilities["prepared_viewer"], true);
+
+        let mut body = serde_json::to_value(&request(1920)).unwrap();
+        body["deferred"] = json!(true);
+        let body = serde_json::to_string(&body).unwrap();
+        let (status, _, first) =
+            call(&app, "POST", "/v1/sessions", key, Some("one"), body).await;
+        assert_eq!(status, StatusCode::CREATED);
+        let first: Value = serde_json::from_slice(&first).unwrap();
+        assert_eq!(first["status"], "prepared");
+        assert!(first.get("playback").is_none());
+        assert_eq!(first["job_id"], "");
+        let id = first["id"].as_str().unwrap();
+
+        let (_, _, available) =
+            call(&app, "GET", "/v1/capabilities", key, None, String::new()).await;
+        let available: Value = serde_json::from_slice(&available).unwrap();
+        assert_eq!(available["available"]["inputs"], 1);
+        assert_eq!(available["available"]["outputs"], 1);
+
+        let (status, _, renewed) = call(
+            &app,
+            "POST",
+            &format!("/v1/sessions/{id}/renew"),
+            key,
+            None,
+            String::new(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let renewed: Value = serde_json::from_slice(&renewed).unwrap();
+        assert_eq!(renewed["status"], "prepared");
+
+        let (status, _, ready) = call(
+            &app,
+            "POST",
+            &format!("/v1/sessions/{id}/activate"),
+            key,
+            None,
+            String::new(),
+        )
+        .await;
+        assert!(status == StatusCode::OK || status == StatusCode::ACCEPTED);
+        let ready: Value = serde_json::from_slice(&ready).unwrap();
+        assert!(matches!(ready["status"].as_str().unwrap(), "ready" | "starting"));
+        assert_eq!(ready["playback"]["id"], id);
+
+        let (status, _, _) = call(
+            &app,
+            "POST",
+            &format!("/v1/sessions/{id}/activate"),
+            key,
+            None,
+            String::new(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        workers.reap(now().unwrap() + 16).await.unwrap();
         workers.shutdown().await;
     }
 }
