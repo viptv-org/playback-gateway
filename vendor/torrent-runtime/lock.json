@@ -3,7 +3,7 @@
   "revision": "674b71523dff5a74fb339eae97ddcb6217ea9f8b",
   "files": {
     "LICENSE": "edaef632cbb643e4e7a221717a6c441a4c1a7c918e6e4d56debc3d8739b233f6",
-    "PROVENANCE.md": "0dba1e7754c030b0297b9f1cb21428671416b91c1ab526707903374fae8019a0",
+    "PROVENANCE.md": "91a9a0f6e4667d30e919f5aaa69a47040a91d68a6de55c90a90fdc7c26791618",
     "go.mod": "376df2ba43c973f4bea0a15be86408046ef024a5891d46ecdfd7717242d14385",
     "go.sum": "2bada421db87830221beecce2fa07eb2ede95f745c83e742c096d5adca805e9d",
     "licenses/filippo.io/edwards25519/LICENSE": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067",

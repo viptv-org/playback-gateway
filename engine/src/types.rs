@@ -173,7 +173,7 @@ pub struct MediaTrack {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SelectedAudio {
     pub input_index: u32,
-    /// Compatibility alias for output_audio_ordinal; never a native Roku track ID.
+    /// Compatibility alias for output_audio_ordinal; not a player-native track ID.
     pub output_index: u32,
     /// Ordinal within output AUDIO tracks; native IDs come from the player itself.
     pub output_audio_ordinal: u32,

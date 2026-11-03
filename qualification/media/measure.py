@@ -245,7 +245,6 @@ def one(args, fixture, trial, cache):
         trial=trial,
         cache=cache,
         status="failed",
-        profile=args.profile,
         manifest_sha256=digest(args.corpus / "manifest.json"),
         binary=json.loads((run / "provenance.json").read_text())["binary_sha256"],
     )
@@ -273,10 +272,6 @@ def one(args, fixture, trial, cache):
         max_width=1920,
         max_height=1080,
     )
-    if args.profile == "roku-hevc":
-        output_profile.update(
-            video_codecs=["h264", "hevc"], max_width=3840, max_height=2160
-        )
     if args.conversion:
         output_profile["conversion"] = args.conversion
     body = dict(
@@ -643,9 +638,6 @@ def main():
     p.add_argument("--count", type=int, default=40)
     p.add_argument("--trials", type=int, default=20)
     p.add_argument("--seconds", type=int, default=3)
-    p.add_argument(
-        "--profile", choices=["browser", "roku", "roku-hevc"], default="browser"
-    )
     p.add_argument("--conversion", choices=["audio", "video", "audio_video"])
     p.add_argument("--ids")
     p.add_argument("--selection", choices=["formats", "diverse"], default="formats")
@@ -679,7 +671,6 @@ def main():
         fixtures=[f["id"] for f in fixtures],
         trials=args.trials,
         seconds=args.seconds,
-        profile=args.profile,
         conversion=args.conversion,
         reference=args.reference,
         selection=args.selection,

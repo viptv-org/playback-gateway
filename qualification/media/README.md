@@ -115,7 +115,7 @@ with an explicit non-native-HLS capability profile; `tv-html` uses the browserâ€
 actual native-HLS capability. These profiles are recorded separately. `--driver product` additionally exercises the shipped
 web UI, provided its API revision matches the backend. These are different
 qualification levels: a test-driver pass must not be reported as a shipped UI
-or physical Roku pass. The legacy UI currently calls retired backend routes;
+or physical-device pass. The legacy UI currently calls retired backend routes;
 its failures are retained, not hidden through a response adapter.
 
 `browser.mjs` observes rendered frames, timeline progression, first media,
@@ -175,7 +175,7 @@ separately; use its formats, 1080p, 4K and clocked-live workloads for capacity.
 
 `run_suite.py --config PRIVATE_JSON --credentials PRIVATE_ENV --output PRIVATE_DIR`
 runs prepared Intel phases serially: full browser campaign, 40 Ã— 20 cold/warm
-starts, matched throughput, Roku HEVC, VOD/live concurrency and controlled
+starts, matched throughput, VOD/live concurrency and controlled
 network profiles. Its config specifies `corpus`, `manifest`, `backend_binary`,
 `tv_root`, `certs`, `origin`, and `phases` containing `name`, `local_run` and
 `remote_run`. It maintains an owned SSH socket, freezes configuration and writes
@@ -254,7 +254,7 @@ Managed VOD playlists carry a standard start hint. The older shared WebCodecs
 test profile starts correctly; the current KMP app's MSE path also fetches the
 first segment. Chromium 153's native-HLS path was observed ignoring that hint
 and can stall after starting from a later segment. Native-HTML diagnostics are
-retained separately and are not reported as default-browser or Roku acceptance.
+retained separately and are not reported as default-browser acceptance.
 Managed-caption rendering is checked with the MSE profile; default-browser
 format coverage leaves captions off, matching its supported playback path.
 
@@ -364,25 +364,6 @@ references and redirect destinations can contain credentials. External network
 trials are functional checks and must not be treated as controlled-origin
 performance comparisons. Release each lease and verify capacity reclamation.
 
-`lab.py run --driver roku-api` exercises the existing Roku request shape through
-the real backend: catalog/metadata discovery, source grants/ranking, gateway-only
-playback, first-frame acknowledgement, heartbeat, playback events, and release.
-A paced FFmpeg decoder runs on the workstation behind the trusted HTTPS ingress.
-It decodes the delivered video/audio, checks codecs and the exact negotiated
-resolution fit, verifies SDR BT.709/8-bit output for HDR inputs, and verifies
-selected audio/subtitle delivery. Per-case `driver_sha256` records the actual
-observer. `compatibility_passed` is separate from `performance_failures`: a paced
-decoder progress gap remains a failed performance result while independent color,
-codec, resolution, and cleanup checks still run. This qualifies the Roku wire
-protocol and output; it does not assert physical Roku rendering. Actual browser
-rendering continues to use `--driver kmp`.
-
-A fixture's optional `client` object supplies the existing Roku 720p, 1080p H.264,
-or 4K H.264/HEVC facts. The default is 1080p H.264/AAC with direct play disabled.
-Use a private `.observer-candidate.json` with the existing `remote_sample.py`
-configuration to retain actual producer commands and DRM video-engine counters.
-Those command files remain private because they can include upstream credentials.
-
 `lab.py start --cpus N` freezes an explicit CPU budget in provenance. Four CPUs
 remain the default for matched performance controls. A separate six-CPU run can
 qualify the full i5-9500 host budget; never mix those measurements into a claimed
@@ -399,10 +380,6 @@ mapper, and tone-mapping status reflects the selected CPU filter. A two-run,
 and 42% less CPU, with 48.1 dB decoded-output PSNR against the prior path. This is
 a focused result, not the completed compatibility or capacity campaign. The faster
 VPP tone-mapping experiment measured 27.3 dB and was not selected.
-
-The [HDR passthrough follow-up note](HDR-PASSTHROUGH-NOTE.md) records the user's
-questions about avoiding SDR conversion on HDR-capable clients. It is a future
-qualification consideration and does not change current playback behavior.
 
 Rawvideo software references stored in NUT lose color metadata. The quality
 comparator restores the reference's known BT.709 limited-range properties before
