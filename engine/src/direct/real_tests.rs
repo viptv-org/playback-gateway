@@ -115,22 +115,9 @@ async fn real_original_mp4_hls_resume_and_decode_without_encoder() {
             .unwrap()
             .unwrap()
     }
-    let listener = tokio::net::TcpListener::bind(
-        std::env::var("PLAYBACK_ROKU_BIND").unwrap_or_else(|_| "127.0.0.1:0".into()),
-    )
-    .await
-    .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_base = format!("http://{}", listener.local_addr().unwrap());
-    let catalogue = Arc::new(Mutex::new(Vec::<PlaybackResponse>::new()));
-    let published = catalogue.clone();
     let app = Router::new()
-        .route(
-            "/acceptance.json",
-            get(move || {
-                let catalogue = published.clone();
-                async move { axum::Json(catalogue.lock().await.clone()) }
-            }),
-        )
         .route("/media/:id/:cap/:file", get(media))
         .with_state(manager.clone());
     let proxy = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -189,23 +176,7 @@ async fn real_original_mp4_hls_resume_and_decode_without_encoder() {
             "DIRECT_FIXTURE format={format} prepare_ms={preparation} decode_ms={}",
             started.elapsed().as_millis() - preparation
         );
-        if std::env::var("PLAYBACK_ROKU_BIND").is_ok() {
-            catalogue.lock().await.push(response);
-        } else {
-            assert!(manager.stop(&response.id).await);
-        }
-    }
-    if std::env::var("PLAYBACK_ROKU_BIND").is_ok() {
-        println!("ROKU_FIXTURES_READY");
-        for _ in 0..180 {
-            for response in catalogue.lock().await.iter() {
-                manager.heartbeat(&response.id).await;
-            }
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        }
-        for response in catalogue.lock().await.iter() {
-            manager.stop(&response.id).await;
-        }
+        assert!(manager.stop(&response.id).await);
     }
     assert_eq!(manager.active_count().await, 0);
     manager.shutdown().await;
