@@ -111,20 +111,6 @@ def stages(config, phase):
             ],
         ),
         (
-            "roku-hevc",
-            [
-                "measure.py",
-                "--selection",
-                "diverse",
-                "--count",
-                "40",
-                "--trials",
-                "1",
-                "--profile",
-                "roku-hevc",
-            ],
-        ),
-        (
             "shared-live-throughput",
             [
                 "measure.py",

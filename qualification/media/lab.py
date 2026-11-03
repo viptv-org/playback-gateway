@@ -17,7 +17,6 @@ import signal
 import socket
 import ssl
 import subprocess
-import sys
 import time
 import urllib.request
 import urllib.parse
@@ -752,9 +751,7 @@ def run_campaign(args):
                     with (campaign / (case_id + ".log")).open("wb") as log:
                         try:
                             subprocess.run(
-                                ([sys.executable, str(HERE / "roku_flow.py"), str(config)]
-                                 if args.driver == "roku-api" else
-                                 ["node", str(HERE / "browser.mjs"), str(config)]),
+                                ["node", str(HERE / "browser.mjs"), str(config)],
                                 stdout=log,
                                 stderr=log,
                                 timeout=case_seconds + 150,
@@ -947,7 +944,7 @@ def main():
         help="pinned copy of the actual browser executable",
     )
     s.add_argument(
-        "--driver", choices=["current-api", "product", "kmp", "roku-api"], default="current-api"
+        "--driver", choices=["current-api", "product", "kmp"], default="current-api"
     )
     s.add_argument(
         "--player-profile", choices=["browser", "mse", "tv-html"], default="browser"

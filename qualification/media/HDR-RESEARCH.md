@@ -2,7 +2,7 @@
 
 Research started 2026-10-24. Production readiness remains unproven. The API and
 consumer contracts remain unchanged. HDR passthrough is still a separate
-[follow-up](HDR-PASSTHROUGH-NOTE.md), not a substitute for fast SDR conversion.
+follow-up, not a substitute for fast SDR conversion.
 
 ## Implementations being evaluated
 
