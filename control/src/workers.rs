@@ -9,6 +9,8 @@ use crate::{
 use playback_engine::{Capabilities, PlaybackManager, PlaybackResponse, TrackSelection};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
+    future::Future,
+    pin::Pin,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -39,6 +41,7 @@ pub struct Workers {
     pub sessions: Arc<Mutex<Sessions>>,
     pub credentials: Arc<Credentials>,
     engine: Arc<PlaybackManager>,
+    teardown: Arc<dyn EngineTeardown>,
     proxy: EgressProxy,
     active: Mutex<BTreeMap<String, PlaybackResponse>>,
     starting: Mutex<BTreeSet<String>>,
@@ -50,6 +53,22 @@ pub struct Workers {
     preparation_cancelled: tokio::sync::Notify,
     cancelled_preparations: Mutex<HashMap<(String, String), (String, Instant)>>,
 }
+
+trait EngineTeardown: Send + Sync {
+    fn stop(&self, id: &str) -> Pin<Box<dyn Future<Output = bool> + Send + '_>>;
+    fn settle_cancelled_inputs(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
+}
+
+impl EngineTeardown for PlaybackManager {
+    fn stop(&self, id: &str) -> Pin<Box<dyn Future<Output = bool> + Send + '_>> {
+        let id = id.to_owned();
+        Box::pin(async move { PlaybackManager::stop(self, &id).await })
+    }
+    fn settle_cancelled_inputs(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        Box::pin(PlaybackManager::settle_cancelled_inputs(self))
+    }
+}
+
 impl Workers {
     pub fn media_storage_available(&self) -> bool {
         self.engine.media_storage_available()
@@ -141,6 +160,34 @@ impl Workers {
         policy: NetworkPolicy,
         config: playback_engine::TorrentConfig,
     ) -> Result<Self, &'static str> {
+        let teardown: Arc<dyn EngineTeardown> = engine.clone();
+        Self::build(engine, teardown, credentials, policy, config).await
+    }
+
+    #[cfg(test)]
+    async fn new_with_teardown(
+        engine: Arc<PlaybackManager>,
+        teardown: Arc<dyn EngineTeardown>,
+        credentials: Arc<Credentials>,
+        policy: NetworkPolicy,
+    ) -> Result<Self, &'static str> {
+        Self::build(
+            engine,
+            teardown,
+            credentials,
+            policy,
+            playback_engine::TorrentConfig::default(),
+        )
+        .await
+    }
+
+    async fn build(
+        engine: Arc<PlaybackManager>,
+        teardown: Arc<dyn EngineTeardown>,
+        credentials: Arc<Credentials>,
+        policy: NetworkPolicy,
+        config: playback_engine::TorrentConfig,
+    ) -> Result<Self, &'static str> {
         engine
             .initialize()
             .await
@@ -154,6 +201,7 @@ impl Workers {
             sessions: Arc::new(Mutex::new(Sessions::default())),
             credentials,
             engine,
+            teardown,
             proxy,
             active: Mutex::new(BTreeMap::new()),
             starting: Mutex::new(BTreeSet::new()),
@@ -812,6 +860,7 @@ impl Workers {
             sessions.reap(now);
             sessions.stopping_jobs()
         };
+        let mut first_error: Option<&'static str> = None;
         for job in jobs {
             if self
                 .starting
@@ -825,18 +874,37 @@ impl Workers {
                 .active
                 .lock()
                 .map_err(|_| "session_store_unavailable")?
-                .remove(&job);
+                .get(&job)
+                .cloned();
             if let Some(response) = response {
-                tokio::time::timeout(Duration::from_secs(5), self.engine.stop(&response.id))
-                    .await
-                    .map_err(|_| "cleanup_pending")?;
+                match tokio::time::timeout(
+                    Duration::from_secs(5),
+                    self.teardown.stop(&response.id),
+                )
+                .await
+                {
+                    Ok(_) => {
+                        self.active
+                            .lock()
+                            .map_err(|_| "session_store_unavailable")?
+                            .remove(&job);
+                    }
+                    Err(_) => {
+                        first_error.get_or_insert("cleanup_pending");
+                        continue;
+                    }
+                }
             }
-            tokio::time::timeout(
+            if tokio::time::timeout(
                 Duration::from_secs(5),
-                self.engine.settle_cancelled_inputs(),
+                self.teardown.settle_cancelled_inputs(),
             )
             .await
-            .map_err(|_| "cleanup_pending")?;
+            .is_err()
+            {
+                first_error.get_or_insert("cleanup_pending");
+                continue;
+            }
             let source = self
                 .input_sources
                 .lock()
@@ -844,12 +912,22 @@ impl Workers {
                 .get(&job)
                 .cloned();
             if let Some(source) = source {
-                tokio::time::timeout(
+                match tokio::time::timeout(
                     Duration::from_secs(5),
                     self.sources.close_if_unused(&source),
                 )
                 .await
-                .map_err(|_| "cleanup_pending")??;
+                {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => {
+                        first_error.get_or_insert(error);
+                        continue;
+                    }
+                    Err(_) => {
+                        first_error.get_or_insert("cleanup_pending");
+                        continue;
+                    }
+                }
             }
             self.sessions
                 .lock()
@@ -864,8 +942,13 @@ impl Workers {
                 .map_err(|_| "session_store_unavailable")?
                 .remove(&job);
         }
-        self.sources.reap().await?;
-        Ok(())
+        if let Err(error) = self.sources.reap().await {
+            first_error.get_or_insert(error);
+        }
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
     /// Media paths resolve only after independent viewer authorization. The
@@ -3190,5 +3273,160 @@ printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","wi
             0
         );
         workers.engine.shutdown().await;
+    }
+
+    struct FakeEngine {
+        stop_hang: Arc<Mutex<std::collections::HashSet<String>>>,
+    }
+
+    impl super::EngineTeardown for FakeEngine {
+        fn stop(
+            &self,
+            id: &str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + '_>> {
+            let hang = self.stop_hang.lock().unwrap().contains(id);
+            Box::pin(async move {
+                if hang {
+                    std::future::pending::<()>().await;
+                }
+                true
+            })
+        }
+        fn settle_cancelled_inputs(
+            &self,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
+            Box::pin(async {})
+        }
+    }
+
+    async fn fixture_with_fake_teardown(
+        outputs: usize,
+    ) -> (
+        tempfile::TempDir,
+        Arc<Workers>,
+        Principal,
+        Arc<Mutex<std::collections::HashSet<String>>>,
+    ) {
+        let root = tempfile::tempdir().unwrap();
+        let probe = root.path().join("probe");
+        std::fs::write(&probe, r#"#!/bin/sh
+printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","width":640,"height":360,"pix_fmt":"yuv420p","profile":"High","level":31,"avg_frame_rate":"30/1","r_frame_rate":"30/1","field_order":"progressive"},{"index":1,"codec_type":"audio","codec_name":"aac","profile":"LC","channels":2}],"format":{"format_name":"mpegts"}}'
+"#).unwrap();
+        let encoder = root.path().join("encoder");
+        std::fs::write(&encoder, r#"#!/bin/sh
+printf x >> "$0.count"
+printf '%s\n' "$$" >> "$0.pids"
+for arg do case "$arg" in *independent_segments*) printf '%s' "$$" > "$0.ingest-pid" ;; esac; done
+for last do :; done
+dir=${last%/*}
+printf '#EXTM3U\n#EXT-X-TARGETDURATION:2\n' > "$last.tmp"
+for n in 000000000 000000001 000000002; do
+    printf 'fixture' > "$dir/segment-$n.ts"
+    printf '#EXTINF:2,\nsegment-%s.ts\n' "$n" >> "$last.tmp"
+done
+mv "$last.tmp" "$last"
+exec sleep 30
+"#).unwrap();
+        for file in [&probe, &encoder] {
+            std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let engine = PlaybackManager::new(playback_engine::Config {
+            ffmpeg: encoder,
+            ffprobe: probe,
+            root: root.path().join("media"),
+            max_sessions: outputs,
+            ttl: Duration::from_secs(60),
+        });
+        let credentials = Arc::new(
+            Credentials::from_connection(
+                rusqlite::Connection::open_in_memory().unwrap(),
+                BOOTSTRAP,
+            )
+            .unwrap(),
+        );
+        let key = credentials
+            .issue(
+                BOOTSTRAP,
+                KeySpec {
+                    label: "fixture".into(),
+                    namespaces: vec!["fixture".into()],
+                    scopes: vec![Scope::Create, Scope::Read, Scope::Renew, Scope::Release],
+                    quotas: Quotas {
+                        inputs: 1,
+                        outputs: outputs as u32,
+                        viewers: 5,
+                    },
+                    expires_at: None,
+                },
+                0,
+            )
+            .unwrap();
+        let principal = credentials.authenticate(&key.secret, 0).unwrap();
+        let stop_hang = Arc::new(Mutex::new(std::collections::HashSet::new()));
+        let teardown = Arc::new(FakeEngine {
+            stop_hang: stop_hang.clone(),
+        });
+        let workers = Arc::new(
+            Workers::new_with_teardown(engine, teardown, credentials, NetworkPolicy::default())
+                .await
+                .unwrap(),
+        );
+        (root, workers, principal, stop_hang)
+    }
+
+    #[tokio::test]
+    async fn a_stuck_stop_keeps_the_job_active_and_retries_it_on_the_next_tick() {
+        let (_root, workers, principal, stop_hang) = fixture_with_fake_teardown(1).await;
+        let viewer = workers
+            .create(&principal, &request(1920), "stuck", 0)
+            .await
+            .unwrap();
+        let job = viewer.job_id.clone();
+        let engine_id = workers.active.lock().unwrap()[&job].id.clone();
+        workers
+            .sessions
+            .lock()
+            .unwrap()
+            .fail(&job, Failure::ProcessingFailed, 0);
+        stop_hang.lock().unwrap().insert(engine_id.clone());
+        assert_eq!(workers.reap(1).await, Err("cleanup_pending"));
+        assert!(workers.active.lock().unwrap().contains_key(&job));
+        assert!(workers.sessions.lock().unwrap().stopping_jobs().contains(&job));
+        stop_hang.lock().unwrap().remove(&engine_id);
+        workers.reap(1).await.unwrap();
+        assert!(workers.active.lock().unwrap().is_empty());
+        assert_eq!(workers.sessions.lock().unwrap().job_count(), 0);
+        workers.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn one_stuck_stop_does_not_skip_other_jobs_teardown() {
+        let (_root, workers, principal, stop_hang) = fixture_with_fake_teardown(2).await;
+        let first = workers
+            .create(&principal, &request(1920), "first", 0)
+            .await
+            .unwrap();
+        let second = workers
+            .create(&principal, &request(320), "second", 0)
+            .await
+            .unwrap();
+        assert_ne!(first.job_id, second.job_id);
+        let first_job = first.job_id.clone();
+        let second_job = second.job_id.clone();
+        let first_engine = workers.active.lock().unwrap()[&first_job].id.clone();
+        for job in [&first_job, &second_job] {
+            workers
+                .sessions
+                .lock()
+                .unwrap()
+                .fail(job, Failure::ProcessingFailed, 0);
+        }
+        stop_hang.lock().unwrap().insert(first_engine);
+        assert_eq!(workers.reap(1).await, Err("cleanup_pending"));
+        assert!(workers.active.lock().unwrap().contains_key(&first_job));
+        assert!(!workers.active.lock().unwrap().contains_key(&second_job));
+        assert_eq!(workers.sessions.lock().unwrap().job_count(), 1);
+        assert!(workers.sessions.lock().unwrap().stopping_jobs().contains(&first_job));
+        workers.shutdown().await;
     }
 }
