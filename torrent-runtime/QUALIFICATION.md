@@ -2,9 +2,7 @@
 
 2026-10-22 update: the owner approved Stremio-style early reads for ordinary
 live selected-file playback; reusable cached data and archives still require
-verification. The entries below retain their original verified-only semantics
-and measurements. Current cold-only work and its separate acceptance result are
-recorded in [the cold-start follow-up](../docs/TORRENT_COLD_START_2026_10_22.md).
+verification.
 
 Status on 2026-10-09: **client integration authorized; performance parity deferred**.
 The approved replacement is specified in design's
@@ -210,7 +208,7 @@ The existing Rust gateway workspace tests and design validation passed.
 5. Integrate backend/core versioned negotiation and shared deadlines, Android
    private worker service, desktop supervision, and gateway worker ingestion.
    Preserve native-only acquisition and existing players/authorization.
-6. Verify gateway direct/copy/remux/transcode and real HTTPS web/Roku delivery.
+6. Verify gateway direct/copy/remux/transcode and real HTTPS app delivery.
    Update contracts, consumers and artifact revisions together; remove obsolete
    wrappers only after replacement qualification.
 
@@ -297,7 +295,7 @@ seek comparison, final teardown, concurrent unrelated metadata preparation,
 and a selected file larger than a 256 KiB rolling cache. The upstream Go seeder
 and private-network worker exist only in a Go test executable. Production native
 artifacts exclude them. These fixtures do not establish public-source speed,
-actual browser/Roku presentation or sustained physical-device behavior.
+actual browser presentation or sustained physical-device behavior.
 
 A retired rqbit seeder fixture intermittently refused fragmented incoming TCP
 handshakes (`NotEnoughData` after a valid 20-byte prefix). This explains that
@@ -334,14 +332,14 @@ about 0.4 seconds after retained verified cache; the first cold gateway output
 observation was 21.9 seconds. These are individual integration observations,
 not matched latency comparisons. Browser startup used a test page around the
 production player adapter; full backend account/source-screen admission was
-not part of this probe. Physical Roku delivery remains separate.
+not part of this probe.
 
 The complete ephemeral backend account/profile/add-on/gateway → production
 browser API/controller → decoder path now has real HTTPS frame and backend-stop
 revocation proof. Advisory progress also arrived through that path as measured
 peer/metadata/buffering transitions. Gateway scope/cancellation and backend
 cross-account/no-renewal tests cover its independent routes; native v1 envelopes
-are unchanged. Physical Roku/Windows presentation remains separately unverified.
+are unchanged. Physical-device/Windows presentation remains separately unverified.
 
 ## Durable resolved selection
 

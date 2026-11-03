@@ -1,9 +1,7 @@
 # Torrent performance follow-up
 
 2026-10-22: cache and KMP desktop work, controlled/public measurements, and the
-remaining failed parity gate are recorded in
-[the performance report](TORRENT_PERFORMANCE_2026_10_22.md). The observations below
-remain historical evidence.
+remaining failed parity gate are recorded below as historical evidence.
 
 Owner decision, 2026-10-09: proceed with client integration using the current
 shared runtime. Performance parity is deferred; cache integrity, authorization,
@@ -79,9 +77,6 @@ configuration differ from the Stremio comparison trials above. These observation
 establish a working Android byte/player path and do not establish latency parity,
 physical-device qualification, general swarm reliability or production rollout.
 
-The Android integration and qualification details are recorded in
-`android/docs/TORRENT_RUNTIME_V2.md` in the organization workspace.
-
 ## Linux desktop integration observations, 2026-10-09
 
 The bundled Linux app's real Rust host and native plugin decoded the original
@@ -98,7 +93,7 @@ These app-window checks exercise the worker/native decoder path directly. They
 exclude backend account/source-screen admission, use a software-rendered owned
 Xvfb display and are single observations. Engine/cache differences prevent a
 cold/warm or Stremio speed comparison. Prioritize MPV seek behavior, then repeat
-cold/warm/seek trials and actual authenticated web/Roku delivery qualification.
+cold/warm/seek trials and actual authenticated app delivery qualification.
 
 The Linux check also caught and fixed a Rust host startup-protocol defect:
 the production worker's readiness banner must be consumed before the first
@@ -123,7 +118,7 @@ successful 120-second seek replacement took 27.1 seconds including gateway
 preparation and destination frames. An earlier seek creation failed; consistent
 reliability remains unproven. No matched speed comparison follows from these
 single observations. See `GATEWAY_TORRENT_RUNTIME.md` for scope and revocation
-proof. Full backend account/source-screen and physical Roku playback remain
+proof. Full backend account/source-screen and physical-device playback remain
 separate acceptance work.
 
 ## Android phone and full-authority observations, 2026-10-09

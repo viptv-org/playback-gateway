@@ -26,21 +26,21 @@ loses its private media authority and must start a fresh authorized session.
 
 The worker's `first_frame` acknowledgement is sent when gateway output preparation
 has succeeded. This is an internal source-consumption acknowledgement, not a
-measurement of a web/Roku decoded frame. Client integration carries the original
+measurement of a client's decoded frame. Client integration carries the original
 startup budget through player opening and presentation; qualification must
 report actual client frames separately. The gateway's direct/copy/remux/transcode
 planner and public viewer authorization remain unchanged.
 
 The separate [torrent startup v2 routes](TORRENT_STARTUP_V2.md) retain the Go
 watchdog through decoder acknowledgement. V1 keeps its compatibility behavior.
-Backend/web/Roku adoption is integrated; the v2 Go/FFmpeg fixture verifies that
+Backend and app adoption is integrated; the v2 Go/FFmpeg fixture verifies that
 output readiness and a legacy acknowledgement leave its handle awaiting a frame.
 
 The production backend/API/controller and Go worker also passed an owned HTTPS
 Mediabunny run: frame presentation preceded the scoped acknowledgement, and Stop
 changed media to 401. Five controlled HTTPS UI cases passed, including withholding
-frame evidence after metadata readiness. See [delivery status](TORRENT_DELIVERY_STATUS.md)
-for exact scope and the separately coordinated physical-device qualification.
+frame evidence after metadata readiness. Physical-device qualification stays
+separate.
 
 ## Local qualification
 
@@ -56,7 +56,8 @@ FFmpeg HLS video conversion, compatible viewers sharing an output, independent
 seek output, decoded-frame seek comparison, final teardown and a 256 KiB cache
 with a substantially larger selected file. A separate pending metadata torrent
 runs concurrently. Cache allocation is checked; no whole-file spool is created.
-These are local controlled results, not public-swarm latency or physical Roku proof.
+These are local controlled results, not public-swarm latency or physical-device
+proof.
 
 While adapting the inherited rqbit seeder fixture, valid fragmented TCP
 handshakes were intermittently refused: the receiver parsed a 20-byte initial
@@ -67,7 +68,7 @@ separate from performance measurements and from the cause of user-reported failu
 
 Performance is accepted for integration, with follow-up in
 [TORRENT_PERFORMANCE_FOLLOWUP.md](TORRENT_PERFORMANCE_FOLLOWUP.md).
-Linux/Windows native playback, actual web/Roku delivery and physical-device
+Linux/Windows native playback, actual app delivery and physical-device
 qualification require their own evidence. No production rollout is implied.
 
 ## Authenticated HTTPS browser delivery, 2026-10-09
@@ -94,7 +95,7 @@ about 0.4 seconds after retained verified cache; the first cold gateway output
 observation was 21.9 seconds. These are individual integration observations,
 not matched latency comparisons. Browser startup used a test page around the
 production player adapter; full backend account/source-screen admission was
-not part of this probe. Physical Roku delivery remains separate.
+not part of this probe.
 
 ## Measured progress and complete backend admission
 
@@ -106,8 +107,8 @@ no playback authority and does not renew a lease.
 
 The backend brokers those facts through the separate
 `/api/v2/playback/:id/progress` route after account/profile/source and gateway
-configuration validation. Web maps the stage through shared core's canonical
-copy; Roku's scoped Task field updates its existing status label once per change.
+configuration validation. The app's web target maps the stage through shared
+core's canonical copy.
 Old playback session/negotiation envelopes are unchanged. Unknown stage values,
 raw diagnostics and stale request owners never reach the status surface.
 
