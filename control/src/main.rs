@@ -289,7 +289,14 @@ async fn run(settings: Settings) -> Result<(), &'static str> {
                         _ = stopped.changed() => break,
                         _ = interval.tick() => {
                             let Some(now) = SystemTime::now().duration_since(UNIX_EPOCH).ok().map(|elapsed| elapsed.as_secs()) else { ready.store(false, Ordering::Release); continue; };
-                            ready.store(workers.reap(now).await.is_ok(), Ordering::Release);
+                            if let Err(error) = workers.reap(now).await {
+                                tracing::warn!(error, "Reaper sweep reported a problem");
+                            }
+                            let pending = workers.pending_teardowns();
+                            if pending > 0 {
+                                tracing::warn!(pending_teardowns = pending, "Output teardowns still pending");
+                            }
+                            ready.store(workers.can_admit(), Ordering::Release);
                         }
                     }
                 }

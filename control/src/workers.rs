@@ -73,6 +73,17 @@ impl Workers {
     pub fn media_storage_available(&self) -> bool {
         self.engine.media_storage_available()
     }
+    pub fn can_admit(&self) -> bool {
+        self.engine.media_storage_available()
+            && self.sessions.lock().is_ok()
+            && self.active.lock().is_ok()
+    }
+    pub fn pending_teardowns(&self) -> usize {
+        self.sessions
+            .lock()
+            .map(|sessions| sessions.stopping_jobs().len())
+            .unwrap_or(0)
+    }
     pub fn torrent_enabled(&self) -> bool {
         self.sources.enabled()
     }
@@ -3427,6 +3438,40 @@ exec sleep 30
         assert!(!workers.active.lock().unwrap().contains_key(&second_job));
         assert_eq!(workers.sessions.lock().unwrap().job_count(), 1);
         assert!(workers.sessions.lock().unwrap().stopping_jobs().contains(&first_job));
+        workers.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_stuck_teardown_does_not_flip_admission_or_hide_the_pending_count() {
+        let (_root, workers, principal, stop_hang) = fixture_with_fake_teardown(2).await;
+        let viewer = workers
+            .create(&principal, &request(1920), "stuck", 0)
+            .await
+            .unwrap();
+        let job = viewer.job_id.clone();
+        let engine_id = workers.active.lock().unwrap()[&job].id.clone();
+        workers
+            .sessions
+            .lock()
+            .unwrap()
+            .fail(&job, Failure::ProcessingFailed, 0);
+        stop_hang.lock().unwrap().insert(engine_id);
+        assert_eq!(workers.reap(1).await, Err("cleanup_pending"));
+        assert!(workers.can_admit());
+        assert_eq!(workers.pending_teardowns(), 1);
+        workers.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_poisoned_session_store_denies_admission() {
+        let (_root, workers, _principal) = fixture(false).await;
+        let sessions = workers.sessions.clone();
+        let handle = std::thread::spawn(move || {
+            let _guard = sessions.lock().unwrap();
+            panic!("poison the session store");
+        });
+        assert!(handle.join().is_err());
+        assert!(!workers.can_admit());
         workers.shutdown().await;
     }
 }
