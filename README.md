@@ -18,7 +18,7 @@ Physical-device qualification and production rollout remain separate.
 
 The standalone service, scoped control/media API and Docker image are implemented
 and locally tested. Do not deploy it publicly until the remaining acceptance
-work in VALIDATION.md is complete. Existing VIPTV deployments still use their
+work in SPEC.md is complete. Existing VIPTV deployments still use their
 old engine until explicit backend/client cutover.
 
 The control API uses an environment bootstrap API_KEY to issue revocable scoped
@@ -67,8 +67,8 @@ supplied Compose deployment independently bounds media allocation with a nested
 See [bounded media](docs/BOUNDED_MEDIA.md) for scope, tuning and upgrade handling.
 See [bounded sustained 4K copy qualification](docs/CBR4K_QUALIFICATION.md) for
 the configured CBR workload, exact byte/progress evidence and its limitations.
-The sampled watchdog can overshoot; it is not the filesystem bound. See VALIDATION.md for exact evidence
-and remaining format, TLS, hardware, storage and crash-containment acceptance.
+The sampled watchdog can overshoot; it is not the filesystem bound. See
+VALIDATION.md for the qualification checks and their limits.
 
 ## Transport policy
 

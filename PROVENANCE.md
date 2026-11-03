@@ -29,8 +29,7 @@ clean immutable runtime source through `TORRENT_RUNTIME_REF`, with checksummed
 import inventories and dependency notices. The cold-pipeline checkpoint remains a
 candidate until its performance and platform gates pass. Importers reject dirty
 build inventories; Android APK and desktop installer checks verify packaged content.
-See [delivery evidence](docs/TORRENT_DELIVERY_STATUS.md) for exact consumer pins
-and hosted build results. These inventories do not establish device qualification
+These inventories do not establish device qualification
 or authorize production rollout; the independent inherited archive distribution
 finding below remains unresolved.
 

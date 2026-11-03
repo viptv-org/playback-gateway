@@ -5,8 +5,8 @@ VIPTV backend) creates playback sessions through a scoped control API; the
 gateway inspects the input, plans passthrough/remux/transcode output, shares
 compatible jobs and authorizes each viewer's media separately.
 
-Contract: [API_V1.md](API_V1.md). Evidence: [VALIDATION.md](VALIDATION.md) and
-`docs/`. Engine provenance: [PROVENANCE.md](PROVENANCE.md).
+Contract: [API_V1.md](API_V1.md). Validation: [VALIDATION.md](VALIDATION.md).
+Engine provenance: [PROVENANCE.md](PROVENANCE.md).
 
 ## Owns
 
@@ -93,7 +93,7 @@ Matroska whose private replay is Matroska (issues #1 and #11, decision recorded
   unsupported inputs fail explicitly.
 - No raw source URLs, headers, credentials, media URLs or response bodies are
   logged or committed; inherited GPL-2.0-only notices are preserved.
-- Remaining items in VALIDATION.md (admission hardening, upstream failure
+- Remaining acceptance items (admission hardening, upstream failure
   classification, remaining formats, crash containment, bounded shutdown,
   hardware/4K and backend integration) are complete before public deployment
   or client cutover, which each require separate approval.

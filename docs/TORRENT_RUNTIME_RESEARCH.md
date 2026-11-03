@@ -8,13 +8,13 @@ belong to its consumers.
 Historical policy note: on 2026-10-22 the owner explicitly approved early live
 selected-file reads while preserving verification for reusable cache data and
 archives. The original verified-read recommendation below records the earlier
-decision; see [the cold-start follow-up](TORRENT_COLD_START_2026_10_22.md).
+decision.
 
 ## Decision and scope
 
 Use **anacrolix/torrent + rardecode** for the first replacement spike. One generic
 runtime should serve native Android/API24, Android TV, Linux and Windows locally,
-with no gateway retry/fallback, and serve web/Roku ingestion on the gateway.
+with no gateway retry/fallback, and serve web ingestion on the gateway.
 Require a bounded, reusable cache of verified data, retained after stop, with no
 background completion download. Initial archives cover **stored, unencrypted RAR
 members, including multipart volumes**. Compressed RAR and passwords are explicitly
