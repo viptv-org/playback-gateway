@@ -75,6 +75,8 @@ impl Workers {
     }
     pub fn can_admit(&self) -> bool {
         self.engine.media_storage_available()
+            && self.sessions.lock().is_ok()
+            && self.active.lock().is_ok()
     }
     pub fn pending_teardowns(&self) -> usize {
         self.sessions
@@ -3457,6 +3459,19 @@ exec sleep 30
         assert_eq!(workers.reap(1).await, Err("cleanup_pending"));
         assert!(workers.can_admit());
         assert_eq!(workers.pending_teardowns(), 1);
+        workers.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_poisoned_session_store_denies_admission() {
+        let (_root, workers, _principal) = fixture(false).await;
+        let sessions = workers.sessions.clone();
+        let handle = std::thread::spawn(move || {
+            let _guard = sessions.lock().unwrap();
+            panic!("poison the session store");
+        });
+        assert!(handle.join().is_err());
+        assert!(!workers.can_admit());
         workers.shutdown().await;
     }
 }
