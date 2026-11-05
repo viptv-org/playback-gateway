@@ -7,7 +7,10 @@ use std::{
     time::Duration,
 };
 use tokio::sync::Mutex as AsyncMutex;
-use torrent_runtime_host::Worker;
+use torrent_runtime_host::{Worker, WorkerError};
+
+const CLOSE_ATTEMPTS: u32 = 3;
+const CLOSE_RETRY_DELAY: Duration = Duration::from_millis(250);
 
 pub struct RuntimeSources {
     executable: PathBuf,
@@ -339,11 +342,24 @@ impl Drop for RuntimeSource {
         let handle = self.handle.clone();
         let pending = self.pending.take();
         let thread = std::thread::spawn(move || {
-            // Do not release admission before the child and its private endpoint settle.
-            let _pending = pending;
-            while close_owned(&worker, &handle).is_err() {
-                std::thread::sleep(Duration::from_secs(1));
+            // Admission outlives the first close attempt: the child may still own
+            // the handle and its private endpoint until one settles.
+            let admission = pending;
+            for attempt in 1..=CLOSE_ATTEMPTS {
+                if close_owned(&worker, &handle).is_ok() {
+                    return;
+                }
+                if attempt < CLOSE_ATTEMPTS {
+                    std::thread::sleep(CLOSE_RETRY_DELAY);
+                }
             }
+            let source_tag = crate::diagnostics::tag(&handle);
+            drop(admission);
+            tracing::warn!(
+                %source_tag,
+                attempts = CLOSE_ATTEMPTS,
+                "Torrent source close abandoned; releasing admission"
+            );
         });
         if let Ok(mut retired) = self.retirements.lock() {
             retired.push(thread);
@@ -355,8 +371,17 @@ fn close_owned(worker: &Worker, handle: &str) -> Result<(), &'static str> {
         json!({"op":"close","handle":handle}),
         Duration::from_millis(1750),
     ) {
-        Ok(reply) if reply["ok"] == true => Ok(()),
-        _ => worker.terminate().map_err(|_| "torrent_worker_unsettled"),
+        // A missing handle, or a child the worker already settled itself, is closed.
+        Ok(reply)
+            if reply["ok"] == true
+                || reply["error"] == "handle_unavailable"
+                || reply["terminate"] == true =>
+        {
+            Ok(())
+        }
+        Ok(_) => Err("torrent_worker_unsettled"),
+        Err(WorkerError::Timeout) => Err("torrent_worker_timeout"),
+        Err(_) => worker.terminate().map_err(|_| "torrent_worker_unsettled"),
     }
 }
 pub(crate) fn valid_media_url(value: &str) -> bool {
@@ -422,5 +447,106 @@ fn runtime_failure(code: &str) -> &'static str {
         | "file_index_unavailable"
         | "empty_file" => "unsupported_output",
         _ => "source_preparation_failed",
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::{
+        os::unix::fs::PermissionsExt,
+        sync::atomic::{AtomicBool, Ordering},
+        time::Instant,
+    };
+
+    const REFUSING_WORKER: &str = r#"#!/bin/sh
+printf '%s\n' '{"version":2,"ready":true}'
+while IFS= read -r request; do
+  case "$request" in
+    *'"op":"close"'*) printf '%s\n' close >> CLOSE_LOG; printf '%s\n' '{"version":2,"ok":false}' ;;
+    *) printf '%s\n' '{"version":2,"ok":true}' ;;
+  esac
+done
+"#;
+
+    struct Admission(Arc<AtomicBool>);
+    impl Drop for Admission {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Release);
+        }
+    }
+
+    fn refusing_worker(root: &std::path::Path) -> Worker {
+        let closes = root.join("closes");
+        let executable = root.join("worker");
+        std::fs::write(
+            &executable,
+            REFUSING_WORKER.replace("CLOSE_LOG", &closes.display().to_string()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        for _ in 0..60 {
+            match Worker::start(&executable, root, 64 << 20) {
+                Ok(worker) => return worker,
+                Err(WorkerError::Unavailable) => std::thread::sleep(Duration::from_millis(100)),
+                Err(error) => panic!("worker start failed: {error}"),
+            }
+        }
+        panic!("worker did not become available");
+    }
+
+    #[test]
+    fn an_abandoned_close_releases_admission_after_bounded_attempts() {
+        let root = tempfile::tempdir().unwrap();
+        let worker = Arc::new(refusing_worker(root.path()));
+        let released = Arc::new(AtomicBool::new(false));
+        let retirements = Arc::new(Mutex::new(Vec::new()));
+        drop(RuntimeSource {
+            url: String::new(),
+            file_index: 0,
+            size: 0,
+            worker: worker.clone(),
+            handle: "fixture-handle".into(),
+            closed: std::sync::atomic::AtomicBool::new(false),
+            settled: AsyncMutex::new(false),
+            frame_acknowledged: AsyncMutex::new(false),
+            renewal: Mutex::new(None),
+            retirements: retirements.clone(),
+            pending: Some(Arc::new(Admission(released.clone()))),
+        });
+        let deadline = Instant::now() + Duration::from_secs(10);
+        for thread in retirements.lock().unwrap().drain(..) {
+            while !thread.is_finished() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(thread.is_finished(), "close retries must be bounded");
+            thread.join().unwrap();
+        }
+        assert!(
+            released.load(Ordering::Acquire),
+            "an abandoned close must release its admission"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("closes"))
+                .unwrap()
+                .lines()
+                .count(),
+            CLOSE_ATTEMPTS as usize,
+            "close attempts must be bounded"
+        );
+        assert!(
+            worker.is_alive(),
+            "one source's close failure must not terminate the shared child"
+        );
+        assert_eq!(
+            worker
+                .call(
+                    json!({"op":"observe","handle":"fixture-handle"}),
+                    Duration::from_secs(5)
+                )
+                .unwrap()["ok"],
+            true,
+            "other sources must keep using the shared child"
+        );
     }
 }
