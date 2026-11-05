@@ -323,6 +323,12 @@ async fn deny(stream: &mut TcpStream) -> Result<(), ()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Whether anything is waiting in a listener's accept queue.
+    fn accepted_connection(listener: TcpListener) -> bool {
+        let listener = listener.into_std().unwrap();
+        listener.set_nonblocking(true).unwrap();
+        listener.accept().is_ok()
+    }
     #[test]
     fn denies_private_metadata_reserved_and_mapped_addresses() {
         let policy = NetworkPolicy::default();
@@ -369,20 +375,23 @@ mod tests {
         let mut response = String::new();
         stream.read_to_string(&mut response).await.unwrap();
         assert!(response.starts_with("HTTP/1.1 403"));
-        assert!(timeout(Duration::from_millis(30), target.accept())
-            .await
-            .is_err());
+        assert!(
+            !accepted_connection(target),
+            "a denied loopback destination must not be contacted"
+        );
     }
     #[tokio::test]
-    async fn owned_range_registration_is_exact_counted_and_revoked_on_last_guard() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        let contacted = Arc::new(AtomicUsize::new(0));
+    async fn owned_range_registration_reaches_only_its_capability_and_revokes_on_last_guard() {
+        let contacted = Arc::new(std::sync::Mutex::new(Vec::new()));
         let router = axum::Router::new().fallback(axum::routing::get({
             let contacted = contacted.clone();
-            move || {
+            move |request: axum::extract::Request| {
                 let contacted = contacted.clone();
                 async move {
-                    contacted.fetch_add(1, Ordering::SeqCst);
+                    contacted
+                        .lock()
+                        .unwrap()
+                        .push(request.uri().path().to_owned());
                     "ok"
                 }
             }
@@ -391,7 +400,9 @@ mod tests {
         let target = listener.local_addr().unwrap();
         let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
         let proxy = EgressProxy::start(NetworkPolicy::default()).await.unwrap();
-        let root = format!("http://{}/{}/0/stream.mp4", target, "a".repeat(64));
+        let capability = "a".repeat(64);
+        let path = format!("/{capability}/0/stream.mp4");
+        let root = format!("http://{target}{path}");
         let client = reqwest::Client::builder()
             .no_proxy()
             .proxy(reqwest::Proxy::all(proxy.url()).unwrap())
@@ -406,7 +417,7 @@ mod tests {
             root.replace("/0/", "/1/"),
             format!("{root}?child=1"),
             root.replace("stream.mp4", "private.ts"),
-            root.replace(&"a".repeat(64), &"b".repeat(64)),
+            root.replace(&capability, &"b".repeat(64)),
         ] {
             assert_eq!(client.get(unauthorized).send().await.unwrap().status(), 403);
         }
@@ -420,9 +431,10 @@ mod tests {
                 .status(),
             403
         );
-        assert!(timeout(Duration::from_millis(30), other.accept())
-            .await
-            .is_err());
+        assert!(
+            !accepted_connection(other),
+            "an unregistered destination must not be contacted"
+        );
         let mut connect = TcpStream::connect(proxy.address).await.unwrap();
         connect
             .write_all(format!("CONNECT {target} HTTP/1.1\r\nHost: ignored\r\n\r\n").as_bytes())
@@ -435,10 +447,14 @@ mod tests {
         assert_eq!(client.get(&root).send().await.unwrap().status(), 200);
         drop(second);
         assert_eq!(client.get(&root).send().await.unwrap().status(), 403);
-        assert_eq!(
-            contacted.load(Ordering::SeqCst),
-            3,
-            "unregistered destinations must be rejected before contact"
+        let contacted = contacted.lock().unwrap();
+        assert!(
+            contacted.iter().all(|contacted| *contacted == path),
+            "unregistered destinations must be rejected before contact: {contacted:?}"
+        );
+        assert!(
+            contacted.len() >= 3,
+            "every authorized request must reach the registered capability: {contacted:?}"
         );
         server.abort();
     }
