@@ -95,14 +95,16 @@ pub enum Failure {
     SourceConnectionLimit,
     UnsupportedMedia,
     ProcessingFailed,
+    StartupTimeout,
 }
 impl Failure {
-    fn code(self) -> &'static str {
+    pub(crate) fn code(self) -> &'static str {
         match self {
             Self::SourceUnavailable => "source_unavailable",
             Self::SourceConnectionLimit => "source_connection_limit",
             Self::UnsupportedMedia => "unsupported_media",
             Self::ProcessingFailed => "processing_failed",
+            Self::StartupTimeout => "startup_timeout",
         }
     }
 }
@@ -607,7 +609,6 @@ impl Sessions {
             return false;
         };
         if job.state != JobState::Starting
-            || now.saturating_sub(job.created) >= job.startup_seconds
             || !job.viewers.iter().any(|id| {
                 self.viewers
                     .get(id)
@@ -889,7 +890,9 @@ impl Sessions {
         }
     }
     /// Returns jobs whose teardown must be completed, without freeing admission.
-    pub fn reap(&mut self, now: u64) -> Vec<String> {
+    /// A start in flight owns its own budget; reaping it would race a start that
+    /// finishes exactly at it.
+    pub fn reap(&mut self, now: u64, in_flight: &BTreeSet<String>) -> Vec<String> {
         let expired: Vec<_> = self
             .viewers
             .iter()
@@ -908,6 +911,7 @@ impl Sessions {
         let mut stopping = Vec::new();
         for job in self.jobs.values_mut() {
             let timed_out = job.state == JobState::Starting
+                && !in_flight.contains(&job.id)
                 && now.saturating_sub(job.created) >= job.startup_seconds;
             if (timed_out
                 || job
@@ -1230,7 +1234,10 @@ mod tests {
         assert!(sessions.ready(&second.viewer.job_id, 1));
         assert!(sessions.ready(&hls.viewer.job_id, 1));
         sessions.release(&p, &first.viewer.id, 2).unwrap();
-        assert_eq!(sessions.reap(40), vec![first.viewer.job_id.clone()]);
+        assert_eq!(
+            sessions.reap(40, &BTreeSet::new()),
+            vec![first.viewer.job_id.clone()]
+        );
         assert_eq!(
             sessions.get(&p, &second.viewer.id, 40).unwrap().status,
             Status::Ready
@@ -1270,7 +1277,7 @@ mod tests {
         assert_eq!(sessions.job_count(), 1);
         assert!(sessions.ready(&viewers[0].viewer.job_id, 1));
         sessions.release(&p, &viewers[0].viewer.id, 2).unwrap();
-        assert!(sessions.reap(20).is_empty());
+        assert!(sessions.reap(20, &BTreeSet::new()).is_empty());
         assert_eq!(
             sessions.get(&p, &viewers[1].viewer.id, 20).unwrap().status,
             Status::Ready
@@ -1278,8 +1285,11 @@ mod tests {
         for viewer in &viewers[1..] {
             sessions.release(&p, &viewer.viewer.id, 21).unwrap();
         }
-        assert!(sessions.reap(35).is_empty());
-        assert_eq!(sessions.reap(36), vec![viewers[0].viewer.job_id.clone()]);
+        assert!(sessions.reap(35, &BTreeSet::new()).is_empty());
+        assert_eq!(
+            sessions.reap(36, &BTreeSet::new()),
+            vec![viewers[0].viewer.job_id.clone()]
+        );
         assert!(sessions
             .reserve(&p, &request("family"), &plan(), "during-cleanup", 36)
             .is_err());
@@ -1343,7 +1353,10 @@ mod tests {
             "input_capacity"
         );
         sessions.release(&p, &first.viewer.id, 1).unwrap();
-        assert_eq!(sessions.reap(16), vec![first.viewer.job_id.clone()]);
+        assert_eq!(
+            sessions.reap(16, &BTreeSet::new()),
+            vec![first.viewer.job_id.clone()]
+        );
         assert_eq!(
             sessions
                 .reserve(&p, &source, &sought, "sought", 16)
@@ -1396,7 +1409,10 @@ mod tests {
         let first = sessions
             .reserve(&p, &request("family"), &plan(), "a", 0)
             .unwrap();
-        assert_eq!(sessions.reap(30), vec![first.viewer.job_id.clone()]);
+        assert_eq!(
+            sessions.reap(30, &BTreeSet::new()),
+            vec![first.viewer.job_id.clone()]
+        );
         assert!(!sessions.ready(&first.viewer.job_id, 31));
         assert!(sessions.renew(&p, &first.viewer.id, 31).is_err());
         assert_eq!(
@@ -1407,6 +1423,45 @@ mod tests {
                 .as_deref(),
             Some("startup_timeout")
         );
+    }
+    #[test]
+    fn a_start_in_flight_at_its_budget_is_not_reaped_and_becomes_ready() {
+        let p = principal("one", "family");
+        let mut sessions = Sessions::default();
+        let first = sessions
+            .reserve(&p, &request("family"), &plan(), "a", 0)
+            .unwrap();
+        let in_flight: BTreeSet<String> = [first.viewer.job_id.clone()].into();
+        assert!(sessions.reap(30, &in_flight).is_empty());
+        assert_eq!(
+            sessions.get(&p, &first.viewer.id, 30).unwrap().error_code,
+            None
+        );
+        assert!(sessions.ready(&first.viewer.job_id, 30));
+        assert_eq!(
+            sessions.get(&p, &first.viewer.id, 31).unwrap().status,
+            Status::Ready
+        );
+        assert!(sessions.reap(31, &in_flight).is_empty());
+    }
+    #[test]
+    fn a_startup_timeout_fails_the_viewer_with_the_code_the_request_reports() {
+        let p = principal("one", "family");
+        let mut sessions = Sessions::default();
+        let first = sessions
+            .reserve(&p, &request("family"), &plan(), "a", 0)
+            .unwrap();
+        assert!(sessions.fail(&first.viewer.job_id, Failure::StartupTimeout, 30));
+        assert_eq!(Failure::StartupTimeout.code(), "startup_timeout");
+        assert_eq!(
+            sessions
+                .get(&p, &first.viewer.id, 30)
+                .unwrap()
+                .error_code
+                .as_deref(),
+            Some("startup_timeout")
+        );
+        assert!(!sessions.ready(&first.viewer.job_id, 30));
     }
     #[test]
     fn fallback_plans_charge_physical_inputs_and_hold_them_until_teardown() {
@@ -1435,7 +1490,7 @@ mod tests {
         );
         sessions.release(&p, &first.viewer.id, 1).unwrap();
         sessions.release(&p, &same.viewer.id, 1).unwrap();
-        sessions.reap(16);
+        sessions.reap(16, &BTreeSet::new());
         assert_eq!(
             sessions
                 .reserve(&p, &source, &third, "three", 16)
@@ -1480,7 +1535,7 @@ mod tests {
             .unwrap();
         sessions.ready(&first.viewer.job_id, 1);
         sessions.release(&p, &first.viewer.id, 2).unwrap();
-        sessions.reap(17);
+        sessions.reap(17, &BTreeSet::new());
         assert_eq!(
             sessions.available(&p, 17).inputs,
             0,
@@ -1621,7 +1676,7 @@ mod tests {
         let p = principal("one", "family");
         let mut sessions = Sessions::default();
         let expired = sessions.prepare(&p, &request("family"), "e", 0).unwrap();
-        sessions.reap(61);
+        sessions.reap(61, &BTreeSet::new());
         assert_eq!(
             sessions.get(&p, &expired.id, 61).unwrap().status,
             Status::Expired

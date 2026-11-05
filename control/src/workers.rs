@@ -52,6 +52,8 @@ pub struct Workers {
     preparation_progress: ProgressRecords,
     preparation_cancelled: tokio::sync::Notify,
     cancelled_preparations: Mutex<HashMap<(String, String), (String, Instant)>>,
+    #[cfg(test)]
+    start_budget_override: Mutex<Option<Duration>>,
 }
 
 trait EngineTeardown: Send + Sync {
@@ -223,6 +225,8 @@ impl Workers {
             preparation_progress: Arc::new(Mutex::new(HashMap::new())),
             preparation_cancelled: tokio::sync::Notify::new(),
             cancelled_preparations: Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            start_budget_override: Mutex::new(None),
         })
     }
 
@@ -384,7 +388,7 @@ impl Workers {
         };
         let _observation = observation;
         let started = Instant::now();
-        let deadline = Duration::from_secs(request.input.startup_seconds());
+        let deadline = self.start_budget(request);
         let mediate_http = request.output.protocol == OutputProtocol::NativeMp4;
         let pending = if request.input.owned_source() || mediate_http {
             if (request.input.torrent() || request.input.archive()) && !self.sources.enabled() {
@@ -593,6 +597,7 @@ impl Workers {
             workers: self,
             job: job.clone(),
             timestamp,
+            failure: Failure::ProcessingFailed,
             complete: false,
         };
         let remaining = deadline.saturating_sub(started.elapsed());
@@ -611,18 +616,25 @@ impl Workers {
                 }
             }
         };
-        match &outcome {
+        let response = match outcome {
             Ok(Ok(response)) => {
                 operation.processing(&response.video_mode, &response.audio_mode);
                 operation.finish(service_telemetry::Outcome::Success);
+                response
             }
-            _ => operation.finish(service_telemetry::Outcome::Failed(
-                service_telemetry::Failure::Decode,
-            )),
-        }
-        let response = match outcome {
-            Ok(Ok(response)) => response,
-            _ => return Err("processing_failed"),
+            Ok(Err(_)) => {
+                operation.finish(service_telemetry::Outcome::Failed(
+                    service_telemetry::Failure::Decode,
+                ));
+                return Err(Failure::ProcessingFailed.code());
+            }
+            Err(_) => {
+                operation.finish(service_telemetry::Outcome::Failed(
+                    service_telemetry::Failure::Decode,
+                ));
+                guard.failure = Failure::StartupTimeout;
+                return Err(Failure::StartupTimeout.code());
+            }
         };
         let timestamp = now.saturating_add(started.elapsed().as_secs());
         // Retain the engine ID before any await, including runtime acknowledgement.
@@ -661,6 +673,17 @@ impl Workers {
             .get(principal, &reservation.viewer.id, timestamp)
     }
 
+    fn start_budget(&self, request: &CreateSession) -> Duration {
+        #[cfg(test)]
+        if let Some(budget) = *self.start_budget_override.lock().unwrap() {
+            return budget;
+        }
+        Duration::from_secs(request.input.startup_seconds())
+    }
+    #[cfg(test)]
+    pub(crate) fn limit_start_budget(&self, budget: Duration) {
+        *self.start_budget_override.lock().unwrap() = Some(budget);
+    }
     async fn prepare_inner(
         &self,
         principal: &Principal,
@@ -863,22 +886,22 @@ impl Workers {
                     .fail(&job, Failure::ProcessingFailed, now);
             }
         }
+        let in_flight: BTreeSet<String> = self
+            .starting
+            .lock()
+            .map_err(|_| "session_store_unavailable")?
+            .clone();
         let jobs = {
             let mut sessions = self
                 .sessions
                 .lock()
                 .map_err(|_| "session_store_unavailable")?;
-            sessions.reap(now);
+            sessions.reap(now, &in_flight);
             sessions.stopping_jobs()
         };
         let mut first_error: Option<&'static str> = None;
         for job in jobs {
-            if self
-                .starting
-                .lock()
-                .map_err(|_| "session_store_unavailable")?
-                .contains(&job)
-            {
+            if in_flight.contains(&job) {
                 continue;
             }
             let response = self
@@ -1114,6 +1137,7 @@ struct Startup<'a> {
     workers: &'a Workers,
     job: String,
     timestamp: u64,
+    failure: Failure,
     complete: bool,
 }
 impl Drop for Startup<'_> {
@@ -1122,7 +1146,7 @@ impl Drop for Startup<'_> {
             return;
         }
         if let Ok(mut sessions) = self.workers.sessions.lock() {
-            sessions.fail(&self.job, Failure::ProcessingFailed, self.timestamp);
+            sessions.fail(&self.job, self.failure, self.timestamp);
         }
         if let Ok(mut starting) = self.workers.starting.lock() {
             starting.remove(&self.job);
@@ -3283,6 +3307,50 @@ printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","wi
                 .count(),
             0
         );
+        workers.engine.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_start_in_flight_at_its_budget_is_not_reaped_or_failed() {
+        let (root, workers, p) = fixture(true).await;
+        let owner = p.key.id.clone();
+        let task = {
+            let workers = workers.clone();
+            tokio::spawn(async move { workers.create(&p, &request(1920), "budget", 0).await })
+        };
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !root.path().join("encoder.count").exists() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        workers.reap(30).await.unwrap();
+        assert!(workers.sessions.lock().unwrap().stopping_jobs().is_empty());
+        assert_eq!(
+            workers.sessions.lock().unwrap().active_owners(),
+            vec![owner]
+        );
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        workers.reap(31).await.unwrap();
+        assert_eq!(workers.sessions.lock().unwrap().job_count(), 0);
+        workers.engine.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_start_that_misses_its_budget_reports_startup_timeout() {
+        let (root, workers, p) = fixture(true).await;
+        workers.limit_start_budget(Duration::from_secs(2));
+        assert_eq!(
+            workers.create(&p, &request(1920), "slow", 0).await.unwrap_err(),
+            "startup_timeout"
+        );
+        assert!(
+            root.path().join("encoder.count").exists(),
+            "the budget must expire while the output start is in flight"
+        );
+        assert_eq!(workers.sessions.lock().unwrap().stopping_jobs().len(), 1);
         workers.engine.shutdown().await;
     }
 
