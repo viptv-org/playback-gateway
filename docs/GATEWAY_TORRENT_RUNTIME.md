@@ -21,8 +21,13 @@ lock does not cover unrelated metadata waits. Output jobs retain their source
 through real media-process cleanup; weak source caches cannot confer authority.
 Cancellation during prepare retains admission until the late control reply's
 handle is closed. Cache records survive stop/restart; the final handle stops
-its torrent. Worker death can interrupt other inputs in that same worker; each
-loses its private media authority and must start a fresh authorized session.
+its torrent. An expired caller budget fails only that request: the shared child
+is terminated only when it completes no reply across consecutive budgets or its
+pipe breaks, so unrelated inputs keep their media authority. A close that cannot
+settle is retried a bounded number of times; an abandoned close releases its
+admission and logs it. Worker death can interrupt other inputs in that same
+worker; each loses its private media authority and must start a fresh authorized
+session.
 
 The worker's `first_frame` acknowledgement is sent when gateway output preparation
 has succeeded. This is an internal source-consumption acknowledgement, not a
