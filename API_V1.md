@@ -282,7 +282,9 @@ no-referrer`; do not place capability URLs in logs or analytics.
 Errors use `{"error":{"code":"..."}}`, never raw subprocess/provider output.
 Invalid requests are `400`, invalid credentials `401`, missing operation scope
 `403`, unknown/foreign session IDs `404`, expired renewal `410`, incompatible
-output `422`, and key quota exhaustion `429`. Startup timeout is `504`; worker
+output `422`, and key quota exhaustion `429`. A viewer holding too many
+unread in-flight media responses is refused `429 media_capacity` until its
+responses complete or drop. Startup timeout is `504`; worker
 and source preparation failures currently use safe generic `502` codes. More
 specific upstream failure classification remains an acceptance item.
 

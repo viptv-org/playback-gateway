@@ -58,6 +58,19 @@ volume usage. Docker notes that tmpfs can be swapped; this is not a guarantee
 that media bytes can never reach host swap. No filesystem or process-memory limit
 for arbitrary native/custom deployments is claimed.
 
+## Per-viewer in-flight media requests
+
+Each in-flight media response buffers only its bounded chunk lookahead in
+memory, with no disk spool. One viewer's concurrent in-flight media requests —
+playlist, segment, caption and original-file paths alike — are admitted up to
+a fixed limit of 8; further requests from that viewer fail with
+429 `media_capacity` until one of its responses completes or its connection
+closes. Other viewers are unaffected. A stalled or aborted request releases
+its admission with the response body, so unread-response memory per viewer is
+bounded by the limit times the existing per-response buffer bound, not by how
+many sockets the client opens. The limit is a fixed service policy, not an
+operator setting.
+
 ## Separate operator replay watchdog
 
 The former fixed 64 MiB replay ceiling is replaced by operator

@@ -52,6 +52,7 @@ pub struct Workers {
     preparation_progress: ProgressRecords,
     preparation_cancelled: tokio::sync::Notify,
     cancelled_preparations: Mutex<HashMap<(String, String), (String, Instant)>>,
+    media_capacity: crate::media_capacity::MediaCapacity,
     #[cfg(test)]
     start_budget_override: Mutex<Option<Duration>>,
 }
@@ -225,6 +226,7 @@ impl Workers {
             preparation_progress: Arc::new(Mutex::new(HashMap::new())),
             preparation_cancelled: tokio::sync::Notify::new(),
             cancelled_preparations: Mutex::new(HashMap::new()),
+            media_capacity: crate::media_capacity::MediaCapacity::new(),
             #[cfg(test)]
             start_budget_override: Mutex::new(None),
         })
@@ -1026,8 +1028,12 @@ impl Workers {
             return Err("method_not_allowed");
         }
         let target = self.media_target(viewer, token, now).await?;
+        let lane = self.media_capacity.admit(viewer)?;
         if file.starts_with("caption_") {
-            return self.caption_media(viewer, token, file, now, method).await;
+            return self
+                .caption_media(viewer, token, file, now, method)
+                .await
+                .map(|response| lane.hold(response));
         }
         if file.len() > 160
             || file.contains("..")
@@ -1070,7 +1076,7 @@ impl Workers {
             axum::http::header::REFERRER_POLICY,
             "no-referrer".parse().unwrap(),
         );
-        Ok(response)
+        Ok(lane.hold(response))
     }
 }
 

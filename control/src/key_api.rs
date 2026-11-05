@@ -108,6 +108,7 @@ impl IntoResponse for ApiError {
             | "archive_volume_missing"
             | "archive_metadata_invalid" => StatusCode::UNPROCESSABLE_ENTITY,
             "caption_capacity"
+            | "media_capacity"
             | "viewer_capacity"
             | "input_capacity"
             | "output_capacity"
