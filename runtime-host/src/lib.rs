@@ -252,10 +252,21 @@ mod tests {
             WorkerError::Protocol
         );
     }
+    // A plain file is written and executed as the worker; another thread's fork
+    // holds the write descriptor and makes that exec fail while it is open.
+    #[cfg(unix)]
+    static FIXTURE: Mutex<()> = Mutex::new(());
+    #[cfg(unix)]
+    fn fixture_lock() -> std::sync::MutexGuard<'static, ()> {
+        FIXTURE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
     #[cfg(unix)]
     #[test]
     fn readiness_banner_precedes_the_first_control_reply() {
         use std::os::unix::fs::PermissionsExt;
+        let _fixture = fixture_lock();
         let root = std::env::temp_dir().join(format!("viptv-banner-test-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let script = root.join("worker");
@@ -275,7 +286,10 @@ mod tests {
         let worker = worker.expect("worker did not become available");
         assert_eq!(
             worker
-                .call(json!({"op":"observe","handle":"1"}), Duration::from_secs(10))
+                .call(
+                    json!({"op":"observe","handle":"1"}),
+                    Duration::from_secs(10)
+                )
                 .unwrap()["ok"],
             true
         );
@@ -302,6 +316,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_slow_reply_fails_one_call_and_leaves_the_shared_child_serving() {
+        let _fixture = fixture_lock();
         let (root, worker) = fixture_worker(
             "slow-reply",
             br#"#!/bin/sh
@@ -316,7 +331,10 @@ done
         );
         assert_eq!(
             worker
-                .call(json!({"op":"observe","handle":"1"}), Duration::from_millis(200))
+                .call(
+                    json!({"op":"observe","handle":"1"}),
+                    Duration::from_millis(200)
+                )
                 .unwrap_err(),
             WorkerError::Timeout
         );
@@ -326,7 +344,10 @@ done
         );
         assert_eq!(
             worker
-                .call(json!({"op":"observe","handle":"2"}), Duration::from_secs(10))
+                .call(
+                    json!({"op":"observe","handle":"2"}),
+                    Duration::from_secs(10)
+                )
                 .unwrap()["ok"],
             true,
             "another source must keep using the same child"
@@ -337,6 +358,7 @@ done
     #[cfg(unix)]
     #[test]
     fn a_child_that_completes_nothing_across_its_budgets_is_replaced() {
+        let _fixture = fixture_lock();
         let (root, worker) = fixture_worker(
             "stalled",
             br#"#!/bin/sh
@@ -351,22 +373,38 @@ done
         );
         let budget = Duration::from_millis(150);
         let observe = || json!({"op":"observe","handle":"1"});
-        assert_eq!(worker.call(observe(), budget).unwrap_err(), WorkerError::Timeout);
+        assert_eq!(
+            worker.call(observe(), budget).unwrap_err(),
+            WorkerError::Timeout
+        );
         assert!(worker.is_alive(), "one caller timeout is not a child fault");
-        assert_eq!(worker.call(observe(), budget).unwrap_err(), WorkerError::Timeout);
-        assert!(worker.is_alive(), "the child may still be finishing its first reply");
-        assert_eq!(worker.call(observe(), budget).unwrap_err(), WorkerError::Timeout);
+        assert_eq!(
+            worker.call(observe(), budget).unwrap_err(),
+            WorkerError::Timeout
+        );
+        assert!(
+            worker.is_alive(),
+            "the child may still be finishing its first reply"
+        );
+        assert_eq!(
+            worker.call(observe(), budget).unwrap_err(),
+            WorkerError::Timeout
+        );
         assert!(
             !worker.is_alive(),
             "a child that completes nothing across budgets must be terminated"
         );
-        assert_eq!(worker.call(observe(), budget).unwrap_err(), WorkerError::Unavailable);
+        assert_eq!(
+            worker.call(observe(), budget).unwrap_err(),
+            WorkerError::Unavailable
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
     #[cfg(unix)]
     #[test]
     fn hung_owned_child_is_killed_and_reaped() {
         use std::os::unix::fs::PermissionsExt;
+        let _fixture = fixture_lock();
         let root = std::env::temp_dir().join(format!("viptv-worker-test-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let script = root.join("worker");

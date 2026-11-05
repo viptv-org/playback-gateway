@@ -341,7 +341,6 @@ impl Drop for RuntimeSource {
         let worker = self.worker.clone();
         let handle = self.handle.clone();
         let pending = self.pending.take();
-        let source_tag = crate::diagnostics::tag(&handle);
         let thread = std::thread::spawn(move || {
             // Admission outlives the first close attempt: the child may still own
             // the handle and its private endpoint until one settles.
@@ -354,6 +353,7 @@ impl Drop for RuntimeSource {
                     std::thread::sleep(CLOSE_RETRY_DELAY);
                 }
             }
+            let source_tag = crate::diagnostics::tag(&handle);
             drop(admission);
             tracing::warn!(
                 %source_tag,
