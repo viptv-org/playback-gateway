@@ -1,6 +1,12 @@
 #![cfg(feature = "torrent")]
 use playback_engine::{TorrentConfig, TorrentManager};
 
+fn accepted_connection(listener: tokio::net::TcpListener) -> bool {
+    let listener = listener.into_std().unwrap();
+    listener.set_nonblocking(true).unwrap();
+    listener.accept().is_ok()
+}
+
 #[tokio::test]
 async fn disabled_transport_never_creates_cache_or_starts_network() {
     let cache = tempfile::tempdir().unwrap().path().join("disabled");
@@ -109,9 +115,7 @@ async fn local_seeder_supports_selection_ranges_tokens_shared_leases_and_scope_i
         .await
         .unwrap();
     assert!(
-        tokio::time::timeout(std::time::Duration::from_millis(100), tracker.accept())
-            .await
-            .is_err(),
+        !accepted_connection(tracker),
         "unvetted HTTP tracker must never be contacted"
     );
     assert_eq!(handle.selected_file().name, "movie.MKV");
