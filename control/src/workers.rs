@@ -3286,6 +3286,108 @@ printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","wi
         workers.engine.shutdown().await;
     }
 
+    #[tokio::test]
+    async fn cancelled_activation_returns_source_preparation_cancelled_and_starts_no_job() {
+        let (root, workers, p) = fixture(true).await;
+        let prepared = workers
+            .create_prepared(&p, &request(1920), "deferred", 0)
+            .await
+            .unwrap();
+        assert_eq!(prepared.status, Status::Prepared);
+        let activation = tokio::spawn({
+            let workers = workers.clone();
+            let principal = p.clone();
+            let id = prepared.id.clone();
+            async move { workers.activate(&principal, &id, 0).await }
+        });
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !root.path().join("encoder.count").exists() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        workers
+            .cancel_preparation_in_namespace(&p, "deferred", Some("fixture"))
+            .unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(5), activation)
+                .await
+                .expect("a cancelled activation must unwind promptly")
+                .unwrap()
+                .err(),
+            Some("source_preparation_cancelled")
+        );
+        workers.reap(1).await.unwrap();
+        assert_eq!(workers.sessions.lock().unwrap().job_count(), 0);
+        assert_eq!(workers.engine.active_count().await, 0);
+        assert_eq!(
+            std::fs::read_dir(root.path().join("media"))
+                .unwrap()
+                .count(),
+            0
+        );
+        let viewer = workers
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&p, &prepared.id, 1)
+            .unwrap();
+        assert_eq!(viewer.status, Status::Failed);
+        workers.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_concurrent_second_activation_is_refused_before_inspecting_the_source() {
+        let (root, workers, p) = fixture(false).await;
+        std::fs::write(root.path().join("probe"), r#"#!/bin/sh
+printf x >> "$0.count"
+sleep 1
+printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","width":640,"height":360,"pix_fmt":"yuv420p","profile":"High","level":31,"avg_frame_rate":"30/1","r_frame_rate":"30/1","field_order":"progressive"},{"index":1,"codec_type":"audio","codec_name":"aac","profile":"LC","channels":2}],"format":{"format_name":"mpegts"}}'
+"#).unwrap();
+        let prepared = workers
+            .create_prepared(&p, &request(1920), "deferred", 0)
+            .await
+            .unwrap();
+        let first = tokio::spawn({
+            let workers = workers.clone();
+            let principal = p.clone();
+            let id = prepared.id.clone();
+            async move { workers.activate(&principal, &id, 0).await }
+        });
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !root.path().join("probe.count").exists() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the first activation must reach source inspection");
+        assert_eq!(
+            workers.activate(&p, &prepared.id, 0).await.err(),
+            Some("session_not_found")
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("probe.count")).unwrap(),
+            "x",
+            "a refused activation must not inspect the source"
+        );
+        let activated = tokio::time::timeout(Duration::from_secs(5), first)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(activated.status, Status::Ready);
+        workers
+            .sessions
+            .lock()
+            .unwrap()
+            .release(&p, &activated.id, 2)
+            .unwrap();
+        workers.reap(18).await.unwrap();
+        assert_eq!(workers.sessions.lock().unwrap().job_count(), 0);
+        workers.shutdown().await;
+    }
+
     struct FakeEngine {
         stop_hang: Arc<Mutex<std::collections::HashSet<String>>>,
     }
