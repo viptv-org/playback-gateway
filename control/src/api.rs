@@ -571,6 +571,101 @@ mod tests {
         workers.shutdown().await;
     }
 
+    async fn open(app: &Router, uri: &str) -> Response {
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(uri)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+
+    async fn session_url(app: &Router, key: &str, idem: &str) -> String {
+        let (status, _, body) = call(
+            app,
+            "POST",
+            "/v1/sessions",
+            key,
+            Some(idem),
+            serde_json::to_string(&request(1920)).unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let session: Value = serde_json::from_slice(&body).unwrap();
+        session["playback"]["url"].as_str().unwrap().to_owned()
+    }
+
+    #[tokio::test]
+    async fn unread_media_requests_beyond_the_viewer_limit_are_refused_for_that_viewer_only() {
+        const VIEWER_MEDIA_LIMIT: usize = 8;
+        let (_root, workers, p) = fixture(false).await;
+        let app = router(Api {
+            workers: workers.clone(),
+            ready: Arc::new(AtomicBool::new(true)),
+        });
+        let key = workers
+            .credentials
+            .issue(BOOTSTRAP, p.key.spec.clone(), 0)
+            .unwrap()
+            .secret;
+        let first = session_url(&app, &key, "one").await;
+        let second = session_url(&app, &key, "two").await;
+        let first_segment = first.replace("index.m3u8", "segment-000000000.ts");
+        let second_segment = second.replace("index.m3u8", "segment-000000000.ts");
+        let mut held = Vec::new();
+        for _ in 0..VIEWER_MEDIA_LIMIT {
+            let response = open(&app, &first_segment).await;
+            assert_eq!(response.status(), StatusCode::OK);
+            held.push(response);
+        }
+        let refused = open(&app, &first_segment).await;
+        assert_eq!(refused.status(), StatusCode::TOO_MANY_REQUESTS);
+        let body = to_bytes(refused.into_body(), 16 * 1024).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&body).unwrap()["error"]["code"],
+            json!("media_capacity")
+        );
+        let other = open(&app, &second_segment).await;
+        assert_eq!(other.status(), StatusCode::OK);
+        held.push(other);
+        drop(held);
+        workers.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn dropped_unread_media_responses_release_the_viewer_limit() {
+        const VIEWER_MEDIA_LIMIT: usize = 8;
+        let (_root, workers, p) = fixture(false).await;
+        let app = router(Api {
+            workers: workers.clone(),
+            ready: Arc::new(AtomicBool::new(true)),
+        });
+        let key = workers
+            .credentials
+            .issue(BOOTSTRAP, p.key.spec.clone(), 0)
+            .unwrap()
+            .secret;
+        let url = session_url(&app, &key, "one").await;
+        let segment = url.replace("index.m3u8", "segment-000000000.ts");
+        let mut held = Vec::new();
+        for _ in 0..VIEWER_MEDIA_LIMIT {
+            let response = open(&app, &segment).await;
+            assert_eq!(response.status(), StatusCode::OK);
+            held.push(response);
+        }
+        assert_eq!(
+            open(&app, &segment).await.status(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        drop(held);
+        assert_eq!(open(&app, &segment).await.status(), StatusCode::OK);
+        workers.shutdown().await;
+    }
+
     #[tokio::test]
     async fn authentication_readiness_and_invalid_bodies_fail_without_secret_echo() {
         let (_root, workers, p) = fixture(false).await;
