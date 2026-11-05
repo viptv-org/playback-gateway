@@ -23,6 +23,12 @@ async fn request(address: std::net::SocketAddr, path: &str) -> String {
     String::from_utf8(bytes).unwrap()
 }
 
+fn accepted_connection(listener: TcpListener) -> bool {
+    let listener = listener.into_std().unwrap();
+    listener.set_nonblocking(true).unwrap();
+    listener.accept().is_ok()
+}
+
 #[tokio::test]
 #[ignore = "requires qualified real FFmpeg and ffprobe binaries"]
 async fn standalone_binary_serves_readiness_locks_storage_and_shuts_down() {
@@ -212,9 +218,7 @@ async fn standalone_torrent_runtime_off_refuses_before_source_io() {
         assert_eq!(error["error"]["code"], "unsupported_output");
     }
     assert!(
-        tokio::time::timeout(Duration::from_millis(250), source.accept())
-            .await
-            .is_err(),
+        !accepted_connection(source),
         "disabled inputs must not contact the fixture source"
     );
     assert!(

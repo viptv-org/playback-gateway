@@ -915,6 +915,11 @@ mod tests {
     async fn fixture_sources(proxy: &str) -> Sources {
         Sources::new(TorrentConfig::default(), proxy).unwrap()
     }
+    fn accepted_connection(listener: tokio::net::TcpListener) -> bool {
+        let listener = listener.into_std().unwrap();
+        listener.set_nonblocking(true).unwrap();
+        listener.accept().is_ok()
+    }
     fn fixture_range(headers: &HttpHeaders, bytes: &[u8]) -> Response<Body> {
         let range = headers
             .get("range")
@@ -1596,9 +1601,8 @@ mod tests {
             Some("source_preparation_failed")
         );
         assert!(
-            tokio::time::timeout(Duration::from_millis(50), target.accept())
-                .await
-                .is_err()
+            !accepted_connection(target),
+            "a denied private archive must not be contacted"
         );
     }
 }

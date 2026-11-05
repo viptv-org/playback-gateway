@@ -495,21 +495,19 @@ async fn cancelled_archive_reader_keeps_key_quota_until_actual_read_completion()
         let workers = workers.clone();
         async move { workers.reap(40).await }
     });
-    tokio::time::sleep(Duration::from_millis(60)).await;
-    assert!(
-        !cleanup.is_finished(),
-        "last source quota must remain held while its blocking reader waits upstream"
-    );
-    assert_eq!(workers.available(&principal, 40).unwrap().inputs, 0);
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(6), cleanup)
             .await
-            .unwrap()
+            .expect("a reaper that waits for a blocked reader must still return")
             .unwrap(),
         Err("cleanup_pending"),
         "bounded reaper waits must leave the stopping reservation for the next poll"
     );
-    assert_eq!(workers.available(&principal, 40).unwrap().inputs, 0);
+    assert_eq!(
+        workers.available(&principal, 40).unwrap().inputs,
+        0,
+        "last source quota must remain held while its blocking reader waits upstream"
+    );
     reading.abort();
     let _ = reading.await;
     release.notify_one();

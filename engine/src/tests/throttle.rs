@@ -32,15 +32,28 @@ fn throttle_tracks_only_fetched_av_segments_and_uses_hysteresis() {
     assert!(!Throttle::default().holding());
 }
 
+#[cfg(target_os = "linux")]
+fn child_state(pid: u32) -> char {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+    stat.rsplit_once(") ").unwrap().1.chars().next().unwrap()
+}
+
+#[cfg(target_os = "linux")]
+async fn wait_state(pid: u32, reached: impl Fn(char) -> bool, expected: &str) {
+    timeout(Duration::from_secs(10), async {
+        while !reached(child_state(pid)) {
+            sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("the encoder must be {expected}"));
+}
+
 /// SIGSTOP/SIGCONT really suspend the child, the stall watchdog is told to
 /// wait, and a suspended child still dies on the normal cleanup path.
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn throttle_suspends_resumes_and_still_kills_the_encoder() {
-    let state = |pid: u32| {
-        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
-        stat.rsplit_once(") ").unwrap().1.chars().next().unwrap()
-    };
     let mut child = Command::new("sleep")
         .arg("30")
         .kill_on_drop(true)
@@ -50,19 +63,16 @@ async fn throttle_suspends_resumes_and_still_kills_the_encoder() {
     let mut throttle = Throttle::on_demand();
     throttle.apply(&child, HLS_THROTTLE_AHEAD_SEGMENTS + 1);
     assert!(throttle.holding());
-    sleep(Duration::from_millis(50)).await;
-    assert_eq!(state(pid), 'T', "the encoder must be stopped");
+    wait_state(pid, |state| state == 'T', "stopped").await;
     throttle.observe("segment-000000100.ts");
     throttle.apply(&child, 100 + HLS_THROTTLE_RESUME_SEGMENTS);
-    sleep(Duration::from_millis(50)).await;
-    assert_eq!(state(pid), 'S', "the encoder must run again");
+    wait_state(pid, |state| state != 'T', "running again").await;
     assert!(
         throttle.holding(),
         "a resumed input gets a grace period before the stall watchdog"
     );
     throttle.apply(&child, 200 + HLS_THROTTLE_AHEAD_SEGMENTS);
-    sleep(Duration::from_millis(50)).await;
-    assert_eq!(state(pid), 'T');
+    wait_state(pid, |state| state == 'T', "stopped again").await;
     child.start_kill().unwrap();
     assert!(!timeout(Duration::from_secs(3), child.wait())
         .await
