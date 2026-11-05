@@ -3351,6 +3351,41 @@ printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","wi
     }
 
     #[tokio::test]
+    async fn key_revocation_during_activation_ends_startup_promptly() {
+        let (root, workers, p) = fixture(true).await;
+        let prepared = workers
+            .create_prepared(&p, &request(1920), "deferred", 0)
+            .await
+            .unwrap();
+        let activation = tokio::spawn({
+            let workers = workers.clone();
+            let principal = p.clone();
+            let id = prepared.id.clone();
+            async move { workers.activate(&principal, &id, 0).await }
+        });
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !root.path().join("encoder.count").exists() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        workers.credentials.revoke(BOOTSTRAP, &p.key.id).unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(5), activation)
+                .await
+                .expect("an activation with a revoked key must unwind promptly")
+                .unwrap()
+                .err(),
+            Some("unauthorized")
+        );
+        workers.reap(1).await.unwrap();
+        assert_eq!(workers.sessions.lock().unwrap().job_count(), 0);
+        assert_eq!(workers.engine.active_count().await, 0);
+        workers.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn a_concurrent_second_activation_is_refused_before_inspecting_the_source() {
         let (root, workers, p) = fixture(false).await;
         std::fs::write(root.path().join("probe"), r#"#!/bin/sh
