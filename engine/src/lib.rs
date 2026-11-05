@@ -218,6 +218,8 @@ pub use input::{TorrentConfig, TorrentFile};
 
 #[cfg(feature = "archive")]
 pub mod archive_cache;
+#[cfg(feature = "range")]
+mod cache_lock;
 #[cfg(all(feature = "range", not(feature = "torrent")))]
 mod range_tasks;
 #[cfg(feature = "archive")]
