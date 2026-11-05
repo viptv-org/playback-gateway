@@ -16,6 +16,7 @@ archive = ["range", "dep:unrar-rs"]
 [dev-dependencies]
 tempfile = "3"
 anyhow = "1"
+tokio = { version = "1", features = ["full", "test-util"] }
 
 [dependencies]
 axum = { version = "0.7", features = ["macros"], optional = true }

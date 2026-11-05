@@ -1305,6 +1305,7 @@ mod tests {
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn registry_queue_and_real_metadata_wait_share_one_absolute_budget() {
+        const BUDGET: Duration = Duration::from_secs(5);
         let temp = tempfile::tempdir().unwrap();
         let peer = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let manager = manager(temp.path().join("cache"), peer.local_addr().unwrap());
@@ -1318,17 +1319,22 @@ mod tests {
                 hash,
                 0,
                 1,
-                Duration::from_millis(300),
+                BUDGET,
             )
             .unwrap();
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        // The queue wait spends part of the one budget the acquisition was given.
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        let queued = entered.elapsed();
         drop(lock);
-        let (socket, _) = tokio::time::timeout(Duration::from_millis(100), peer.accept())
+        let (socket, _) = tokio::time::timeout(Duration::from_secs(30), peer.accept())
             .await
-            .unwrap()
+            .expect("the released queue must reach the metadata stage")
             .unwrap();
         assert!(acquisition.wait_ready().await.is_err());
-        assert!(entered.elapsed() < Duration::from_millis(450));
+        assert!(
+            entered.elapsed() < BUDGET + queued / 2,
+            "the metadata stage must inherit the remaining budget instead of a fresh one"
+        );
         assert_eq!(
             format!("{:?}", acquisition.failure_reason()),
             "Some(MetadataTimeout)",

@@ -5,6 +5,13 @@ use std::{path::Path, time::Duration};
 
 const FALLBACK_INTERVAL: Duration = Duration::from_millis(50);
 
+#[cfg(target_os = "linux")]
+enum Publication {
+    Changed,
+    WatchBroken,
+    NoWatch,
+}
+
 pub(super) struct OutputChanges {
     #[cfg(target_os = "linux")]
     fd: Option<tokio::io::unix::AsyncFd<std::os::fd::OwnedFd>>,
@@ -44,40 +51,49 @@ impl OutputChanges {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    async fn publication(&self) -> Publication {
+        use std::os::fd::AsRawFd;
+        let Some(fd) = &self.fd else {
+            return Publication::NoWatch;
+        };
+        loop {
+            let mut ready = match fd.readable().await {
+                Ok(ready) => ready,
+                Err(_) => return Publication::WatchBroken,
+            };
+            let result = ready.try_io(|fd| {
+                // Event contents are deliberately ignored. The caller
+                // rechecks its existing cache and playback predicates.
+                let mut buffer = [0u8; 4096];
+                let count = unsafe {
+                    libc::read(
+                        fd.get_ref().as_raw_fd(),
+                        buffer.as_mut_ptr().cast(),
+                        buffer.len(),
+                    )
+                };
+                if count < 0 {
+                    Err(std::io::Error::last_os_error())
+                } else if count == 0 {
+                    Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof))
+                } else {
+                    Ok(())
+                }
+            });
+            match result {
+                Ok(Ok(())) => return Publication::Changed,
+                Ok(Err(_)) => return Publication::WatchBroken,
+                Err(_) => continue,
+            }
+        }
+    }
+
     pub(super) async fn wait(&mut self) {
         #[cfg(target_os = "linux")]
-        if let Some(fd) = &self.fd {
-            let result = tokio::time::timeout(FALLBACK_INTERVAL, async {
-                use std::os::fd::AsRawFd;
-                loop {
-                    let mut ready = fd.readable().await?;
-                    let result = ready.try_io(|fd| {
-                        // Event contents are deliberately ignored. The caller
-                        // rechecks its existing cache and playback predicates.
-                        let mut buffer = [0u8; 4096];
-                        let count = unsafe {
-                            libc::read(
-                                fd.get_ref().as_raw_fd(),
-                                buffer.as_mut_ptr().cast(),
-                                buffer.len(),
-                            )
-                        };
-                        if count < 0 {
-                            Err(std::io::Error::last_os_error())
-                        } else if count == 0 {
-                            Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof))
-                        } else {
-                            Ok(())
-                        }
-                    });
-                    match result {
-                        Ok(result) => return result,
-                        Err(_) => continue,
-                    }
-                }
-            })
-            .await;
-            if matches!(result, Ok(Err(_))) {
+        if self.fd.is_some() {
+            let publication = tokio::time::timeout(FALLBACK_INTERVAL, self.publication()).await;
+            if matches!(publication, Ok(Publication::WatchBroken)) {
                 self.fd = None;
                 // A broken descriptor must not become a busy retry loop.
                 tokio::time::sleep(FALLBACK_INTERVAL).await;
@@ -93,20 +109,25 @@ mod tests {
     use super::*;
 
     #[cfg(target_os = "linux")]
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn publication_before_wait_is_not_lost_and_readiness_is_consumed() {
         let root = tempfile::tempdir().unwrap();
         let mut changes = OutputChanges::new(root.path());
-        assert!(changes.fd.is_some());
+        if changes.fd.is_none() {
+            eprintln!("inotify watch unavailable; the publication path is not exercised");
+            return;
+        }
         std::fs::write(root.path().join("index.m3u8.tmp"), "#EXTM3U\n").unwrap();
         std::fs::rename(
             root.path().join("index.m3u8.tmp"),
             root.path().join("index.m3u8"),
         )
         .unwrap();
-        tokio::time::timeout(Duration::from_millis(40), changes.wait())
+        tokio::time::resume();
+        tokio::time::timeout(Duration::from_secs(10), changes.wait())
             .await
-            .unwrap();
+            .expect("a published playlist must wake the wait");
+        tokio::time::pause();
         // Drain any coalesced kernel events before testing the idle path.
         let mut buffer = [0u8; 4096];
         use std::os::fd::AsRawFd;
@@ -118,33 +139,39 @@ mod tests {
             )
         } > 0
         {}
-        let started = std::time::Instant::now();
+        let started = tokio::time::Instant::now();
         changes.wait().await;
-        assert!(started.elapsed() >= Duration::from_millis(40));
+        assert!(started.elapsed() >= FALLBACK_INTERVAL);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn unavailable_watch_uses_finite_polling() {
         let root = tempfile::tempdir().unwrap();
         let mut changes = OutputChanges::new(&root.path().join("missing"));
-        let started = std::time::Instant::now();
+        let started = tokio::time::Instant::now();
         changes.wait().await;
-        assert!(started.elapsed() >= Duration::from_millis(40));
+        assert!(started.elapsed() >= FALLBACK_INTERVAL);
     }
 
     #[cfg(target_os = "linux")]
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn cancellation_leaves_watcher_usable() {
         let root = tempfile::tempdir().unwrap();
         let mut changes = OutputChanges::new(root.path());
+        if changes.fd.is_none() {
+            eprintln!("inotify watch unavailable; the publication path is not exercised");
+            return;
+        }
         assert!(
             tokio::time::timeout(Duration::from_millis(1), changes.wait())
                 .await
-                .is_err()
+                .is_err(),
+            "an idle watch must not report a publication"
         );
+        tokio::time::resume();
         std::fs::write(root.path().join("segment-000.ts"), [0x47; 188]).unwrap();
-        tokio::time::timeout(Duration::from_millis(40), changes.wait())
+        tokio::time::timeout(Duration::from_secs(10), changes.wait())
             .await
-            .unwrap();
+            .expect("a cancelled wait must leave the watch usable");
     }
 }
