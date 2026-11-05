@@ -4,11 +4,17 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::Path,
     process::{Child, Command, Stdio},
-    sync::{mpsc, Arc, Mutex},
+    sync::{
+        atomic::{AtomicU32, AtomicU64, Ordering},
+        mpsc, Arc, Mutex,
+    },
     time::{Duration, Instant},
 };
 
 const MAX_FRAME: usize = 6 * 1024 * 1024;
+// Caller budgets are not child faults: only this many consecutive budgets that
+// complete no reply at all condemn the shared child.
+const STALLED_TIMEOUTS: u32 = 2;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WorkerError {
     Unavailable,
@@ -38,6 +44,9 @@ struct Request {
 pub struct Worker {
     requests: mpsc::SyncSender<Request>,
     child: Arc<Mutex<Child>>,
+    completions: Arc<AtomicU64>,
+    stalled_at: AtomicU64,
+    stalls: AtomicU32,
 }
 impl std::fmt::Debug for Worker {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -64,6 +73,8 @@ impl Worker {
         let output = child.stdout.take().ok_or(WorkerError::Unavailable)?;
         let child = Arc::new(Mutex::new(child));
         let (requests, pending) = mpsc::sync_channel::<Request>(8);
+        let completions = Arc::new(AtomicU64::new(0));
+        let served = completions.clone();
         std::thread::spawn(move || {
             let mut output = BufReader::new(output);
             let mut initialized = false;
@@ -96,20 +107,30 @@ impl Worker {
                     Ok(value)
                 })();
                 let broken = response.is_err();
+                if !broken {
+                    served.fetch_add(1, Ordering::AcqRel);
+                }
                 let _ = request.response.send(response);
                 if broken {
                     break;
                 }
             }
         });
-        let owner = Self { requests, child };
+        let owner = Self {
+            requests,
+            child,
+            completions,
+            stalled_at: AtomicU64::new(u64::MAX),
+            stalls: AtomicU32::new(0),
+        };
         let response = owner.call(json!({"op":"open","config":{"cache_dir":cache,"cache_bytes":capacity,"readahead_bytes":32<<20,"max_inputs":8,"max_handles":64}}), Duration::from_secs(8))?;
         if response["ok"] != true {
             return Err(WorkerError::Refused);
         }
         Ok(owner)
     }
-    /// A caller timeout kills this owned child, including a blocked stdin writer.
+    /// A caller timeout fails only this call; the shared child survives unless it
+    /// completes nothing across consecutive budgets or its pipe breaks.
     pub fn call(&self, mut command: Value, budget: Duration) -> Result<Value> {
         if !command.is_object() || !self.is_alive() {
             return Err(WorkerError::Unavailable);
@@ -123,10 +144,25 @@ impl Worker {
         self.requests
             .try_send(Request { bytes, response })
             .map_err(|_| WorkerError::Unavailable)?;
-        let result = receive
-            .recv_timeout(budget)
-            .map_err(|_| WorkerError::Timeout)
-            .and_then(|value| value);
+        let result = match receive.recv_timeout(budget) {
+            Ok(result) => result,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                let completed = self.completions.load(Ordering::Acquire);
+                let progressed = self.stalled_at.swap(completed, Ordering::AcqRel) != completed;
+                let stalls = if progressed {
+                    self.stalls.store(0, Ordering::Release);
+                    0
+                } else {
+                    self.stalls.fetch_add(1, Ordering::AcqRel).saturating_add(1)
+                };
+                if stalls >= STALLED_TIMEOUTS {
+                    self.stalls.store(0, Ordering::Release);
+                    self.terminate()?;
+                }
+                return Err(WorkerError::Timeout);
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(WorkerError::Unavailable),
+        };
         if result.as_ref().is_err()
             || result
                 .as_ref()
@@ -244,6 +280,87 @@ mod tests {
             true
         );
         worker.shutdown().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[cfg(unix)]
+    fn fixture_worker(name: &str, script: &[u8]) -> (std::path::PathBuf, Worker) {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("viptv-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("worker");
+        std::fs::write(&executable, script).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        for _ in 0..60 {
+            match Worker::start(&executable, &root, 64 << 20) {
+                Ok(worker) => return (root, worker),
+                Err(WorkerError::Unavailable) => std::thread::sleep(Duration::from_millis(100)),
+                Err(error) => panic!("worker start failed: {error}"),
+            }
+        }
+        panic!("worker did not become available");
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_slow_reply_fails_one_call_and_leaves_the_shared_child_serving() {
+        let (root, worker) = fixture_worker(
+            "slow-reply",
+            br#"#!/bin/sh
+printf '%s\n' '{"version":2,"ready":true}'
+count=0
+while IFS= read -r request; do
+  count=$((count+1))
+  if [ "$count" -eq 2 ]; then sleep 1; fi
+  printf '%s\n' '{"version":2,"ok":true}'
+done
+"#,
+        );
+        assert_eq!(
+            worker
+                .call(json!({"op":"observe","handle":"1"}), Duration::from_millis(200))
+                .unwrap_err(),
+            WorkerError::Timeout
+        );
+        assert!(
+            worker.is_alive(),
+            "a caller budget must not kill the shared child"
+        );
+        assert_eq!(
+            worker
+                .call(json!({"op":"observe","handle":"2"}), Duration::from_secs(10))
+                .unwrap()["ok"],
+            true,
+            "another source must keep using the same child"
+        );
+        worker.shutdown().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_child_that_completes_nothing_across_its_budgets_is_replaced() {
+        let (root, worker) = fixture_worker(
+            "stalled",
+            br#"#!/bin/sh
+printf '%s\n' '{"version":2,"ready":true}'
+count=0
+while IFS= read -r request; do
+  count=$((count+1))
+  if [ "$count" -ge 2 ]; then exec sleep 60; fi
+  printf '%s\n' '{"version":2,"ok":true}'
+done
+"#,
+        );
+        let budget = Duration::from_millis(150);
+        let observe = || json!({"op":"observe","handle":"1"});
+        assert_eq!(worker.call(observe(), budget).unwrap_err(), WorkerError::Timeout);
+        assert!(worker.is_alive(), "one caller timeout is not a child fault");
+        assert_eq!(worker.call(observe(), budget).unwrap_err(), WorkerError::Timeout);
+        assert!(worker.is_alive(), "the child may still be finishing its first reply");
+        assert_eq!(worker.call(observe(), budget).unwrap_err(), WorkerError::Timeout);
+        assert!(
+            !worker.is_alive(),
+            "a child that completes nothing across budgets must be terminated"
+        );
+        assert_eq!(worker.call(observe(), budget).unwrap_err(), WorkerError::Unavailable);
         std::fs::remove_dir_all(root).unwrap();
     }
     #[cfg(unix)]
