@@ -599,9 +599,10 @@ mod tests {
         session["playback"]["url"].as_str().unwrap().to_owned()
     }
 
+    const VIEWER_MEDIA_LIMIT: usize = 8;
+
     #[tokio::test]
     async fn unread_media_requests_beyond_the_viewer_limit_are_refused_for_that_viewer_only() {
-        const VIEWER_MEDIA_LIMIT: usize = 8;
         let (_root, workers, p) = fixture(false).await;
         let app = router(Api {
             workers: workers.clone(),
@@ -638,7 +639,6 @@ mod tests {
 
     #[tokio::test]
     async fn dropped_unread_media_responses_release_the_viewer_limit() {
-        const VIEWER_MEDIA_LIMIT: usize = 8;
         let (_root, workers, p) = fixture(false).await;
         let app = router(Api {
             workers: workers.clone(),
