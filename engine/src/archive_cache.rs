@@ -1,5 +1,5 @@
 //! Bounded archive spool ownership, independent of torrent acquisition.
-use crate::input::MIN_CACHE_BYTES;
+use crate::{cache_lock, input::MIN_CACHE_BYTES};
 use std::{
     fs::{File, OpenOptions},
     path::{Path, PathBuf},
@@ -160,9 +160,8 @@ fn prepare(path: &Path) -> Result<File, String> {
     }
     let lock = options
         .open(path.join(".gateway-lock"))
-        .map_err(|_| "Torrent cache lock unavailable")?;
-    lock.try_lock()
-        .map_err(|_| "Torrent cache already in use")?;
+        .map_err(|_| cache_lock::UNAVAILABLE.to_owned())?;
+    cache_lock::acquire(&lock)?;
     for entry in std::fs::read_dir(path).map_err(|_| "Torrent cache unavailable")? {
         let entry = entry.map_err(|_| "Torrent cache unavailable")?;
         let name = entry.file_name();
