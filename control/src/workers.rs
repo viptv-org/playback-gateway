@@ -45,6 +45,7 @@ pub struct Workers {
     proxy: EgressProxy,
     active: Mutex<BTreeMap<String, PlaybackResponse>>,
     starting: Mutex<BTreeSet<String>>,
+    activating: Mutex<BTreeSet<String>>,
     reaper: tokio::sync::Mutex<()>,
     sources: Arc<Sources>,
     input_sources: Mutex<BTreeMap<String, Arc<ResolvedSource>>>,
@@ -219,6 +220,7 @@ impl Workers {
             proxy,
             active: Mutex::new(BTreeMap::new()),
             starting: Mutex::new(BTreeSet::new()),
+            activating: Mutex::new(BTreeSet::new()),
             reaper: tokio::sync::Mutex::new(()),
             sources,
             input_sources: Mutex::new(BTreeMap::new()),
@@ -241,13 +243,13 @@ impl Workers {
         idempotency: &str,
         now: u64,
     ) -> Result<Viewer, &'static str> {
-        self.guarded(
+        Self::observed(self.guarded(
             principal,
             request,
             idempotency,
             now,
             self.create_inner(principal, request, idempotency, now),
-        )
+        ))
         .await
     }
     pub async fn create_prepared(
@@ -257,20 +259,7 @@ impl Workers {
         idempotency: &str,
         now: u64,
     ) -> Result<Viewer, &'static str> {
-        let observation = service_telemetry::observe(service_telemetry::Operation::GatewayPrepare);
-        let context = observation.context();
-        let outcome = service_telemetry::in_context(
-            context,
-            self.prepare_inner(principal, request, idempotency, now),
-        )
-        .await;
-        observation.finish(match &outcome {
-            Ok(_) => service_telemetry::Outcome::Success,
-            Err(code) => {
-                service_telemetry::Outcome::Failed(service_telemetry::Failure::from_code(code))
-            }
-        });
-        outcome
+        Self::observed(self.prepare_inner(principal, request, idempotency, now)).await
     }
     pub async fn activate(
         &self,
@@ -278,10 +267,14 @@ impl Workers {
         id: &str,
         now: u64,
     ) -> Result<Viewer, &'static str> {
+        Self::observed(self.activate_inner(principal, id, now)).await
+    }
+    async fn observed(
+        operation: impl std::future::Future<Output = Result<Viewer, &'static str>>,
+    ) -> Result<Viewer, &'static str> {
         let observation = service_telemetry::observe(service_telemetry::Operation::GatewayPrepare);
         let context = observation.context();
-        let outcome =
-            service_telemetry::in_context(context, self.activate_inner(principal, id, now)).await;
+        let outcome = service_telemetry::in_context(context, operation).await;
         observation.finish(match &outcome {
             Ok(_) => service_telemetry::Outcome::Success,
             Err(code) => {
@@ -298,13 +291,10 @@ impl Workers {
         now: u64,
         operation: impl std::future::Future<Output = Result<Viewer, &'static str>>,
     ) -> Result<Viewer, &'static str> {
-        let observation = service_telemetry::observe(service_telemetry::Operation::GatewayPrepare);
-        let context = observation.context();
         let started = Instant::now();
-        let operation = service_telemetry::in_context(context, operation);
         tokio::pin!(operation);
         let mut authorization = tokio::time::interval(Duration::from_secs(1));
-        let outcome = loop {
+        loop {
             tokio::select! {
                 outcome = &mut operation => break outcome,
                 _ = self.preparation_cancelled.notified() => {
@@ -315,14 +305,7 @@ impl Workers {
                     if let Err(code) = self.require_active(principal, now.saturating_add(started.elapsed().as_secs())).await { break Err(code); }
                 }
             }
-        };
-        observation.finish(match &outcome {
-            Ok(_) => service_telemetry::Outcome::Success,
-            Err(code) => {
-                service_telemetry::Outcome::Failed(service_telemetry::Failure::from_code(code))
-            }
-        });
-        outcome
+        }
     }
     async fn create_inner(
         &self,
@@ -712,8 +695,27 @@ impl Workers {
             .lock()
             .map_err(|_| "session_store_unavailable")?
             .activation(principal, id, now)?;
-        self.create_core(principal, &request, &idempotency, now, Some(id.to_owned()))
-            .await
+        // A concurrent activation of this viewer must be refused before any source work.
+        if !self
+            .activating
+            .lock()
+            .map_err(|_| "session_store_unavailable")?
+            .insert(id.to_owned())
+        {
+            return Err("session_not_found");
+        }
+        let _claim = ActivationClaim {
+            workers: self,
+            viewer: id.to_owned(),
+        };
+        self.guarded(
+            principal,
+            &request,
+            &idempotency,
+            now,
+            self.create_core(principal, &request, &idempotency, now, Some(id.to_owned())),
+        )
+        .await
     }
 
     pub async fn first_frame(
@@ -1137,6 +1139,17 @@ impl Drop for SourcePreparation {
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
         });
+    }
+}
+struct ActivationClaim<'a> {
+    workers: &'a Workers,
+    viewer: String,
+}
+impl Drop for ActivationClaim<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut activating) = self.workers.activating.lock() {
+            activating.remove(&self.viewer);
+        }
     }
 }
 struct Startup<'a> {
@@ -3342,6 +3355,143 @@ printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","wi
         workers.reap(31).await.unwrap();
         assert_eq!(workers.sessions.lock().unwrap().job_count(), 0);
         workers.engine.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn cancelled_activation_returns_source_preparation_cancelled_and_starts_no_job() {
+        let (root, workers, p) = fixture(true).await;
+        let prepared = workers
+            .create_prepared(&p, &request(1920), "deferred", 0)
+            .await
+            .unwrap();
+        assert_eq!(prepared.status, Status::Prepared);
+        let activation = tokio::spawn({
+            let workers = workers.clone();
+            let principal = p.clone();
+            let id = prepared.id.clone();
+            async move { workers.activate(&principal, &id, 0).await }
+        });
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !root.path().join("encoder.count").exists() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        workers
+            .cancel_preparation_in_namespace(&p, "deferred", Some("fixture"))
+            .unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(5), activation)
+                .await
+                .expect("a cancelled activation must unwind promptly")
+                .unwrap()
+                .err(),
+            Some("source_preparation_cancelled")
+        );
+        workers.reap(1).await.unwrap();
+        assert_eq!(workers.sessions.lock().unwrap().job_count(), 0);
+        assert_eq!(workers.engine.active_count().await, 0);
+        assert_eq!(
+            std::fs::read_dir(root.path().join("media"))
+                .unwrap()
+                .count(),
+            0
+        );
+        let viewer = workers
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&p, &prepared.id, 1)
+            .unwrap();
+        assert_eq!(viewer.status, Status::Failed);
+        workers.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn key_revocation_during_activation_ends_startup_promptly() {
+        let (root, workers, p) = fixture(true).await;
+        let prepared = workers
+            .create_prepared(&p, &request(1920), "deferred", 0)
+            .await
+            .unwrap();
+        let activation = tokio::spawn({
+            let workers = workers.clone();
+            let principal = p.clone();
+            let id = prepared.id.clone();
+            async move { workers.activate(&principal, &id, 0).await }
+        });
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !root.path().join("encoder.count").exists() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        workers.credentials.revoke(BOOTSTRAP, &p.key.id).unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(5), activation)
+                .await
+                .expect("an activation with a revoked key must unwind promptly")
+                .unwrap()
+                .err(),
+            Some("unauthorized")
+        );
+        workers.reap(1).await.unwrap();
+        assert_eq!(workers.sessions.lock().unwrap().job_count(), 0);
+        assert_eq!(workers.engine.active_count().await, 0);
+        workers.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_concurrent_second_activation_is_refused_before_inspecting_the_source() {
+        let (root, workers, p) = fixture(false).await;
+        std::fs::write(root.path().join("probe"), r#"#!/bin/sh
+printf x >> "$0.count"
+sleep 1
+printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","width":640,"height":360,"pix_fmt":"yuv420p","profile":"High","level":31,"avg_frame_rate":"30/1","r_frame_rate":"30/1","field_order":"progressive"},{"index":1,"codec_type":"audio","codec_name":"aac","profile":"LC","channels":2}],"format":{"format_name":"mpegts"}}'
+"#).unwrap();
+        let prepared = workers
+            .create_prepared(&p, &request(1920), "deferred", 0)
+            .await
+            .unwrap();
+        let first = tokio::spawn({
+            let workers = workers.clone();
+            let principal = p.clone();
+            let id = prepared.id.clone();
+            async move { workers.activate(&principal, &id, 0).await }
+        });
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !root.path().join("probe.count").exists() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the first activation must reach source inspection");
+        assert_eq!(
+            workers.activate(&p, &prepared.id, 0).await.err(),
+            Some("session_not_found")
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("probe.count")).unwrap(),
+            "x",
+            "a refused activation must not inspect the source"
+        );
+        let activated = tokio::time::timeout(Duration::from_secs(5), first)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(activated.status, Status::Ready);
+        workers
+            .sessions
+            .lock()
+            .unwrap()
+            .release(&p, &activated.id, 2)
+            .unwrap();
+        workers.reap(18).await.unwrap();
+        assert_eq!(workers.sessions.lock().unwrap().job_count(), 0);
+        workers.shutdown().await;
     }
 
     #[tokio::test]
