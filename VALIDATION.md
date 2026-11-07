@@ -67,3 +67,16 @@ and stripped from origin requests and process arguments. The real cross-CDN
 fragmented-MP4 fixture passes with an authenticated extensionless root as well
 as the ordinary playlist suffix. The workspace gate passes 278 tests with 62
 opt-in checks ignored, plus that explicitly executed real-media fixture.
+
+
+## Consumption-paced caption cache regression
+
+A physical paused/resumed WebVTT run exposed a separate cache leak: watched AV
+segments were reclaimed, but VTT segments accumulated until the unchanged
+watchdog retired the output. Viewer renewals were healthy; later media 401s were
+secondary to that processing failure. On-demand cleanup now reclaims caption
+prefixes using their own EXTINF timeline and the same consumed-time grace as AV,
+including after the producer has exited. A simulated 20-minute AV/VTT filesystem
+run remains below the original watchdog and retains current captions. Irregular
+caption durations and repeat cleanup are covered. The workspace gate passes
+280 tests; cache file-count, byte and per-file limits are unchanged.

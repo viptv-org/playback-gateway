@@ -345,3 +345,67 @@ fn completed_long_features_still_reclaim_after_a_deep_seek() {
         Some("segment-000000169.ts")
     );
 }
+
+#[test]
+fn caption_cleanup_uses_caption_durations_and_retains_the_current_grace_window() {
+    let mut throttle = Throttle::on_demand();
+    let av = (0..100).fold(String::from("#EXTM3U\n"), |mut s, i| {
+        s.push_str(&format!("#EXTINF:2,\nsegment-{i:09}.ts\n"));
+        s
+    });
+    throttle.apply_playlist(&av);
+    throttle.observe("segment-000000080.ts");
+    throttle.apply_playlist(&av);
+    throttle.take_pending_deletions();
+    let captions =
+        "#EXTM3U\n#EXTINF:0.5,\nindex0.vtt\n#EXTINF:4,\nindex1.vtt\n#EXTINF:100,\nindex2.vtt\n";
+    throttle.apply_caption_playlist(captions);
+    assert_eq!(
+        throttle.take_pending_deletions(),
+        ["index0.vtt", "index1.vtt"]
+    );
+    throttle.apply_caption_playlist(captions);
+    assert!(throttle.take_pending_deletions().is_empty());
+}
+
+#[tokio::test]
+async fn subtitle_enabled_vod_stays_inside_the_cache_watchdog_during_long_consumption() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut throttle = Throttle::on_demand();
+    let mut produced = 0;
+    let mut av = String::from("#EXTM3U\n");
+    let mut captions = av.clone();
+    for consumed in 0..600u64 {
+        while produced <= (consumed + 20).min(599) {
+            let video = format!("segment-{produced:09}.ts");
+            let text = format!("index{produced}.vtt");
+            tokio::fs::write(dir.path().join(&video), [0x47; 188])
+                .await
+                .unwrap();
+            tokio::fs::write(dir.path().join(&text), "WEBVTT\n\n")
+                .await
+                .unwrap();
+            av.push_str(&format!("#EXTINF:2,\n{video}\n"));
+            captions.push_str(&format!("#EXTINF:2,\n{text}\n"));
+            produced += 1;
+        }
+        tokio::fs::write(dir.path().join("index.m3u8"), &av)
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("index_vtt.m3u8"), &captions)
+            .await
+            .unwrap();
+        throttle.observe(&format!("segment-{consumed:09}.ts"));
+        hls::reclaim_vod_prefix(dir.path(), &mut throttle).await;
+        assert!(
+            cache_safe(dir.path(), false).await,
+            "AV/VTT cache exceeded the unchanged watchdog at segment {consumed}"
+        );
+        assert!(
+            dir.path().join(format!("index{consumed}.vtt")).exists(),
+            "current caption was deleted"
+        );
+    }
+    assert!(!dir.path().join("index0.vtt").exists());
+    assert!(dir.path().join("index599.vtt").exists());
+}
