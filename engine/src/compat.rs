@@ -5,8 +5,8 @@ pub(super) struct Probe {
     pub(super) streams: Vec<ProbeStream>,
     #[serde(default)]
     pub(super) format: serde_json::Value,
-    /// The source is HLS whose segments FFmpeg could only read through the
-    /// loopback sanitizer (refused segment names or image-disguised media).
+    /// The source needs the loopback HLS normalizer for refused segment names,
+    /// image disguises or protected headers that must stay out of FFmpeg.
     /// Every later reader starts its own sanitizer; the probe never carries
     /// one, because probe copies outlive the reader that needed it.
     #[serde(skip)]

@@ -130,10 +130,50 @@ fn uri_kind(line: &str) -> Option<bool> {
     .iter()
     .find_map(|(tag, kind)| line.starts_with(tag).then_some(*kind))
 }
+// HLS attribute values may contain commas (notably CODECS and rendition names).
+fn attributes(mut text: &str) -> impl Iterator<Item = &str> {
+    std::iter::from_fn(move || {
+        if text.is_empty() {
+            return None;
+        }
+        let mut quoted = false;
+        let end = text
+            .bytes()
+            .position(|byte| {
+                if byte == b'"' {
+                    quoted = !quoted;
+                }
+                byte == b',' && !quoted
+            })
+            .unwrap_or(text.len());
+        let value = text[..end].trim();
+        text = text.get(end + 1..).unwrap_or("");
+        Some(value)
+    })
+}
+fn quoted_attribute<'a>(attribute: &'a str, key: &str) -> Option<&'a str> {
+    attribute
+        .strip_prefix(key)?
+        .strip_prefix("=\"")?
+        .strip_suffix('"')
+}
 pub(super) fn rewrite(text: &str, base: &Url) -> Result<(String, HashMap<String, Url>), String> {
     if !text.trim_start().starts_with("#EXTM3U") {
         return Err("Invalid HLS playlist".into());
     }
+    // Some muxed origins reference an audio group that is never declared.
+    // Roku then ignores in-band AAC. Remove only nonexistent audio references;
+    // valid separate and in-band rendition groups remain authoritative.
+    let audio_groups: HashSet<_> = text
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim().strip_prefix("#EXT-X-MEDIA:")?;
+            if !attributes(line).any(|attribute| attribute == "TYPE=AUDIO") {
+                return None;
+            }
+            attributes(line).find_map(|attribute| quoted_attribute(attribute, "GROUP-ID"))
+        })
+        .collect();
     let mut out = String::new();
     let mut map = HashMap::new();
     // Set between a variant descriptor and the playlist URI line after it.
@@ -167,7 +207,18 @@ pub(super) fn rewrite(text: &str, base: &Url) -> Result<(String, HashMap<String,
                 return Err("Unsupported HLS reference".into());
             }
             variant = true;
-            out.push_str(line);
+            out.push_str("#EXT-X-STREAM-INF:");
+            let mut separator = "";
+            for attribute in attributes(line.trim_start_matches("#EXT-X-STREAM-INF:")) {
+                if quoted_attribute(attribute, "AUDIO")
+                    .is_some_and(|group| !audio_groups.contains(group))
+                {
+                    continue;
+                }
+                out.push_str(separator);
+                out.push_str(attribute);
+                separator = ",";
+            }
         } else if let Some(at) = line.find("URI=\"") {
             // Unknown URI-bearing tags (content steering, private extensions)
             // stay on managed playback instead of leaking an origin URL.

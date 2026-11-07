@@ -376,7 +376,11 @@ impl Workers {
         let started = Instant::now();
         let deadline = self.start_budget(request);
         let mediate_http = request.output.protocol == OutputProtocol::NativeMp4;
-        let pending = if request.input.owned_source() || mediate_http {
+        // Header-bearing HLS uses the engine's nested-resource sanitizer. The
+        // binary range relay deliberately refuses manifests/nonranged inputs.
+        let pending = if (request.input.owned_source() && !request.input.authenticated_hls())
+            || mediate_http
+        {
             if (request.input.torrent() || request.input.archive()) && !self.sources.enabled() {
                 return Err("unsupported_output");
             }

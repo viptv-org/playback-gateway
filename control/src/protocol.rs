@@ -38,6 +38,10 @@ impl Input {
     pub fn mediated_http(&self) -> bool {
         !self.headers.is_empty() && !self.torrent() && !self.archive()
     }
+    pub fn authenticated_hls(&self) -> bool {
+        !self.headers.is_empty()
+            && matches!(source_extension(&self.url).as_deref(), Some("m3u8" | "m3u"))
+    }
     pub fn owned_source(&self) -> bool {
         self.torrent() || self.archive() || self.mediated_http()
     }
@@ -279,6 +283,23 @@ pub enum SessionState {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn authenticated_hls_uses_nested_mediation_instead_of_the_binary_range_relay() {
+        for (url, expected) in [
+            ("https://media.example/index.m3u8?token=fixture", true),
+            ("https://media.example/INDEX.M3U", true),
+            ("https://media.example/movie.mp4", false),
+            ("https://media.example/movie.mp4?name=index.m3u8", false),
+        ] {
+            let mut input: Input = serde_json::from_value(serde_json::json!({
+                "url": url, "live": false, "headers": {"Referer":"https://player.example/"}
+            }))
+            .unwrap();
+            assert_eq!(input.authenticated_hls(), expected);
+            input.headers.clear();
+            assert!(!input.authenticated_hls());
+        }
+    }
     #[test]
     fn clients_cannot_assert_a_validated_proxy_route() {
         for name in [

@@ -463,6 +463,24 @@ impl PlaybackManager {
         reduced: bool,
     ) -> Result<Probe, ProbeFailure> {
         let sample_frames = hls_path(url);
+        let authenticated_hls = sample_frames
+            && sanitize::header_map(headers).keys().any(|name| {
+                name != crate::EGRESS_PROXY_HEADER && name != crate::VALIDATED_EGRESS_PROXY_HEADER
+            });
+        if authenticated_hls {
+            // Credentials belong to the HTTP transport, never FFmpeg's global
+            // header block (which may otherwise follow cross-origin children).
+            let sanitizer =
+                sanitize::HlsSanitizer::start(url, &sanitize::header_map(headers), permits.clone())
+                    .await
+                    .map_err(|_| ProbeFailure::Protocol)?;
+            let mut probe = self
+                .probe_command(url, headers, permits, reduced, Some(&sanitizer), true)
+                .await?;
+            // Readers must use the same normalizer, even without an image prefix.
+            probe.disguised_hls = true;
+            return Ok(probe);
+        }
         let mut direct = self
             .probe_command(url, headers, permits.clone(), reduced, None, sample_frames)
             .await;

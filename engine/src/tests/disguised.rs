@@ -15,6 +15,10 @@ const PNG_1X1: &[u8] = &[
 #[tokio::test]
 #[ignore = "requires real FFmpeg/ffprobe; isolated fMP4 HLS fixture"]
 async fn real_fmp4_with_image_named_playlist_map_and_segments() {
+    qualify_fmp4(false).await;
+    qualify_fmp4(true).await;
+}
+async fn qualify_fmp4(authenticated: bool) {
     let ffmpeg = PathBuf::from(std::env::var("PLAYBACK_TEST_FFMPEG").unwrap());
     let ffprobe = PathBuf::from(std::env::var("PLAYBACK_TEST_FFPROBE").unwrap());
     let root = tempfile::tempdir().unwrap();
@@ -81,13 +85,19 @@ async fn real_fmp4_with_image_named_playlist_map_and_segments() {
         ));
     }
     let (url, server) = origin(
-        || "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=500000\nhttp://cdn.example/live/variant.jpg\n".into(),
+        || {
+            "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=500000\nhttp://cdn.example/live/variant.jpg\n"
+                .into()
+        },
         resources,
     )
     .await;
     let manager = manager(&ffmpeg, ffprobe, root.path());
     let route = Url::parse(&url).unwrap().origin().ascii_serialization();
-    let block = format!("{}: {route}\r\n", crate::VALIDATED_EGRESS_PROXY_HEADER);
+    let mut block = format!("{}: {route}\r\n", crate::VALIDATED_EGRESS_PROXY_HEADER);
+    if authenticated {
+        block.push_str("Authorization: Bearer fixture-only\r\n");
+    }
     let probe = manager
         .probe("http://origin.example/live/index.m3u8", &block, None)
         .await
@@ -617,5 +627,32 @@ async fn real_disguised_live_window_reloads_through_sanitizer() {
         .filter(|line| !line.starts_with('#') && !line.is_empty())
         .count();
     assert_eq!(live, expected);
+    server.abort();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn authenticated_hls_never_passes_provider_headers_to_ffprobe() {
+    let (url, server) = origin(|| "#EXTM3U\n#EXTINF:1,\nsegment.ts\n".into(), vec![]).await;
+    let root = tempfile::tempdir().unwrap();
+    let manager = scripted_probe(
+        root.path(),
+        r#"
+for arg in "$@"; do
+  case "$arg" in
+    -headers|*provider-secret*|*origin.example*) exit 4 ;;
+  esac
+done
+printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","field_order":"progressive"}],"format":{"format_name":"hls"}}'
+"#,
+    );
+    let probe = manager
+        .probe(&url, "Authorization: Bearer provider-secret\r\n", None)
+        .await
+        .unwrap();
+    assert!(
+        probe.disguised_hls,
+        "readers must retain the normalizing transport"
+    );
     server.abort();
 }

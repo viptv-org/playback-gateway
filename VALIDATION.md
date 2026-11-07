@@ -34,10 +34,25 @@ ordinary playback. Cross-origin requests strip provider headers. Generic proxies
 still refuse cross-origin original media; clients cannot set either reserved
 proxy header. No FFmpeg extension-check relaxation is introduced.
 
-The workspace gate passes 274 tests (62 opt-in checks ignored). The new transport
+The workspace gate passes 277 tests (62 opt-in checks ignored). The new transport
 regression covers CDN traversal, credential and internal-header stripping,
 private child refusal and conservative generic-proxy behavior. A real FFmpeg 9
 fixture also passes: H.264/AAC fragmented MP4, a cross-origin image-named variant,
 GIF-named initialization map and JPEG-named segments with image MIME types. That
 fixture contacts only an isolated local proxy. It establishes the sanitizer and
 probe path, separately from external source and physical-device qualification.
+
+
+Protected `.m3u8`/`.m3u` inputs now use that nested-resource transport before
+inspection instead of the binary-only range relay. Neither the probe nor later
+readers receive provider headers as process arguments. The real fragmented-MP4
+fixture runs with and without a provider header; regressions cover route
+classification and the process-argument boundary.
+
+Playlist rewriting removes only AUDIO references whose group is not declared.
+Declared separate/in-band audio groups and quoted CODECS values containing
+commas are preserved. This addresses malformed masters that prevent Roku from
+finding muxed AAC. It does not replace missing upstream media: the investigated
+1080p source returns HTTP 404 for its sixth video segment even when fetched
+directly from the CDN. A ready admission and short decode do not establish
+whole-title continuity; physical playback evidence is recorded separately.

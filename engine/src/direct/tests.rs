@@ -1096,3 +1096,24 @@ async fn validated_proxy_follows_cdn_without_leaking_credentials_or_transport_fi
     assert!(block.contains(crate::VALIDATED_EGRESS_PROXY_HEADER));
     server.abort();
 }
+
+#[test]
+fn missing_audio_groups_do_not_disable_muxed_audio() {
+    let base = Url::parse("https://origin.example/master.m3u8").unwrap();
+    let descriptor = "#EXT-X-STREAM-INF:BANDWIDTH=500000,CODECS=\"avc1.640028,mp4a.40.2\",AUDIO=\"audio\",RESOLUTION=1920x1080\nvariant.m3u8\n";
+    for rendition in [
+        "",
+        "#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=\"audio\",NAME=\"English\"\n",
+    ] {
+        let (cleaned, _) = rewrite(&format!("#EXTM3U\n{descriptor}{rendition}"), &base).unwrap();
+        assert!(!cleaned.contains("AUDIO=\"audio\""));
+        assert!(cleaned.contains("CODECS=\"avc1.640028,mp4a.40.2\",RESOLUTION=1920x1080"));
+    }
+    for rendition in [
+        "#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"audio\",NAME=\"English, original\",URI=\"audio.m3u8\"\n",
+        "#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"audio\",NAME=\"In-band\"\n",
+    ] {
+        let (cleaned, _) = rewrite(&format!("#EXTM3U\n{descriptor}{rendition}"), &base).unwrap();
+        assert!(cleaned.contains("AUDIO=\"audio\""));
+    }
+}
