@@ -129,6 +129,7 @@ impl Input {
                             | "proxy-authorization"
                             | "x-playback-egress-proxy"
                             | "x-playback-validated-egress-proxy"
+                            | "x-playback-normalize-hls"
                     )
             })
         {
@@ -305,6 +306,7 @@ mod tests {
         for name in [
             "x-playback-egress-proxy",
             "X-Playback-Validated-Egress-Proxy",
+            "x-playback-normalize-hls",
         ] {
             let input: Input = serde_json::from_value(serde_json::json!({
                 "url": "https://media.example/master.m3u8", "live": false,

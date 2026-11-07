@@ -1058,6 +1058,7 @@ async fn validated_proxy_follows_cdn_without_leaking_credentials_or_transport_fi
             crate::VALIDATED_EGRESS_PROXY_HEADER.into(),
             format!("http://{address}"),
         ),
+        (crate::NORMALIZE_HLS_HEADER.into(), "1".into()),
         ("Authorization".into(), "Bearer provider-secret".into()),
         ("X-provider-key".into(), "provider-key".into()),
     ]);

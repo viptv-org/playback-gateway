@@ -97,9 +97,18 @@ async fn qualify_fmp4(authenticated: bool) {
     let mut block = format!("{}: {route}\r\n", crate::VALIDATED_EGRESS_PROXY_HEADER);
     if authenticated {
         block.push_str("Authorization: Bearer fixture-only\r\n");
+        block.push_str(&format!("{}: 1\r\n", crate::NORMALIZE_HLS_HEADER));
     }
     let probe = manager
-        .probe("http://origin.example/live/index.m3u8", &block, None)
+        .probe(
+            if authenticated {
+                "http://origin.example/live/asset"
+            } else {
+                "http://origin.example/live/index.m3u8"
+            },
+            &block,
+            None,
+        )
         .await
         .expect("cross-origin image-named fMP4 must be inspected through the validating proxy");
     assert!(probe.disguised_hls);
@@ -124,10 +133,18 @@ async fn origin(
     playlist: impl Fn() -> String + Clone + Send + Sync + 'static,
     resources: Vec<(String, &'static str, Vec<u8>)>,
 ) -> (String, tokio::task::JoinHandle<()>) {
+    let opaque_playlist = playlist.clone();
     let mut router = axum::Router::new().route(
         "/live/index.m3u8",
         axum::routing::get(move || {
             let playlist = playlist.clone();
+            async move { playlist() }
+        }),
+    );
+    router = router.route(
+        "/live/asset",
+        axum::routing::get(move || {
+            let playlist = opaque_playlist.clone();
             async move { playlist() }
         }),
     );
@@ -647,12 +664,37 @@ printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","fi
 "#,
     );
     let probe = manager
-        .probe(&url, "Authorization: Bearer provider-secret\r\n", None)
+        .probe(
+            &url.replace("index.m3u8", "asset"),
+            &format!(
+                "Authorization: Bearer provider-secret\r\n{}: 1\r\n",
+                crate::NORMALIZE_HLS_HEADER
+            ),
+            None,
+        )
         .await
         .unwrap();
     assert!(
         probe.disguised_hls,
         "readers must retain the normalizing transport"
     );
+    server.abort();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn opaque_hls_hint_never_falls_back_to_raw_headers_on_non_playlist_bytes() {
+    let (url, server) = origin(|| "<html>Not a media playlist</html>".into(), vec![]).await;
+    let root = tempfile::tempdir().unwrap();
+    let manager = scripted_probe(root.path(), "exit 9");
+    let block = format!(
+        "Authorization: Bearer fixture-only\r\n{}: 1\r\n",
+        crate::NORMALIZE_HLS_HEADER
+    );
+    assert!(manager
+        .probe(&url.replace("index.m3u8", "asset"), &block, None)
+        .await
+        .is_none());
+    assert!(!root.path().join("probe.sh.count").exists());
     server.abort();
 }

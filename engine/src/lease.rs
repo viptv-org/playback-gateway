@@ -215,7 +215,7 @@ fn network_input_args(cmd: &mut Command, headers: &str, protocols: &str) {
             .or_else(|| line.strip_prefix("x-playback-validated-egress-proxy: "))
         {
             cmd.arg("-http_proxy").arg(proxy);
-        } else {
+        } else if !line.starts_with("x-playback-normalize-hls: ") {
             public.push_str(line);
             public.push_str("\r\n");
         }
@@ -257,6 +257,7 @@ pub(super) fn header_block(headers: &HashMap<String, String>) -> Result<String, 
         .filter(|(key, _)| {
             !key.eq_ignore_ascii_case(crate::EGRESS_PROXY_HEADER)
                 && !key.eq_ignore_ascii_case(crate::VALIDATED_EGRESS_PROXY_HEADER)
+                && !key.eq_ignore_ascii_case(crate::NORMALIZE_HLS_HEADER)
         })
         .count()
         > 32

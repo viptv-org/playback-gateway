@@ -138,6 +138,9 @@ pub const EGRESS_PROXY_HEADER: &str = "x-playback-egress-proxy";
 /// Callers must reject this transport field in untrusted input headers.
 #[cfg(feature = "media")]
 pub const VALIDATED_EGRESS_PROXY_HEADER: &str = "x-playback-validated-egress-proxy";
+/// Server-authored instruction to validate an opaque input as nested HLS.
+#[cfg(feature = "media")]
+pub const NORMALIZE_HLS_HEADER: &str = "x-playback-normalize-hls";
 
 /// Route a client through the configured egress proxy (for example a WARP
 /// route) with all other proxying disabled.

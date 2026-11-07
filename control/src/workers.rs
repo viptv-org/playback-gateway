@@ -417,7 +417,8 @@ impl Workers {
             match result {
                 Ok(source) => Some(source),
                 Err("unsupported_output" | "source_preparation_failed")
-                    if mediate_http && request.input.headers.is_empty() =>
+                    if (mediate_http && request.input.headers.is_empty())
+                        || (request.output.protocol == OutputProtocol::Hls && request.input.mediated_http()) =>
                 {
                     None
                 }
@@ -474,6 +475,11 @@ impl Workers {
         // The root's exact private Range URI is registered, while every nested
         // HTTP(S) URL still goes through ordinary destination validation.
         headers.insert(playback_engine::VALIDATED_EGRESS_PROXY_HEADER.into(), self.proxy.url());
+        if resolved.is_none() && request.input.mediated_http() && request.output.protocol == OutputProtocol::Hls {
+            // Header-bearing extensionless playlists need byte validation and
+            // nested-resource mediation, never a raw FFmpeg header fallback.
+            headers.insert(playback_engine::NORMALIZE_HLS_HEADER.into(), "1".into());
+        }
         let prepared = tokio::time::timeout(
             deadline.saturating_sub(started.elapsed()),
             self.engine.prepare_shared_with_selection(

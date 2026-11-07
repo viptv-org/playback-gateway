@@ -34,7 +34,7 @@ ordinary playback. Cross-origin requests strip provider headers. Generic proxies
 still refuse cross-origin original media; clients cannot set either reserved
 proxy header. No FFmpeg extension-check relaxation is introduced.
 
-The workspace gate passes 277 tests (62 opt-in checks ignored). The new transport
+The workspace gate passes 278 tests (62 opt-in checks ignored). The new transport
 regression covers CDN traversal, credential and internal-header stripping,
 private child refusal and conservative generic-proxy behavior. A real FFmpeg 9
 fixture also passes: H.264/AAC fragmented MP4, a cross-origin image-named variant,
@@ -56,3 +56,14 @@ finding muxed AAC. It does not replace missing upstream media: the investigated
 1080p source returns HTTP 404 for its sixth video segment even when fetched
 directly from the CDN. A ready admission and short decode do not establish
 whole-title continuity; physical playback evidence is recorded separately.
+
+
+Authenticated HLS inputs can also use opaque URLs without a playlist suffix.
+When the binary range relay refuses such an input, HLS output may attempt the
+bounded nested-playlist mediator through a reserved server-only instruction.
+Actual playlist bytes are mandatory. Invalid/HTML inputs never fall back to a
+raw FFmpeg header block; the instruction is rejected from public input headers
+and stripped from origin requests and process arguments. The real cross-CDN
+fragmented-MP4 fixture passes with an authenticated extensionless root as well
+as the ordinary playlist suffix. The workspace gate passes 278 tests with 62
+opt-in checks ignored, plus that explicitly executed real-media fixture.

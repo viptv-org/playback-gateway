@@ -463,10 +463,16 @@ impl PlaybackManager {
         reduced: bool,
     ) -> Result<Probe, ProbeFailure> {
         let sample_frames = hls_path(url);
-        let authenticated_hls = sample_frames
-            && sanitize::header_map(headers).keys().any(|name| {
-                name != crate::EGRESS_PROXY_HEADER && name != crate::VALIDATED_EGRESS_PROXY_HEADER
-            });
+        let fields = sanitize::header_map(headers);
+        let authenticated_hls = fields
+            .get(crate::NORMALIZE_HLS_HEADER)
+            .is_some_and(|v| v == "1")
+            || (sample_frames
+                && fields.keys().any(|name| {
+                    name != crate::EGRESS_PROXY_HEADER
+                        && name != crate::VALIDATED_EGRESS_PROXY_HEADER
+                        && name != crate::NORMALIZE_HLS_HEADER
+                }));
         if authenticated_hls {
             // Credentials belong to the HTTP transport, never FFmpeg's global
             // header block (which may otherwise follow cross-origin children).
