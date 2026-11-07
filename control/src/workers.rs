@@ -342,6 +342,7 @@ impl Workers {
         {
             return Err("source_preparation_cancelled");
         }
+        self.reclaim_idle_for_admission(principal, now).await?;
         let observation = if request.input.torrent() {
             let key = (principal.key.id.clone(), idempotency.to_owned());
             let mut pending = self
@@ -687,11 +688,30 @@ impl Workers {
         idempotency: &str,
         now: u64,
     ) -> Result<Viewer, &'static str> {
+        request.validate()?;
+        principal.require(&request.namespace, Scope::Create)?;
         self.require_active(principal, now).await?;
+        self.reclaim_idle_for_admission(principal, now).await?;
         self.sessions
             .lock()
             .map_err(|_| "session_store_unavailable")?
             .prepare(principal, request, idempotency, now)
+    }
+
+    async fn reclaim_idle_for_admission(
+        &self,
+        principal: &Principal,
+        now: u64,
+    ) -> Result<(), &'static str> {
+        let reclaim = self
+            .sessions
+            .lock()
+            .map_err(|_| "session_store_unavailable")?
+            .reclaim_idle_for_admission(principal, now);
+        if reclaim {
+            self.reap(now).await?;
+        }
+        Ok(())
     }
 
     async fn activate_inner(
@@ -2970,6 +2990,50 @@ pub(crate) mod tests {
             workers.available(&principal, 41).unwrap().inputs,
             if shared { 1 } else { 2 }
         );
+        workers.shutdown().await;
+    }
+    #[tokio::test]
+    async fn rapid_replacements_reclaim_released_jobs_before_the_idle_grace_elapses() {
+        let (_root, workers, principal) = fixture_with_outputs(false, 2).await;
+        let mut input = request(640);
+        let first = workers
+            .create(&principal, &input, "first", 0)
+            .await
+            .unwrap();
+        workers
+            .sessions
+            .lock()
+            .unwrap()
+            .release(&principal, &first.id, 1)
+            .unwrap();
+        input.input.url.push_str("/replacement");
+        let second = workers
+            .create(&principal, &input, "second", 2)
+            .await
+            .unwrap();
+        assert_eq!(
+            workers
+                .sessions
+                .lock()
+                .unwrap()
+                .get(&principal, &second.id, 2)
+                .unwrap()
+                .status,
+            Status::Ready
+        );
+        workers
+            .sessions
+            .lock()
+            .unwrap()
+            .release(&principal, &second.id, 3)
+            .unwrap();
+        input.input.url.push_str("/captions");
+        let third = workers
+            .create(&principal, &input, "third", 4)
+            .await
+            .unwrap();
+        assert_eq!(third.status, Status::Ready);
+        assert_eq!(workers.sessions.lock().unwrap().job_count(), 1);
         workers.shutdown().await;
     }
     pub(crate) async fn fixture(stall: bool) -> (tempfile::TempDir, Arc<Workers>, Principal) {

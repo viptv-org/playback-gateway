@@ -80,3 +80,41 @@ including after the producer has exited. A simulated 20-minute AV/VTT filesystem
 run remains below the original watchdog and retains current captions. Irregular
 caption durations and repeat cleanup are covered. The workspace gate passes
 280 tests; cache file-count, byte and per-file limits are unchanged.
+
+## Rapid track replacement and resumed H.264 synchronization
+
+An API-only reproduction of successive Hindi → English → English subtitles
+returned `input_capacity` on the third admission: a fully released producer
+continued charging the key for the 15-second reuse window. Under input/output
+pressure, admission now marks only that key's fully released ready jobs for
+teardown and waits for actual resource cleanup. Active viewers, other keys and
+normal idle reuse remain intact; quota is never freed before teardown. Ledger
+and worker regressions cover immediate replacements and retained quota during
+cleanup. Limits are unchanged.
+
+A separate actual-source comparison found a resumed H.264 picture-content shift
+of about 0.8 seconds with the deployed QSV decoder, while selected English audio
+content matched within 20 milliseconds. Packet PTS alone appeared aligned.
+Software H.264 decoding with QSV encoding removed the measured picture shift.
+Resumed H.264 transcodes now use that existing hybrid pipeline; initial playback,
+remux/copy, HEVC and GPU encoding retain their existing paths. This increases
+CPU decoding work for those resumed H.264 transcodes. Physical lip-sync and
+subtitle visibility require a separate device check.
+
+The workspace gate passes 282 tests with 62 opt-in cases ignored. A fresh
+library-only run after the final authorization guards also passes.
+
+The isolated rebuilt candidate passes two rounds of five immediate actual-source
+track changes (Hindi, English, English subtitles, Off, SDH) under a two-input
+quota. Every admission returns 201/ready; retired viewer leases and temporary
+keys are released. A decoded eight-second prefix after the final resumed SDH
+selection matches source picture content at the sampled frames (100 ms grid)
+and English audio content within about 20 ms. The old candidate's picture was
+about 0.8 seconds behind. This is media evidence, not physical TV lip-sync.
+
+An accelerated actual-source caption run consumes 600.14 seconds of Loki media
+through the candidate API: 300 AV segments and 179 successful current-caption
+checks, with nonempty WebVTT cues and a ready session at completion. It finishes
+in 42.84 wall seconds, so this is ten minutes of media consumption, not ten
+minutes of physical viewing. Viewer and temporary key cleanup return 204. The
+unchanged cache watchdog remains enabled throughout.

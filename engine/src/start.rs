@@ -770,6 +770,16 @@ impl PlaybackManager {
                 hdr_transfer,
                 deinterlace_needed,
             );
+            // The deployed QSV H.264 decoder can attach post-seek PTS to
+            // earlier pictures (measured ~0.8 s against software decoding),
+            // while AAC remains correctly timed. Keep GPU encoding, but use
+            // the accurate software decoder for resumed H.264 transcodes.
+            if position > 0.0
+                && pipeline == hardware::Pipeline::QsvDecode
+                && probe.video()?.codec_name.as_deref() == Some("h264")
+            {
+                pipeline = hardware::Pipeline::QsvEncode;
+            }
             let tone_map = hardware::tone_map(accel.vaapi, hdr_transfer);
             let engine_started = Instant::now();
             loop {
