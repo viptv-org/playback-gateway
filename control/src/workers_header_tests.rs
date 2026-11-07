@@ -81,6 +81,7 @@ async fn qualify(native: bool, other_codec: bool, headerless_redirect: bool) {
                         );
                     }
                     assert!(!headers.contains_key("x-playback-egress-proxy"));
+                    assert!(!headers.contains_key("x-playback-validated-egress-proxy"));
                     contacts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     let range = headers
                         .get("range")

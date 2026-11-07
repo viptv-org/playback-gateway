@@ -9,8 +9,13 @@ impl Direct {
         if !public_host(url) {
             return Err("Unsafe media destination".into());
         }
-        // An HTTP egress proxy resolves hostnames itself. Until its resolved
-        // destination can be enforced, cross-origin WARP media uses managed HLS.
+        // The control plane's validating proxy enforces DNS/IP policy on every
+        // HTTP request and CONNECT. Reuse it; local resolution would bypass that
+        // policy. request() still strips credentials when crossing origins.
+        if self.validated_proxy {
+            return Ok(self.client.clone());
+        }
+        // A generic upstream proxy offers no destination enforcement guarantee.
         if self.proxy.is_some() {
             return Err("Cross-origin proxy media requires managed playback".into());
         }

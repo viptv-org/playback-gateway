@@ -49,6 +49,7 @@ pub(super) struct Direct {
     // at most its chunk lookahead, never a permit.
     fetch: Arc<Semaphore>,
     proxy: Option<String>,
+    validated_proxy: bool,
     destinations: Mutex<HashMap<String, reqwest::Client>>,
     cache: Mutex<HashMap<String, (Instant, Bytes)>>,
     playlists: Mutex<HashMap<String, (Instant, Bytes)>>,
@@ -83,7 +84,15 @@ impl Direct {
             })
             .collect::<HashMap<_, _>>();
         if let Some(proxy) = &self.proxy {
-            headers.insert(crate::EGRESS_PROXY_HEADER.into(), proxy.clone());
+            headers.insert(
+                if self.validated_proxy {
+                    crate::VALIDATED_EGRESS_PROXY_HEADER
+                } else {
+                    crate::EGRESS_PROXY_HEADER
+                }
+                .into(),
+                proxy.clone(),
+            );
         }
         (
             self.root.as_str().to_owned(),
@@ -107,7 +116,9 @@ impl Direct {
     ) -> Result<Arc<Self>, String> {
         let mut public = HeaderMap::new();
         for (name, value) in headers {
-            if name.eq_ignore_ascii_case(crate::EGRESS_PROXY_HEADER) {
+            if name.eq_ignore_ascii_case(crate::EGRESS_PROXY_HEADER)
+                || name.eq_ignore_ascii_case(crate::VALIDATED_EGRESS_PROXY_HEADER)
+            {
                 continue;
             }
             if [
@@ -133,7 +144,10 @@ impl Direct {
                 .connect_timeout(Duration::from_secs(5))
                 .read_timeout(Duration::from_secs(10))
                 .redirect(reqwest::redirect::Policy::none()),
-            headers.get(crate::EGRESS_PROXY_HEADER).map(String::as_str),
+            headers
+                .get(crate::VALIDATED_EGRESS_PROXY_HEADER)
+                .or_else(|| headers.get(crate::EGRESS_PROXY_HEADER))
+                .map(String::as_str),
         )?
         .build()
         .map_err(|_| "Media transport unavailable")?;
@@ -143,7 +157,11 @@ impl Direct {
             root: url,
             resources: Mutex::new(HashMap::new()),
             fetch: Arc::new(Semaphore::new(6)),
-            proxy: headers.get(crate::EGRESS_PROXY_HEADER).cloned(),
+            proxy: headers
+                .get(crate::VALIDATED_EGRESS_PROXY_HEADER)
+                .or_else(|| headers.get(crate::EGRESS_PROXY_HEADER))
+                .cloned(),
+            validated_proxy: headers.contains_key(crate::VALIDATED_EGRESS_PROXY_HEADER),
             destinations: Mutex::new(HashMap::new()),
             cache: Mutex::new(HashMap::new()),
             playlists: Mutex::new(HashMap::new()),

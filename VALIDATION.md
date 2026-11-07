@@ -24,3 +24,20 @@ Generated media belongs in a dedicated volume.
 
 Physical devices, public swarms, hardware/4K and production cutover are not
 covered by these fixtures and stay separately qualified and approved.
+
+## Image-named HLS through the validating egress proxy
+
+The control plane now identifies its own destination-validating proxy separately
+from a generic upstream proxy. This lets the sanitizer follow public CDN
+playlists and segments through the same HTTP/CONNECT DNS/IP policy used by
+ordinary playback. Cross-origin requests strip provider headers. Generic proxies
+still refuse cross-origin original media; clients cannot set either reserved
+proxy header. No FFmpeg extension-check relaxation is introduced.
+
+The workspace gate passes 274 tests (62 opt-in checks ignored). The new transport
+regression covers CDN traversal, credential and internal-header stripping,
+private child refusal and conservative generic-proxy behavior. A real FFmpeg 9
+fixture also passes: H.264/AAC fragmented MP4, a cross-origin image-named variant,
+GIF-named initialization map and JPEG-named segments with image MIME types. That
+fixture contacts only an isolated local proxy. It establishes the sanitizer and
+probe path, separately from external source and physical-device qualification.

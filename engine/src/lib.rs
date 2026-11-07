@@ -133,6 +133,12 @@ pub const MSG_PLAYBACK_CAPACITY: &str = "Playback capacity reached";
 #[cfg(feature = "media")]
 pub const EGRESS_PROXY_HEADER: &str = "x-playback-egress-proxy";
 
+/// Server-owned proxy that resolves and validates every HTTP/CONNECT destination.
+/// Unlike a generic upstream proxy, it can safely follow public cross-origin HLS.
+/// Callers must reject this transport field in untrusted input headers.
+#[cfg(feature = "media")]
+pub const VALIDATED_EGRESS_PROXY_HEADER: &str = "x-playback-validated-egress-proxy";
+
 /// Route a client through the configured egress proxy (for example a WARP
 /// route) with all other proxying disabled.
 #[cfg(feature = "media")]

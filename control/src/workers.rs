@@ -469,7 +469,7 @@ impl Workers {
         };
         // The root's exact private Range URI is registered, while every nested
         // HTTP(S) URL still goes through ordinary destination validation.
-        headers.insert("x-playback-egress-proxy".into(), self.proxy.url());
+        headers.insert(playback_engine::VALIDATED_EGRESS_PROXY_HEADER.into(), self.proxy.url());
         let prepared = tokio::time::timeout(
             deadline.saturating_sub(started.elapsed()),
             self.engine.prepare_shared_with_selection(

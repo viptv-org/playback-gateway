@@ -11,6 +11,96 @@ const PNG_1X1: &[u8] = &[
     0x00, 0x03, 0x01, 0x01, 0x00, 0x18, 0xdd, 0x8d, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
     0x44, 0xae, 0x42, 0x60, 0x82,
 ];
+
+#[tokio::test]
+#[ignore = "requires real FFmpeg/ffprobe; isolated fMP4 HLS fixture"]
+async fn real_fmp4_with_image_named_playlist_map_and_segments() {
+    let ffmpeg = PathBuf::from(std::env::var("PLAYBACK_TEST_FFMPEG").unwrap());
+    let ffprobe = PathBuf::from(std::env::var("PLAYBACK_TEST_FFPROBE").unwrap());
+    let root = tempfile::tempdir().unwrap();
+    let status = Command::new(&ffmpeg)
+        .current_dir(root.path())
+        .args([
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=160x90:rate=25",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=sample_rate=48000",
+            "-t",
+            "3",
+            "-c:v",
+            "libx264",
+            "-threads",
+            "1",
+            "-preset",
+            "ultrafast",
+            "-g",
+            "25",
+            "-c:a",
+            "aac",
+            "-f",
+            "hls",
+            "-hls_time",
+            "1",
+            "-hls_playlist_type",
+            "vod",
+            "-hls_segment_type",
+            "fmp4",
+            "-hls_fmp4_init_filename",
+            "init.mp4",
+            "-hls_segment_filename",
+            "segment%d.m4s",
+            "media.m3u8",
+        ])
+        .status()
+        .await
+        .unwrap();
+    assert!(status.success());
+    let playlist = std::fs::read_to_string(root.path().join("media.m3u8"))
+        .unwrap()
+        .replace("init.mp4", "init.gif")
+        .replace(".m4s", ".jpg");
+    let mut resources = vec![
+        ("variant.jpg".into(), "image/jpeg", playlist.into_bytes()),
+        (
+            "init.gif".into(),
+            "image/gif",
+            std::fs::read(root.path().join("init.mp4")).unwrap(),
+        ),
+    ];
+    for index in 0..3 {
+        resources.push((
+            format!("segment{index}.jpg"),
+            "image/jpeg",
+            std::fs::read(root.path().join(format!("segment{index}.m4s"))).unwrap(),
+        ));
+    }
+    let (url, server) = origin(
+        || "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=500000\nhttp://cdn.example/live/variant.jpg\n".into(),
+        resources,
+    )
+    .await;
+    let manager = manager(&ffmpeg, ffprobe, root.path());
+    let route = Url::parse(&url).unwrap().origin().ascii_serialization();
+    let block = format!("{}: {route}\r\n", crate::VALIDATED_EGRESS_PROXY_HEADER);
+    let probe = manager
+        .probe("http://origin.example/live/index.m3u8", &block, None)
+        .await
+        .expect("cross-origin image-named fMP4 must be inspected through the validating proxy");
+    assert!(probe.disguised_hls);
+    assert_eq!(probe.video().unwrap().codec_name.as_deref(), Some("h264"));
+    assert!(probe
+        .streams
+        .iter()
+        .any(|stream| stream.codec_name.as_deref() == Some("aac")));
+    server.abort();
+}
+
 /// Three MPEG-TS null packets: enough for the transport to classify a segment.
 fn ts_packet() -> Vec<u8> {
     let mut packet = [0xff_u8; 188];

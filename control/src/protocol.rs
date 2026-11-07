@@ -124,6 +124,7 @@ impl Input {
                             | "transfer-encoding"
                             | "proxy-authorization"
                             | "x-playback-egress-proxy"
+                            | "x-playback-validated-egress-proxy"
                     )
             })
         {
@@ -278,6 +279,21 @@ pub enum SessionState {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn clients_cannot_assert_a_validated_proxy_route() {
+        for name in [
+            "x-playback-egress-proxy",
+            "X-Playback-Validated-Egress-Proxy",
+        ] {
+            let input: Input = serde_json::from_value(serde_json::json!({
+                "url": "https://media.example/master.m3u8", "live": false,
+                "headers": {name: "http://127.0.0.1:1"}
+            }))
+            .unwrap();
+            assert_eq!(input.validate(), Err("invalid_headers"));
+        }
+    }
+
     use super::*;
     #[test]
     fn torrent_discovery_and_archive_fields_are_bounded_and_identity_preserving() {
