@@ -545,9 +545,9 @@ impl PlaybackManager {
         // The reduced form keeps every field the delivery decision needs, including
         // SDR/HDR transfer evidence, while shrinking a response that failed to parse.
         let entries = if reduced {
-            "format=duration,format_name,start_time:stream=index,codec_type,codec_name,start_time,width,height,pix_fmt,channels,avg_frame_rate,color_transfer"
+            "format=duration,format_name,start_time,bit_rate,size:stream=index,codec_type,codec_name,start_time,bit_rate,width,height,pix_fmt,channels,avg_frame_rate,color_transfer:stream_tags=BPS,BPS-eng"
         } else {
-            "format=duration,format_name,start_time:stream=index,codec_type,codec_name,start_time,width,height,pix_fmt,sample_aspect_ratio,profile,level,channels,avg_frame_rate,r_frame_rate,color_transfer,field_order:stream_tags=language,title:stream_disposition=default,comment,hearing_impaired,visual_impaired,forced,attached_pic"
+            "format=duration,format_name,start_time,bit_rate,size:stream=index,codec_type,codec_name,start_time,bit_rate,width,height,pix_fmt,sample_aspect_ratio,profile,level,channels,avg_frame_rate,r_frame_rate,color_transfer,field_order:stream_tags=language,title,BPS,BPS-eng:stream_disposition=default,comment,hearing_impaired,visual_impaired,forced,attached_pic"
         };
         let entries = if sample_frames {
             cmd.args([

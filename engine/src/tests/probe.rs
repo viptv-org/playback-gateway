@@ -665,3 +665,65 @@ async fn validates_before_spawning_and_redacts_errors() {
     assert!(!manager.stop("unknown").await);
     assert!(!manager.ffmpeg_available().await);
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn vod_hls_planning_keeps_copy_inside_the_cache_budget() {
+    for (case, video_rate, tags, container_rate, expected) in [
+        ("high_video", serde_json::json!("32000000"), serde_json::json!({}), serde_json::json!("40000000"), "encode"),
+        ("at_limit", serde_json::json!("24000000"), serde_json::json!({}), serde_json::Value::Null, "copy"),
+        ("over_limit", serde_json::json!(24000001u64), serde_json::json!({}), serde_json::Value::Null, "encode"),
+        ("low_video", serde_json::json!("8000000"), serde_json::json!({}), serde_json::json!("40000000"), "copy"),
+        ("matroska_bps", serde_json::Value::Null, serde_json::json!({"BPS":"32000000"}), serde_json::Value::Null, "encode"),
+        ("matroska_bps_eng", serde_json::Value::Null, serde_json::json!({"BPS-eng":"32000000"}), serde_json::Value::Null, "encode"),
+        ("container_fallback", serde_json::Value::Null, serde_json::json!({}), serde_json::json!(32000000u64), "encode"),
+        ("unknown", serde_json::json!("N/A"), serde_json::json!({}), serde_json::Value::Null, "copy"),
+        ("invalid_video", serde_json::json!(-1), serde_json::json!({}), serde_json::json!("32000000"), "encode"),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let facts = serde_json::json!({
+            "streams":[{"index":0,"codec_type":"video","codec_name":"h264","width":1280,"height":720,
+                "pix_fmt":"yuv420p","profile":"High","level":41,"field_order":"progressive",
+                "avg_frame_rate":"24/1","r_frame_rate":"24/1","bit_rate":video_rate,"tags":tags},
+                {"index":1,"codec_type":"audio","codec_name":"aac","channels":2}],
+            "format":{"duration":"180","format_name":"matroska,webm","bit_rate":container_rate}
+        });
+        let manager = scripted_probe(root.path(), &format!("printf '%s' '{}'", facts));
+        let prepared = manager.prepare_with_selection(
+            "https://fixture.invalid/high-rate.mkv".into(), HashMap::new(), 0.0,
+            Some(Capabilities::default()), false, false, None, TrackSelection::default(),
+        ).await.unwrap();
+        assert_eq!(prepared.plan.as_ref().unwrap().video_mode, expected, "{case}");
+        assert_eq!(manager.active_count().await, 0, "planning must not start an encoder");
+        drop(prepared);
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn high_rate_hls_fallback_fits_the_bounded_encoder_without_capping_ordinary_copy() {
+    for (rate, expected, dimensions) in [(32000000u64,"encode",(1920,1080)),(8000000,"copy",(3840,2160))] {
+        let root=tempfile::tempdir().unwrap();
+        let facts=serde_json::json!({"streams":[{"index":0,"codec_type":"video","codec_name":"h264",
+            "width":3840,"height":2160,"pix_fmt":"yuv420p","profile":"High","level":51,
+            "avg_frame_rate":"24/1","r_frame_rate":"24/1","field_order":"progressive","bit_rate":rate}],
+            "format":{"duration":"180","format_name":"matroska,webm"}});
+        let manager=scripted_probe(root.path(),&format!("printf '%s' '{}'",facts));
+        let prepared=manager.prepare_with_selection("https://fixture.invalid/high-rate.mkv".into(),HashMap::new(),0.0,
+            Some(Capabilities{max_width:3840,max_height:2160,..Capabilities::default()}),false,false,None,TrackSelection::default()).await.unwrap();
+        let plan=prepared.plan.as_ref().unwrap();assert_eq!(plan.video_mode,expected);assert_eq!((plan.width,plan.height),dimensions);
+        drop(prepared);
+    }
+}
+
+#[test]
+fn bitrate_inspection_uses_container_size_only_when_stream_rates_are_unknown() {
+    let probe:Probe=serde_json::from_value(serde_json::json!({"streams":[{"codec_type":"video","codec_name":"h264"}],
+        "format":{"duration":"100","size":"400000000"}})).unwrap();
+    assert_eq!(probe.video_bit_rate(),Some(32000000));
+    let mut facts=serde_json::to_value(serde_json::json!({"streams":[{"codec_type":"video","codec_name":"h264","bit_rate":"8000000"}],
+        "format":{"duration":"100","size":"400000000"}})).unwrap();
+    let probe:Probe=serde_json::from_value(facts.clone()).unwrap();assert_eq!(probe.video_bit_rate(),Some(8000000));
+    facts["streams"][0]["bit_rate"]=serde_json::json!("N/A");facts["format"]["duration"]=serde_json::json!("N/A");
+    let probe:Probe=serde_json::from_value(facts).unwrap();assert_eq!(probe.video_bit_rate(),None);
+}

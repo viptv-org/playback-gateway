@@ -118,3 +118,36 @@ checks, with nonempty WebVTT cues and a ready session at completion. It finishes
 in 42.84 wall seconds, so this is ten minutes of media consumption, not ten
 minutes of physical viewing. Viewer and temporary key cleanup return 204. The
 unchanged cache watchdog remains enabled throughout.
+
+## High-rate VOD HLS cache budget
+
+An actual 1080p CineWave AVC remux played decoded picture and audio, then failed
+in a browser after roughly 33 seconds and on Roku with “no valid bitrates”.
+Viewer renewals remained healthy. The output reached 409,386,538 bytes with 50
+files and no captions, crossing the existing 384 MiB cache watchdog. Its largest
+segment was below the separate per-file bound; this was aggregate retention.
+
+Inspection now retains video/container bitrate, Matroska BPS tags, and a
+size/duration fallback. Known VOD HLS video rates above 24 Mbit/s use the existing
+bounded H.264 encoder (up to 1080p/30 and 5 Mbit/s) so the production lead and
+60-second deletion grace fit the cache. This trades original video bitrate for
+managed-delivery continuity and uses encoding resources. Ordinary lower-rate
+copy, original delivery, streaming fMP4 and Live retain their existing paths.
+Unknown rates retain legacy behavior under the same watchdog. No cache limits
+or egress protections were relaxed. Watchdog warnings now include numeric
+file-count/byte evidence without URLs or filenames.
+
+The workspace gate passes 285 tests with 62 opt-in checks ignored. Planner
+regressions cover bitrate strings/numbers, Matroska tags, container fallback,
+unknown metadata, threshold boundaries, and the bounded 4K conversion envelope
+while retaining ordinary 4K copy.
+
+The isolated rebuilt candidate decodes the same actual source for 160 seconds:
+3858 video frames, nonzero PCM audio, a ready lease, and a successful release.
+A second 110-second decoded run also stays healthy. An additional accelerated
+read consumes 181.01 seconds of media, with 160 cache observations peaking at
+54,400,698 bytes (about 51.9 MiB), 53 files, and a 1,704,032-byte largest file.
+An eight-second content comparison at title time 20 seconds matches picture on
+a 100 ms grid and English audio within about 20 ms. These are explicitly
+executed actual-source/candidate checks; physical Roku continuity after the
+beta gateway update remains a separate gate.

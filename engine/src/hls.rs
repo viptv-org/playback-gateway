@@ -6,6 +6,11 @@ pub(super) const HLS_INITIAL_SEGMENT_SECONDS: u32 = 1;
 pub(super) const HLS_SEGMENT_SECONDS: u32 = 2;
 pub(super) const HLS_WINDOW_SECONDS: u32 = 120;
 pub(super) const HLS_DELETE_GRACE_SECONDS: u32 = 60;
+/// At 24 Mbit/s the 40s production lead plus 60s deletion grace uses about
+/// 300 MB, leaving room for audio and open fragments under the 384 MiB guard.
+/// Higher-rate VOD HLS uses the existing 5 Mbit/s bounded encoder instead.
+/// Original delivery and backpressured streaming fMP4 do not retain this cache.
+pub(super) const HLS_VOD_COPY_MAX_BIT_RATE: u64 = 24_000_000;
 /// A video-only first fragment makes some existing readers permanently choose
 /// no audio. Keep the selected audio's first packet inside that fragment when
 /// the inspected streams begin at different timestamps. No re-encoding is needed.
@@ -463,7 +468,8 @@ pub(super) async fn cache_safe(dir: &std::path::Path, require_progress: bool) ->
         // The configured 120s window plus 60s delete grace can retain up to
         // 180 two-second AV/VTT files; leave a small margin for playlists.
         if count > 256 || meta.len() > 32 * 1024 * 1024 || bytes > 384 * 1024 * 1024 {
-            tracing::warn!("Playback cache watchdog limit exceeded");
+            tracing::warn!(file_count = count, file_bytes = meta.len(), total_bytes = bytes,
+                "Playback cache watchdog limit exceeded");
             return false;
         }
     }

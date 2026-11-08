@@ -518,6 +518,19 @@ impl PlaybackManager {
         // inspected source must be inside it. Original delivery above is exempt:
         // there the client's own decoders, not this policy, decide.
         probe.ensure_supported()?;
+        let continuous = !caps.direct_play
+            && selected_subtitle.is_none()
+            && caps.browser.as_ref().is_some_and(|b| b.fmp4);
+        let video_bit_rate = probe.video_bit_rate();
+        let rate_limited = !live && !continuous
+            && video_bit_rate.is_some_and(|rate| rate > hls::HLS_VOD_COPY_MAX_BIT_RATE);
+        // The bounded encoders advertise H.264 level 4.0 at up to 30 fps.
+        // Keep this cache fallback inside that envelope, including 4K inputs.
+        let (width, height) = if rate_limited {
+            (width.min(1920), height.min(1080))
+        } else {
+            (width, height)
+        };
         // Encoders never upscale. Normalize excess capability headroom before
         // computing transforms so equivalent output requests share one plan.
         let width = width.min(probe.video()?.width.unwrap_or(width)) / 2 * 2;
@@ -571,9 +584,6 @@ impl PlaybackManager {
         }
         // Qualified browser copy delivery reports the preceding keyframe origin;
         // the client consumes preroll instead of requiring video encoding for seek.
-        let continuous = !caps.direct_play
-            && selected_subtitle.is_none()
-            && caps.browser.as_ref().is_some_and(|b| b.fmp4);
         let video = probe.video()?;
         // Sharing replaces original HLS transport, not the native decoder gate.
         // Preserve previously compatible native HEVC instead of forcing H264.
@@ -642,8 +652,12 @@ impl PlaybackManager {
             None
         };
         let position = seek_origin.unwrap_or(position);
-        let copy_video =
-            !force_video && compatible_video && (position == 0.0 || seek_origin.is_some());
+        let copy_eligible = !force_video && compatible_video && (position == 0.0 || seek_origin.is_some());
+        let copy_video = copy_eligible && !rate_limited;
+        if rate_limited {
+            tracing::info!(video_bit_rate, limit = hls::HLS_VOD_COPY_MAX_BIT_RATE,
+                "High-rate VOD uses bounded encoding to fit the HLS cache");
+        }
         // Copy audio independently at zero offset. After input-side seeking,
         // decoded audio is required to keep MPEGTS/WebVTT on the same clock.
         let copy_audio = !force_audio
