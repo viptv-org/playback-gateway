@@ -151,3 +151,13 @@ An eight-second content comparison at title time 20 seconds matches picture on
 a 100 ms grid and English audio within about 20 ms. These are explicitly
 executed actual-source/candidate checks; physical Roku continuity after the
 beta gateway update remains a separate gate.
+
+The qualified source revision `a3dc95d` is deployed to the beta gateway through
+the managed Compose entry after a SQLite online backup. Its deployment reports
+`done`, the HTTPS readiness check returns 200, and only the beta gateway
+container ID changed. The other service container IDs are unchanged. The same
+13.2 GiB AVC source then plays on the physical Roku beyond 332 seconds with
+H.264/AAC and no error; pause, paused 10-second seek and resume succeed. Its
+stored language is English. A post-rollout browser run also decodes 102 seconds
+with PCM audio and a ready lease. This is scoped source/device evidence, not
+a whole-catalog or whole-title continuity claim.
