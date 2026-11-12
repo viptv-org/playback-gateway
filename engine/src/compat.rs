@@ -5,8 +5,8 @@ pub(super) struct Probe {
     pub(super) streams: Vec<ProbeStream>,
     #[serde(default)]
     pub(super) format: serde_json::Value,
-    /// The source is HLS whose segments FFmpeg could only read through the
-    /// loopback sanitizer (refused segment names or image-disguised media).
+    /// The source needs the loopback HLS normalizer for refused segment names,
+    /// image disguises or protected headers that must stay out of FFmpeg.
     /// Every later reader starts its own sanitizer; the probe never carries
     /// one, because probe copies outlive the reader that needed it.
     #[serde(skip)]
@@ -21,6 +21,8 @@ pub(super) struct ProbeStream {
     pub(super) codec_type: Option<String>,
     pub(super) codec_name: Option<String>,
     pub(super) start_time: Option<String>,
+    #[serde(default)]
+    pub(super) bit_rate: serde_json::Value,
     pub(super) width: Option<u32>,
     pub(super) height: Option<u32>,
     pub(super) pix_fmt: Option<String>,
@@ -321,6 +323,28 @@ impl Probe {
         v.as_f64()
             .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
             .filter(|d| d.is_finite() && *d > 0.0 && *d <= 604800.0)
+    }
+    /// Prefer the selected video rate. Matroska often reports it as a BPS
+    /// tag instead of bit_rate; container facts provide a conservative fallback.
+    pub(super) fn video_bit_rate(&self) -> Option<u64> {
+        let positive = |value: &serde_json::Value| {
+            value.as_u64()
+                .or_else(|| value.as_str().and_then(|s| s.trim().parse().ok()))
+                .filter(|rate| *rate > 0)
+        };
+        let video = self.video().ok()?;
+        std::iter::once(positive(&video.bit_rate))
+            .chain(video.tags.iter()
+                .filter(|(key, _)| key.eq_ignore_ascii_case("bps") || key.to_ascii_lowercase().starts_with("bps-"))
+                .map(|(_, value)| value.trim().parse::<u64>().ok().filter(|rate| *rate > 0)))
+            .flatten()
+            .max()
+            .or_else(|| positive(&self.format["bit_rate"]))
+            .or_else(|| {
+                let size = positive(&self.format["size"])?;
+                let duration = self.duration()?;
+                Some((size as f64 * 8.0 / duration).ceil().min(u64::MAX as f64) as u64)
+            })
     }
     #[cfg(test)]
     pub(super) fn compatible(&self, width: u32, height: u32) -> bool {

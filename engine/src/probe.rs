@@ -463,6 +463,30 @@ impl PlaybackManager {
         reduced: bool,
     ) -> Result<Probe, ProbeFailure> {
         let sample_frames = hls_path(url);
+        let fields = sanitize::header_map(headers);
+        let authenticated_hls = fields
+            .get(crate::NORMALIZE_HLS_HEADER)
+            .is_some_and(|v| v == "1")
+            || (sample_frames
+                && fields.keys().any(|name| {
+                    name != crate::EGRESS_PROXY_HEADER
+                        && name != crate::VALIDATED_EGRESS_PROXY_HEADER
+                        && name != crate::NORMALIZE_HLS_HEADER
+                }));
+        if authenticated_hls {
+            // Credentials belong to the HTTP transport, never FFmpeg's global
+            // header block (which may otherwise follow cross-origin children).
+            let sanitizer =
+                sanitize::HlsSanitizer::start(url, &sanitize::header_map(headers), permits.clone())
+                    .await
+                    .map_err(|_| ProbeFailure::Protocol)?;
+            let mut probe = self
+                .probe_command(url, headers, permits, reduced, Some(&sanitizer), true)
+                .await?;
+            // Readers must use the same normalizer, even without an image prefix.
+            probe.disguised_hls = true;
+            return Ok(probe);
+        }
         let mut direct = self
             .probe_command(url, headers, permits.clone(), reduced, None, sample_frames)
             .await;
@@ -521,9 +545,9 @@ impl PlaybackManager {
         // The reduced form keeps every field the delivery decision needs, including
         // SDR/HDR transfer evidence, while shrinking a response that failed to parse.
         let entries = if reduced {
-            "format=duration,format_name,start_time:stream=index,codec_type,codec_name,start_time,width,height,pix_fmt,channels,avg_frame_rate,color_transfer"
+            "format=duration,format_name,start_time,bit_rate,size:stream=index,codec_type,codec_name,start_time,bit_rate,width,height,pix_fmt,channels,avg_frame_rate,color_transfer:stream_tags=BPS,BPS-eng"
         } else {
-            "format=duration,format_name,start_time:stream=index,codec_type,codec_name,start_time,width,height,pix_fmt,sample_aspect_ratio,profile,level,channels,avg_frame_rate,r_frame_rate,color_transfer,field_order:stream_tags=language,title:stream_disposition=default,comment,hearing_impaired,visual_impaired,forced,attached_pic"
+            "format=duration,format_name,start_time,bit_rate,size:stream=index,codec_type,codec_name,start_time,bit_rate,width,height,pix_fmt,sample_aspect_ratio,profile,level,channels,avg_frame_rate,r_frame_rate,color_transfer,field_order:stream_tags=language,title,BPS,BPS-eng:stream_disposition=default,comment,hearing_impaired,visual_impaired,forced,attached_pic"
         };
         let entries = if sample_frames {
             cmd.args([

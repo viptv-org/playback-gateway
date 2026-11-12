@@ -210,9 +210,12 @@ fn network_input_args(cmd: &mut Command, headers: &str, protocols: &str) {
     // This server-authored transport field is consumed here, never sent upstream.
     let mut public = String::new();
     for line in headers.split("\r\n").filter(|line| !line.is_empty()) {
-        if let Some(proxy) = line.strip_prefix("x-playback-egress-proxy: ") {
+        if let Some(proxy) = line
+            .strip_prefix("x-playback-egress-proxy: ")
+            .or_else(|| line.strip_prefix("x-playback-validated-egress-proxy: "))
+        {
             cmd.arg("-http_proxy").arg(proxy);
-        } else {
+        } else if !line.starts_with("x-playback-normalize-hls: ") {
             public.push_str(line);
             public.push_str("\r\n");
         }
@@ -251,7 +254,11 @@ pub(super) fn header_block(headers: &HashMap<String, String>) -> Result<String, 
     let mut out = String::new();
     if pairs
         .iter()
-        .filter(|(key, _)| !key.eq_ignore_ascii_case("x-playback-egress-proxy"))
+        .filter(|(key, _)| {
+            !key.eq_ignore_ascii_case(crate::EGRESS_PROXY_HEADER)
+                && !key.eq_ignore_ascii_case(crate::VALIDATED_EGRESS_PROXY_HEADER)
+                && !key.eq_ignore_ascii_case(crate::NORMALIZE_HLS_HEADER)
+        })
         .count()
         > 32
     {

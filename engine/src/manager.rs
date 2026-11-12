@@ -173,14 +173,7 @@ impl PlaybackManager {
             }
             // Prefix cleanup tracks the viewer, not the producer: it must
             // keep running after a fast producer has already exited.
-            if let Ok(playlist) = tokio::fs::read_to_string(session.dir.join("index.m3u8")).await {
-                session.throttle.apply_playlist(&playlist);
-            }
-            for file in session.throttle.take_pending_deletions() {
-                if file.starts_with("segment-") && !file.contains(['/', '\\']) {
-                    let _ = tokio::fs::remove_file(session.dir.join(&file)).await;
-                }
-            }
+            hls::reclaim_vod_prefix(&session.dir, &mut session.throttle).await;
             let Some(child) = session.child.as_mut() else {
                 continue;
             };

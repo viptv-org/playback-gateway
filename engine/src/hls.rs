@@ -6,6 +6,11 @@ pub(super) const HLS_INITIAL_SEGMENT_SECONDS: u32 = 1;
 pub(super) const HLS_SEGMENT_SECONDS: u32 = 2;
 pub(super) const HLS_WINDOW_SECONDS: u32 = 120;
 pub(super) const HLS_DELETE_GRACE_SECONDS: u32 = 60;
+/// At 24 Mbit/s the 40s production lead plus 60s deletion grace uses about
+/// 300 MB, leaving room for audio and open fragments under the 384 MiB guard.
+/// Higher-rate VOD HLS uses the existing 5 Mbit/s bounded encoder instead.
+/// Original delivery and backpressured streaming fMP4 do not retain this cache.
+pub(super) const HLS_VOD_COPY_MAX_BIT_RATE: u64 = 24_000_000;
 /// A video-only first fragment makes some existing readers permanently choose
 /// no audio. Keep the selected audio's first packet inside that fragment when
 /// the inspected streams begin at different timestamps. No re-encoding is needed.
@@ -73,6 +78,7 @@ pub(super) struct Throttle {
     consumed_seconds: f64,
     last_segment: Option<u64>,
     deleted_below: u64,
+    caption_deleted_below: u64,
     pending_deletions: Vec<String>,
     last_ahead: f64,
 }
@@ -145,6 +151,38 @@ impl Throttle {
             self.deleted_below = index + 1;
         }
         self.last_ahead = self.produced_seconds - self.consumed_seconds;
+    }
+    /// Caption segment durations may differ from AV cuts. Reclaim only the
+    /// caption prefix ending behind the same consumed-time grace boundary.
+    pub(super) fn apply_caption_playlist(&mut self, playlist: &str) {
+        let below = self.consumed_seconds - f64::from(HLS_DELETE_GRACE_SECONDS);
+        let mut end = 0.0;
+        let mut duration = None;
+        for line in playlist.lines() {
+            if let Some(value) = line.strip_prefix("#EXTINF:") {
+                duration = value
+                    .split(',')
+                    .next()
+                    .and_then(|v| v.parse::<f64>().ok())
+                    .filter(|v| v.is_finite() && *v >= 0.0);
+            } else if !line.is_empty() && !line.starts_with('#') {
+                let Some(seconds) = duration.take() else {
+                    return;
+                };
+                let Some(index) = caption_number(line) else {
+                    return;
+                };
+                end += seconds;
+                if index < self.caption_deleted_below {
+                    continue;
+                }
+                if end >= below {
+                    break;
+                }
+                self.pending_deletions.push(line.to_owned());
+                self.caption_deleted_below = index + 1;
+            }
+        }
     }
     pub(super) fn ahead(&self) -> f64 {
         self.last_ahead
@@ -219,6 +257,32 @@ pub(super) fn segment_number(file: &str) -> Option<u64> {
         .0
         .parse()
         .ok()
+}
+
+fn caption_number(file: &str) -> Option<u64> {
+    if media_type(file) != Some("text/vtt") {
+        return None;
+    }
+    file.strip_prefix("index")?
+        .strip_suffix(".vtt")?
+        .parse()
+        .ok()
+}
+
+/// Reclaim AV and WebVTT with their own playlist clocks, including after EOF.
+/// Never relax the cache watchdog to compensate for missing prefix cleanup.
+pub(super) async fn reclaim_vod_prefix(dir: &std::path::Path, throttle: &mut Throttle) {
+    if let Ok(playlist) = tokio::fs::read_to_string(dir.join("index.m3u8")).await {
+        throttle.apply_playlist(&playlist);
+    }
+    if let Ok(playlist) = tokio::fs::read_to_string(dir.join("index_vtt.m3u8")).await {
+        throttle.apply_caption_playlist(&playlist);
+    }
+    for file in throttle.take_pending_deletions() {
+        if segment_number(&file).is_some() || caption_number(&file).is_some() {
+            let _ = tokio::fs::remove_file(dir.join(file)).await;
+        }
+    }
 }
 
 /// Newest AV segment the encoder has completed and listed.
@@ -404,7 +468,8 @@ pub(super) async fn cache_safe(dir: &std::path::Path, require_progress: bool) ->
         // The configured 120s window plus 60s delete grace can retain up to
         // 180 two-second AV/VTT files; leave a small margin for playlists.
         if count > 256 || meta.len() > 32 * 1024 * 1024 || bytes > 384 * 1024 * 1024 {
-            tracing::warn!("Playback cache watchdog limit exceeded");
+            tracing::warn!(file_count = count, file_bytes = meta.len(), total_bytes = bytes,
+                "Playback cache watchdog limit exceeded");
             return false;
         }
     }
