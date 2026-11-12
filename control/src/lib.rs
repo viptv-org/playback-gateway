@@ -1,5 +1,6 @@
 pub mod api;
 mod captions;
+mod subtitle_sync;
 pub mod credentials;
 mod diagnostics;
 pub mod key_api;

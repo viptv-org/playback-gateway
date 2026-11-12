@@ -3,6 +3,8 @@ use super::*;
 pub struct PlaybackManager {
     pub(super) config: Config,
     pub(super) slots: Arc<Semaphore>,
+    pub(super) subtitle_analysis: Arc<Semaphore>,
+    pub(super) subtitle_activity_cache: Mutex<Option<(String, Vec<(i64, bool)>)>>,
     pub(super) preparation_slots: Arc<Semaphore>,
     pub(super) sessions: Mutex<HashMap<String, Session>>,
     pub(super) probe_cache: Mutex<HashMap<[u8; 32], ProbeCacheEntry>>,
@@ -100,6 +102,8 @@ impl PlaybackManager {
             .max(Duration::from_millis(100));
         let manager = Arc::new(Self {
             slots: Arc::new(Semaphore::new(config.max_sessions)),
+            subtitle_analysis: Arc::new(Semaphore::new(1)),
+            subtitle_activity_cache: Mutex::new(None),
             preparation_slots: Arc::new(Semaphore::new(config.max_sessions.max(1))),
             sessions: Mutex::new(HashMap::new()),
             probe_cache: Mutex::new(HashMap::new()),
