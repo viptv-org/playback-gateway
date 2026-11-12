@@ -1,7 +1,7 @@
 {
   "evidence": "Executed owned-fixture mechanism; circular subtitle reference and seeded producer ledger, not paired playback or independent accuracy.",
   "source_sha256": {
-    "engine/src/subtitle_sync.rs": "dcbb0239c7e5f9554b38bb1699d66be71ebfa5d7d84152e3c0d67859302c1e61",
+    "engine/src/subtitle_sync.rs": "2d8bbecba63f31c7050cd72cf0f8d681cbe2b7a7bf7d7618588c905c93b3a761",
     "control/src/subtitle_sync.rs": "1feda5b85030de8b40d0cf23f0eab0b56ea274e78506c159cd8b8408e9126342",
     "control/src/sessions/subtitle_sync.rs": "472b3b5d1a9fdc7c63a186d480d707043839de68ba55dc9437aa17b6dd24964a",
     "tools/subtitle-sync/vad.c": "2e13f3280013869e18b4b4cb82c74ea06be8151f80253ea1af2b989cb18598f0"
@@ -13,7 +13,9 @@
     "vad_source": "wiseman/py-webrtcvad@e283ca41df3a84b0e87fb1f5cb9b21580a286b09 native BSD-3-Clause",
     "vad_sha256": "8b1038bce20dc263b058a071d351790197be2270020cab60a942e753f6ca53a6",
     "estimator_source": "viptv-org/core@fec3550db0786ac9bf1b91bf31edd7b0865f88a1",
-    "estimator_sha256": "85f620abbd1954fdb4383497a39110883f3cc125388ea1cbfbab1b71ab9f9eae"
+    "estimator_sha256": "85f620abbd1954fdb4383497a39110883f3cc125388ea1cbfbab1b71ab9f9eae",
+    "pcm_framing_buffer_bytes": 20480,
+    "pcm_retained_for_full_window": false
   },
   "fixture": {
     "kind": "owned synthetic voiced harmonic/silence signal, AAC in retained TS HLS",

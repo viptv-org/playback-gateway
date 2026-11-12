@@ -4,7 +4,6 @@ use tokio::io::AsyncWriteExt;
 
 pub const MAX_AUDIO_SECONDS: usize = 120;
 const MAX_INPUT_BYTES: usize = 32 * 1024 * 1024;
-const MAX_PCM_BYTES: usize = (MAX_AUDIO_SECONDS + 1) * 32_000;
 
 impl PlaybackManager {
     pub async fn retained_subtitle_activity(
@@ -96,14 +95,11 @@ impl PlaybackManager {
             .ok_or("analysis_timestamps")?;
         let mut decode = Command::new(&self.config.ffmpeg);
         decode.args(["-hide_banner","-loglevel","info","-nostdin","-threads","1","-filter_threads","1","-protocol_whitelist","pipe","-f","mpegts","-copyts","-i","pipe:0","-map","0:a:0","-vn","-sn","-dn","-af","aformat=sample_fmts=s16:sample_rates=16000:channel_layouts=mono,atrim=duration=120,asetnsamples=n=320:p=0,ashowinfo","-f","s16le","pipe:1"]);
-        let (mut pcm, log) = run(decode, &bytes, MAX_PCM_BYTES, 2 * 1024 * 1024).await?;
-        pcm.truncate(pcm.len() / 640 * 640);
+        let (decisions, log, forwarded) = decode_activity(decode, vad, &bytes).await?;
         drop(bytes);
-        let vad_command = Command::new(vad);
-        let (decisions, _) = run(vad_command, &pcm, 8192, 16 * 1024).await?;
         let frames = String::from_utf8(log).map_err(|_| "analysis_timestamps")?;
         let times = frame_times(&frames, origin)?;
-        if times.len() != decisions.len() || times.len() < 1000 || pcm.len() != times.len() * 640 {
+        if times.len() != decisions.len() || times.len() < 1000 || times.len() != forwarded {
             return Err("analysis_incomplete".into());
         }
         let frames = times
@@ -190,6 +186,103 @@ fn frame_times(log: &str, origin: f64) -> Result<Vec<i64>, String> {
     }
     Ok(times)
 }
+async fn decode_activity(
+    mut command: Command,
+    vad: &std::path::Path,
+    input: &[u8],
+) -> Result<(Vec<u8>, Vec<u8>, usize), String> {
+    contain_media_process(&mut command);
+    let mut decoder = command
+        .kill_on_drop(true)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|_| "analysis_worker_unavailable")?;
+    let mut classify = Command::new(vad);
+    contain_media_process(&mut classify);
+    let mut classifier = match classify
+        .kill_on_drop(true)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => {
+            let _ = decoder.start_kill();
+            let _ = decoder.wait().await;
+            return Err("analysis_worker_unavailable".into());
+        }
+    };
+    let mut source = decoder.stdin.take().unwrap();
+    let mut pcm = decoder.stdout.take().unwrap();
+    let decode_log = decoder.stderr.take().unwrap();
+    let mut feed = classifier.stdin.take().unwrap();
+    let decisions = classifier.stdout.take().unwrap();
+    let errors = classifier.stderr.take().unwrap();
+    let result = timeout(Duration::from_secs(15), async {
+        let forward = async move {
+            let mut buffer = [0u8; 640 * 32];
+            let mut retained = 0;
+            let mut frames = 0;
+            loop {
+                let count = pcm
+                    .read(&mut buffer[retained..])
+                    .await
+                    .map_err(|_| "analysis_worker_failed")?;
+                if count == 0 {
+                    break;
+                }
+                let available = retained + count;
+                let complete = available / 640 * 640;
+                frames += complete / 640;
+                if frames > 6000 {
+                    return Err("analysis_frame_budget");
+                }
+                feed.write_all(&buffer[..complete])
+                    .await
+                    .map_err(|_| "analysis_worker_failed")?;
+                buffer.copy_within(complete..available, 0);
+                retained = available - complete;
+            }
+            drop(feed);
+            Ok::<_, &str>(frames)
+        };
+        let (_, forwarded, log, out, err, decoded, classified) = tokio::join!(
+            async {
+                let _ = source.write_all(input).await;
+                drop(source);
+            },
+            forward,
+            probe_output(decode_log, 2 * 1024 * 1024),
+            probe_output(decisions, 8192),
+            probe_output(errors, 16 * 1024),
+            decoder.wait(),
+            classifier.wait()
+        );
+        if !decoded.is_ok_and(|s| s.success()) || !classified.is_ok_and(|s| s.success()) {
+            return Err("analysis_worker_failed".into());
+        }
+        let frames = forwarded.map_err(str::to_owned)?;
+        let _ = err.map_err(|_| "analysis_output_budget")?;
+        Ok((
+            out.map_err(|_| "analysis_output_budget")?,
+            log.map_err(|_| "analysis_output_budget")?,
+            frames,
+        ))
+    })
+    .await
+    .unwrap_or_else(|_| Err("analysis_timeout".into()));
+    if result.is_err() {
+        let _ = decoder.start_kill();
+        let _ = classifier.start_kill();
+        let _ = decoder.wait().await;
+        let _ = classifier.wait().await;
+    }
+    result
+}
+
 pub async fn run(
     mut command: Command,
     input: &[u8],
@@ -252,6 +345,34 @@ mod tests {
             .collect::<String>();
         assert_eq!(segment_names(&list).unwrap().len(), 31);
     }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn pcm_pipe_forwards_complete_frames_and_drops_only_the_tail() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let vad = root.path().join("vad");
+        std::fs::write(
+            &vad,
+            r#"#!/usr/bin/env python3
+import sys
+if sys.stdin.buffer.read() != bytes(range(256)) * 5:
+    sys.exit(4)
+sys.stdout.buffer.write(bytes((0, 1)))
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&vad, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut decode = Command::new("python3");
+        decode.args([
+            "-c",
+            "import sys;sys.stdout.buffer.write((bytes(range(256))*6)[:1313])",
+        ]);
+        let (decisions, log, frames) = decode_activity(decode, &vad, &[]).await.unwrap();
+        assert_eq!(frames, 2);
+        assert_eq!(decisions, vec![0, 1]);
+        assert!(log.is_empty());
+    }
+
     #[test]
     fn preserves_timestamp_gaps_and_origin() {
         let log="[Parsed_ashowinfo_1] pts_time:1.4 nb_samples:320\n[Parsed_ashowinfo_1] pts_time:2.4 nb_samples:320";

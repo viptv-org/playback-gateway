@@ -16,7 +16,9 @@ provider URL, requests torrent pieces or holds an output producer/renderer.
 
 One global worker slot covers snapshot acquisition, VAD and estimation; overload
 abstains without a pending-work queue. One analysis slot consumes a 60–120 second snapshot, at most 32 MiB input and
-6000 mono 16 kHz/20 ms frames. FFmpeg receives TS bytes through stdin with only
+6000 mono 16 kHz/20 ms frames. Decoded PCM streams directly into VAD through a
+20 KiB framing buffer; final partial frames are dropped and no minute-long PCM
+array is retained. FFmpeg receives TS bytes through stdin with only
 the `pipe` protocol permitted. Decoded frame PTS are normalized against the
 retained output origin; gaps remain gaps. The native WebRTC VAD emits one byte
 per complete frame. The core estimator receives batches of at most 3000 frames.
@@ -89,7 +91,9 @@ playback-impact evidence. Set `PLAYBACK_SYNC_ESTIMATOR`,
 
 [Validation manifest](SUBTITLE_SYNC_VALIDATION.json) records exact source/binary
 hashes. The owned 120-second retained fixture yields 6000 timestamped frames;
-the native VAD marks 3516 speech frames. A deliberately circular reference
+the native VAD marks 3516 speech frames through the 20 KiB PCM framer. The
+framer regression also verifies byte-exact full frames and discards only a
+partial trailing frame. A deliberately circular reference
 shifted by two seconds produces an accepted offset of +2000000 us at server
 revision 2 through the authenticated control lifecycle. Foreign-viewer reads are
 rejected and the same playback job remains Ready. The engine also reuses cached
