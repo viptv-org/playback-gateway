@@ -1,3 +1,4 @@
+use super::headers::cross_origin_referer;
 use super::playlist::{public_host, public_ip};
 use super::*;
 
@@ -65,6 +66,9 @@ impl Direct {
             let mut headers = self.headers.clone();
             if url.origin() != self.root.origin() {
                 headers.clear();
+                if let Some(referer) = cross_origin_referer(&self.headers, &url) {
+                    headers.insert(header::REFERER, referer);
+                }
             }
             let mut request = client
                 .get(url.clone())

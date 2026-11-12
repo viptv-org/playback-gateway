@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Semaphore;
 use url::Url;
 
+mod headers;
 mod playlist;
 #[cfg(test)]
 mod real_tests;

@@ -79,6 +79,11 @@ rewritten-playlist cache has a separate 4 MiB bound per transport. Opaque child
 routing, destination validation and segment validation apply independently of
 the playlist byte budget.
 
+Cross-origin media requests retain only the origin of a supplied public HTTP(S)
+Referer. Viewer paths, queries and fragments are removed; userinfo, local origins
+and HTTPS-to-HTTP downgrades suppress it. Authorization, cookies, Origin,
+User-Agent and arbitrary provider headers remain restricted to the root origin.
+
 ## Separate operator replay watchdog
 
 The former fixed 64 MiB replay ceiling is replaced by operator
