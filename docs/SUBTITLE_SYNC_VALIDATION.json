@@ -2,9 +2,10 @@
   "evidence": "Executed owned-fixture mechanism; circular subtitle reference and seeded producer ledger, not paired playback or independent accuracy.",
   "source_sha256": {
     "engine/src/subtitle_sync.rs": "2d8bbecba63f31c7050cd72cf0f8d681cbe2b7a7bf7d7618588c905c93b3a761",
-    "control/src/subtitle_sync.rs": "1feda5b85030de8b40d0cf23f0eab0b56ea274e78506c159cd8b8408e9126342",
+    "control/src/subtitle_sync.rs": "4f3295bd15a94de3d5cd510c82bb54868ea13fe4394e63d57044f2710bb1fe79",
     "control/src/sessions/subtitle_sync.rs": "472b3b5d1a9fdc7c63a186d480d707043839de68ba55dc9437aa17b6dd24964a",
-    "tools/subtitle-sync/vad.c": "2e13f3280013869e18b4b4cb82c74ea06be8151f80253ea1af2b989cb18598f0"
+    "tools/subtitle-sync/vad.c": "2e13f3280013869e18b4b4cb82c74ea06be8151f80253ea1af2b989cb18598f0",
+    "control/src/caption_http_tests.rs": "7eac1db4cfbcf0ca83e14a5168acba69b7a0500c9114cc31f2472c2e9f3ab889"
   },
   "runtime": {
     "ffmpeg": "5.1.9-0+deb12u1, Debian GCC12, userspace dependencies reused; no host package install",
@@ -15,7 +16,8 @@
     "estimator_source": "viptv-org/core@fec3550db0786ac9bf1b91bf31edd7b0865f88a1",
     "estimator_sha256": "85f620abbd1954fdb4383497a39110883f3cc125388ea1cbfbab1b71ab9f9eae",
     "pcm_framing_buffer_bytes": 20480,
-    "pcm_retained_for_full_window": false
+    "pcm_retained_for_full_window": false,
+    "native_vad_entrypoint": "WebRtcVad_Process(16000,320), mode 2; no 48 kHz path qualification"
   },
   "fixture": {
     "kind": "owned synthetic voiced harmonic/silence signal, AAC in retained TS HLS",
@@ -40,7 +42,22 @@
     "confidence_kind": "uncalibratedHeuristic",
     "foreign_viewer_rejected": true,
     "same_ready_playback_job": true,
-    "observations_reused_without_decoder": true
+    "observations_reused_without_decoder": true,
+    "slow_estimator_cancellation": {
+      "cases": [
+        "manual",
+        "back",
+        "release",
+        "route_key_revoke",
+        "credential_store_revoke"
+      ],
+      "each_deadline_seconds": 3,
+      "assertions": [
+        "child_not_running",
+        "sole_worker_permit_released",
+        "no_late_correction"
+      ]
+    }
   },
   "unqualified": [
     "Real HTTP/torrent/HLS producer execution and timestamp origins",

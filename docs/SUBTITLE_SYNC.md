@@ -104,3 +104,12 @@ no host packages were installed. A separately downloaded static FFmpeg 7.0.2
 crashed on MPEG-TS input and was excluded from mechanism evidence. Both decoder
 versions differ from the prior isolated production-image baseline. Full producer
 and paired playback/resource/held-out accuracy qualification remain open.
+
+
+Estimator cancellation uses the same 100 ms viewer/cancel checks and 1 s key
+checks as acquisition. A slow-child fixture verifies manual freeze, Back,
+release, key-route revocation and direct credential-store revocation terminate
+the child and return the sole permit within three seconds, without publishing
+a late correction. The final publication revision/identity/authority fences
+remain independent. Native VAD evidence here is exactly 16 kHz/20 ms through
+CalcVad16; it does not qualify the upstream 48 kHz path.

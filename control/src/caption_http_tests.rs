@@ -217,3 +217,68 @@ async fn real_retained_worker_publishes_through_authenticated_caption_lifecycle(
     workers.shutdown().await;
     std::env::remove_var("VIPTV_SUBTITLE_SYNC_VAD");std::env::remove_var("VIPTV_SUBTITLE_SYNC_ESTIMATOR");
 }
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore = "requires owned retained HLS and real decoder/VAD; slow estimator cancellation lifecycle"]
+async fn slow_subtitle_estimator_cancels_and_releases_the_only_worker() {
+    use std::os::unix::fs::PermissionsExt;
+    for action in ["manual", "back", "release", "revoke", "credential_revoke"] {
+        let (root,workers,p)=fixture(false).await;
+        let key=workers.credentials.issue(BOOTSTRAP,p.key.spec.clone(),0).unwrap();
+        let app=router(Api{workers:workers.clone(),ready:Arc::new(AtomicBool::new(true))});
+        let mut input=request(1920);input.input.live=false;
+        let (status,_,created)=call(&app,"POST","/v1/sessions",&key.secret,Some(&format!("slow-{action}")),serde_json::to_string(&input).unwrap()).await;
+        assert_eq!(status,StatusCode::CREATED);
+        let created:Value=serde_json::from_slice(&created).unwrap();let id=created["id"].as_str().unwrap();
+        let engine_id=workers.active.lock().unwrap().get(created["job_id"].as_str().unwrap()).unwrap().id.clone();
+        let directory=root.path().join("media").join(engine_id);
+        for file in std::fs::read_dir(std::env::var("PLAYBACK_SYNC_FIXTURE").unwrap()).unwrap().map(Result::unwrap) {
+            let name=file.file_name();let name=name.to_str().unwrap();
+            if name=="index.m3u8" || name.starts_with("segment-") && name.ends_with(".ts") {std::fs::copy(file.path(),directory.join(name)).unwrap();}
+        }
+        for (script,variable) in [("encoder","PLAYBACK_TEST_FFMPEG"),("probe","PLAYBACK_TEST_FFPROBE")] {
+            let path=root.path().join(script);std::fs::remove_file(&path).unwrap();std::os::unix::fs::symlink(std::env::var(variable).unwrap(),path).unwrap();
+        }
+        let marker=root.path().join("estimator.pid");let estimator=root.path().join("slow-estimator");
+        std::fs::write(&estimator,format!("#!/bin/sh\nprintf '%s' \"$$\" > '{}'\nexec sleep 60\n",marker.display())).unwrap();
+        std::fs::set_permissions(&estimator,std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::env::set_var("VIPTV_SUBTITLE_SYNC_VAD",std::env::var("PLAYBACK_SYNC_VAD").unwrap());
+        std::env::set_var("VIPTV_SUBTITLE_SYNC_ESTIMATOR",&estimator);
+        let endpoint=format!("/v1/sessions/{id}/subtitle-sync");let generation=format!("slow-{action}");
+        let (status,_,started)=call(&app,"POST",&endpoint,&key.secret,None,json!({"content_vtt":"WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nOwned fixture\n","playback_generation":generation}).to_string()).await;
+        assert_eq!(status,StatusCode::OK);let started:Value=serde_json::from_slice(&started).unwrap();assert_eq!(started["state"],"observing");
+        let pid=tokio::time::timeout(Duration::from_secs(10),async {
+            loop {if let Ok(value)=std::fs::read_to_string(&marker) {if let Ok(pid)=value.parse::<u32>(){break pid;}}tokio::time::sleep(Duration::from_millis(10)).await;}
+        }).await.unwrap();
+        assert_eq!(workers.subtitle_analysis.available_permits(),0);
+        let began=std::time::Instant::now();
+        let (method,path,token,body)=match action {
+            "manual"=>("PUT",endpoint.clone(),key.secret.as_str(),json!({"revision":started["revision"],"manual":true}).to_string()),
+            "back"=>("DELETE",endpoint.clone(),key.secret.as_str(),json!({"playback_generation":generation}).to_string()),
+            "release"=>("DELETE",format!("/v1/sessions/{id}"),key.secret.as_str(),String::new()),
+            _=>("DELETE",format!("/v1/keys/{}",key.key.id),BOOTSTRAP,String::new()),
+        };
+        let status=if action=="credential_revoke" {
+            workers.credentials.revoke(BOOTSTRAP,&key.key.id).unwrap();StatusCode::NO_CONTENT
+        }else{call(&app,method,&path,token,None,body).await.0};
+        assert!(status.is_success(),"{action}: {status}");
+        tokio::time::timeout(Duration::from_secs(3),async {
+            loop {
+                let running=match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+                    Ok(value)=>!value.rsplit_once(") ").is_some_and(|(_,tail)|tail.starts_with('Z')||tail.starts_with('X')),
+                    Err(error) if error.kind()==std::io::ErrorKind::NotFound=>false,
+                    Err(error)=>panic!("process status: {error}"),
+                };
+                if workers.subtitle_analysis.available_permits()==1 && !running {break;}
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }).await.unwrap_or_else(|_|panic!("{action}: estimator or worker permit survived cancellation"));
+        assert!(began.elapsed()<Duration::from_secs(3));
+        let (status,_,record)=call(&app,"GET",&endpoint,&key.secret,None,String::new()).await;
+        if action=="manual" {assert_eq!(status,StatusCode::OK);let record:Value=serde_json::from_slice(&record).unwrap();assert_eq!(record["manual"],true);assert!(record["correction"].is_null());}
+        else {assert_ne!(status,StatusCode::OK);}
+        workers.shutdown().await;
+        std::env::remove_var("VIPTV_SUBTITLE_SYNC_VAD");std::env::remove_var("VIPTV_SUBTITLE_SYNC_ESTIMATOR");
+    }
+}

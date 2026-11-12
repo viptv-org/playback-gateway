@@ -202,14 +202,30 @@ impl Workers {
                                 )
                                 .unwrap();
                                 let command = tokio::process::Command::new(&estimator);
-                                outcome = playback_engine::subtitle_sync::run(
+                                if cancel.load(Ordering::Acquire) {
+                                    return;
+                                }
+                                let estimate = playback_engine::subtitle_sync::run(
                                     command,
                                     &body,
                                     64 * 1024,
                                     16 * 1024,
-                                )
-                                .await
-                                .and_then(|(out, _)| {
+                                );
+                                tokio::pin!(estimate);
+                                let result = loop {
+                                    tokio::select! {
+                                        result=&mut estimate=>break result,
+                                        _=tokio::time::sleep(Duration::from_millis(100))=>{
+                                            let timestamp=now.saturating_add(started.elapsed().as_secs());
+                                            if cancel.load(Ordering::Acquire) || sessions.lock().ok().and_then(|s|s.sync(&principal,&id,timestamp).ok()).is_none() { return; }
+                                        },
+                                        _=authorization.tick()=>{
+                                            let timestamp=now.saturating_add(started.elapsed().as_secs());
+                                            if !worker_key_active(&credentials,&principal.key.id,timestamp).await {return;}
+                                        }
+                                    }
+                                };
+                                outcome = result.and_then(|(out, _)| {
                                     serde_json::from_slice(&out)
                                         .map_err(|_| "analysis_estimator_protocol".into())
                                 });
