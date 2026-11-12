@@ -33,6 +33,7 @@ const CHUNK_BACKOFF_MAX: Duration = Duration::from_millis(3200);
 // consumption, and the bound caps buffered bytes per response.
 const CHUNK_LOOKAHEAD: usize = 2;
 const RESOURCE_LIMIT: usize = 4096;
+const PLAYLIST_BODY_LIMIT: usize = 1024 * 1024;
 const CACHE_LIMIT: usize = 8 * 1024 * 1024;
 // Players poll live playlists near every second; a matching TTL absorbs the
 // cadence without freezing the live window.
