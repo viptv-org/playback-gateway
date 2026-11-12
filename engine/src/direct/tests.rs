@@ -2,6 +2,9 @@ use super::*;
 use axum::{extract::State, routing::get, Router};
 use std::sync::atomic::AtomicUsize;
 
+mod playlist_budget;
+mod public_referer;
+
 type LivePeakState = (Arc<Vec<u8>>, Arc<AtomicUsize>, Arc<AtomicUsize>);
 type GateUnfetchedState = (Arc<Vec<u8>>, Arc<tokio::sync::Notify>, Arc<AtomicUsize>);
 

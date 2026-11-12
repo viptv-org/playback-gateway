@@ -71,6 +71,19 @@ bounded by the limit times the existing per-response buffer bound, not by how
 many sockets the client opens. The limit is a fixed service policy, not an
 operator setting.
 
+## HLS playlist admission
+
+Original-media HLS and the managed HLS sanitizer admit at most 1 MiB per
+upstream playlist body and 4,096 distinct resources per rewrite. The retained
+rewritten-playlist cache has a separate 4 MiB bound per transport. Opaque child
+routing, destination validation and segment validation apply independently of
+the playlist byte budget.
+
+Cross-origin media requests retain only the origin of a supplied public HTTP(S)
+Referer. Viewer paths, queries and fragments are removed; userinfo, local origins
+and HTTPS-to-HTTP downgrades suppress it. Authorization, cookies, Origin,
+User-Agent and arbitrary provider headers remain restricted to the root origin.
+
 ## Separate operator replay watchdog
 
 The former fixed 64 MiB replay ceiling is replaced by operator

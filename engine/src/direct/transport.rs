@@ -1,3 +1,4 @@
+use super::headers::cross_origin_referer;
 use super::playlist::{public_host, public_ip};
 use super::*;
 
@@ -65,6 +66,9 @@ impl Direct {
             let mut headers = self.headers.clone();
             if url.origin() != self.root.origin() {
                 headers.clear();
+                if let Some(referer) = cross_origin_referer(&self.headers, &url) {
+                    headers.insert(header::REFERER, referer);
+                }
             }
             let mut request = client
                 .get(url.clone())
@@ -112,7 +116,7 @@ impl Direct {
             .map_err(|_| "Media expired")?;
         let response = self.request(url, None).await?;
         let base = response.url().clone();
-        let bytes = bounded(response, 256 * 1024).await?;
+        let bytes = bounded(response, PLAYLIST_BODY_LIMIT).await?;
         // Admission covers origin I/O only; rewriting and map updates are local.
         drop(permit);
         let text = std::str::from_utf8(&bytes).map_err(|_| "Invalid HLS playlist")?;
