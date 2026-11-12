@@ -1,0 +1,52 @@
+{
+  "evidence": "Executed owned-fixture mechanism; circular subtitle reference and seeded producer ledger, not paired playback or independent accuracy.",
+  "source_sha256": {
+    "engine/src/subtitle_sync.rs": "dcbb0239c7e5f9554b38bb1699d66be71ebfa5d7d84152e3c0d67859302c1e61",
+    "control/src/subtitle_sync.rs": "1feda5b85030de8b40d0cf23f0eab0b56ea274e78506c159cd8b8408e9126342",
+    "control/src/sessions/subtitle_sync.rs": "472b3b5d1a9fdc7c63a186d480d707043839de68ba55dc9437aa17b6dd24964a",
+    "tools/subtitle-sync/vad.c": "2e13f3280013869e18b4b4cb82c74ea06be8151f80253ea1af2b989cb18598f0"
+  },
+  "runtime": {
+    "ffmpeg": "5.1.9-0+deb12u1, Debian GCC12, userspace dependencies reused; no host package install",
+    "ffmpeg_sha256": "0dafc1360bb07743f76abeb1e4ae16b0aaa1331e9041a0e8d6a8524111dc0cbb",
+    "ffprobe_sha256": "0e598fe6d247bfe63757f5c839dc145a166b3f876f2875ca88a306a5b8ec5a58",
+    "vad_source": "wiseman/py-webrtcvad@e283ca41df3a84b0e87fb1f5cb9b21580a286b09 native BSD-3-Clause",
+    "vad_sha256": "8b1038bce20dc263b058a071d351790197be2270020cab60a942e753f6ca53a6",
+    "estimator_source": "viptv-org/core@fec3550db0786ac9bf1b91bf31edd7b0865f88a1",
+    "estimator_sha256": "85f620abbd1954fdb4383497a39110883f3cc125388ea1cbfbab1b71ab9f9eae"
+  },
+  "fixture": {
+    "kind": "owned synthetic voiced harmonic/silence signal, AAC in retained TS HLS",
+    "duration_us": 120000000,
+    "frames": 6000,
+    "speech_frames": 3516,
+    "rate_hz": 16000,
+    "frame_samples": 320,
+    "observations_start_us": 0,
+    "observations_end_us": 120000000,
+    "wav_sha256": "42bcc507cdd94dd2233d50c99408395b7346bc72b96b4ec261bc41a576c43148",
+    "retained_ts_bytes": 795240
+  },
+  "gateway_control": {
+    "state": "accepted",
+    "revision": 2,
+    "correction": {
+      "anchorUs": 28000000,
+      "offsetUs": 2000000,
+      "scale": 1.0
+    },
+    "confidence_kind": "uncalibratedHeuristic",
+    "foreign_viewer_rejected": true,
+    "same_ready_playback_job": true,
+    "observations_reused_without_decoder": true
+  },
+  "unqualified": [
+    "Real HTTP/torrent/HLS producer execution and timestamp origins",
+    "Held-out dialogue, wrong release/dub and confidence calibration",
+    "Paired startup/rebuffer/restart measurements",
+    "Complete decoder/VAD/estimator memory and CPU budgets",
+    "Long-duration drift",
+    "Native HLS Safari and physical TVs"
+  ],
+  "discarded_runtime": "Downloaded FFmpeg7.0.2 static build SIGSEGV on MPEG-TS even with file input; no application availability claim based on that decoder."
+}

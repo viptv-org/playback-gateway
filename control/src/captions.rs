@@ -12,7 +12,7 @@ pub(crate) struct Delivery {
     pub format: &'static str,
     pub timeline_offset_seconds: f64,
 }
-fn clock(raw: &str) -> Option<u64> {
+pub(crate) fn clock(raw: &str) -> Option<u64> {
     let (time, fraction) = raw.split_once('.')?;
     if fraction.len() != 3 || !fraction.bytes().all(|b| b.is_ascii_digit()) {
         return None;

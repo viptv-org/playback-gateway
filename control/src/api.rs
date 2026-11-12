@@ -54,6 +54,7 @@ pub fn router(state: Api) -> Router {
         )
         .route("/v1/sessions/:id", get(session).delete(release))
         .route("/v1/sessions/:id/renew", post(renew))
+        .route("/v1/sessions/:id/subtitle-sync", get(subtitle_sync).post(start_subtitle_sync).put(subtitle_sync_policy).delete(stop_subtitle_sync).layer(DefaultBodyLimit::max(4 * 1024 * 1024)))
         .route("/v1/sessions/:id/activate", post(activate))
         .route(
             "/v1/sessions/:id/captions",
@@ -916,4 +917,18 @@ mod tests {
         workers.reap(now().unwrap() + 16).await.unwrap();
         workers.shutdown().await;
     }
+}
+
+async fn start_subtitle_sync(State(state):State<Api>,Extension(principal):Extension<Principal>,Path(id):Path<String>,body:Result<Json<crate::subtitle_sync::Start>,JsonRejection>)->Result<Json<crate::subtitle_sync::Record>,ApiError>{
+    state.workers.start_subtitle_sync(&principal,&id,payload(body)?,now()?).await.map(Json).map_err(ApiError)
+}
+async fn subtitle_sync(State(state):State<Api>,Extension(principal):Extension<Principal>,Path(id):Path<String>)->Result<Json<crate::subtitle_sync::Record>,ApiError>{
+    state.workers.subtitle_sync(&principal,&id,now()?).await.map(Json).map_err(ApiError)
+}
+async fn subtitle_sync_policy(State(state):State<Api>,Extension(principal):Extension<Principal>,Path(id):Path<String>,body:Result<Json<crate::subtitle_sync::Policy>,JsonRejection>)->Result<Json<crate::subtitle_sync::Record>,ApiError>{
+    state.workers.subtitle_sync_policy(&principal,&id,payload(body)?,now()?).await.map(Json).map_err(ApiError)
+}
+
+async fn stop_subtitle_sync(State(state):State<Api>,Extension(principal):Extension<Principal>,Path(id):Path<String>,body:Result<Json<crate::subtitle_sync::Stop>,JsonRejection>)->Result<Json<serde_json::Value>,ApiError>{
+    state.workers.stop_subtitle_sync(&principal,&id,payload(body)?,now()?).await.map(|_|Json(serde_json::json!({"ok":true}))).map_err(ApiError)
 }

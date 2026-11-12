@@ -97,3 +97,6 @@ Matroska whose private replay is Matroska (issues #1 and #11, decision recorded
   classification, remaining formats, crash containment, bounded shutdown,
   hardware/4K and backend integration) are complete before public deployment
   or client cutover, which each require separate approval.
+
+
+Experimental subtitle timing: [docs/SUBTITLE_SYNC.md](docs/SUBTITLE_SYNC.md). Disabled by default; retained zero-origin VOD TS output only.

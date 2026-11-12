@@ -45,6 +45,8 @@ mod sanitize;
 mod start;
 #[cfg(feature = "media")]
 mod subtitles;
+#[cfg(feature = "media")]
+pub mod subtitle_sync;
 #[cfg(test)]
 #[cfg(feature = "media")]
 mod tests;

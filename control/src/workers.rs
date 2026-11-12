@@ -41,10 +41,11 @@ mod captions;
 pub struct Workers {
     pub sessions: Arc<Mutex<Sessions>>,
     pub credentials: Arc<Credentials>,
-    engine: Arc<PlaybackManager>,
+    pub(crate) engine: Arc<PlaybackManager>,
     teardown: Arc<dyn EngineTeardown>,
     proxy: EgressProxy,
-    active: Mutex<BTreeMap<String, PlaybackResponse>>,
+    pub(crate) active: Mutex<BTreeMap<String, PlaybackResponse>>,
+    pub(crate) subtitle_analysis: Arc<tokio::sync::Semaphore>,
     starting: Mutex<BTreeSet<String>>,
     activating: Mutex<BTreeSet<String>>,
     reaper: tokio::sync::Mutex<()>,
@@ -220,6 +221,7 @@ impl Workers {
             teardown,
             proxy,
             active: Mutex::new(BTreeMap::new()),
+            subtitle_analysis: Arc::new(tokio::sync::Semaphore::new(1)),
             starting: Mutex::new(BTreeSet::new()),
             activating: Mutex::new(BTreeSet::new()),
             reaper: tokio::sync::Mutex::new(()),
@@ -843,7 +845,7 @@ impl Workers {
             .await
             .map_err(|_| "credential_store_unavailable")?
     }
-    async fn require_active(&self, principal: &Principal, now: u64) -> Result<(), &'static str> {
+    pub(crate) async fn require_active(&self, principal: &Principal, now: u64) -> Result<(), &'static str> {
         if self.key_active(&principal.key.id, now).await? {
             Ok(())
         } else {

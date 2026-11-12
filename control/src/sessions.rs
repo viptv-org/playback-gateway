@@ -6,6 +6,7 @@ use crate::{
 };
 use serde::Serialize;
 mod captions;
+mod subtitle_sync;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Use the engine's inspected plan, never a parallel control-layer approximation.
@@ -74,6 +75,7 @@ struct OwnedViewer {
     media_hash: Option<[u8; 32]>,
     media_token: Option<String>,
     captions: BTreeMap<String, std::sync::Arc<str>>,
+    subtitle_sync: Option<crate::subtitle_sync::Entry>,
 }
 
 /// Returned only on issuance. Never include this capability in logs or a
@@ -388,6 +390,7 @@ impl Sessions {
                 media_hash: None,
                 media_token: None,
                 captions: BTreeMap::new(),
+                subtitle_sync: None,
             },
         );
         Ok(view)
@@ -597,6 +600,7 @@ impl Sessions {
                 media_hash: None,
                 media_token: None,
                 captions: BTreeMap::new(),
+                subtitle_sync: None,
             },
         );
         Ok(Reservation {
@@ -801,6 +805,7 @@ impl Sessions {
                     viewer.view.expires_at = now;
                     viewer.media_hash = None;
                     viewer.captions.clear();
+                    viewer.subtitle_sync = None;
                 }
             }
         }
@@ -862,6 +867,7 @@ impl Sessions {
         viewer.media_token = None;
         viewer.media_hash = None;
         viewer.captions.clear();
+                    viewer.subtitle_sync = None;
         viewer.view.expires_at = now;
         let job_id = viewer.view.job_id.clone();
         let owner = viewer.owner.clone();
