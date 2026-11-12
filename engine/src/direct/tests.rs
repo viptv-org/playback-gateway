@@ -1018,3 +1018,103 @@ fn ranged(headers: &HeaderMap, body: Vec<u8>, kind: &'static str) -> Response {
             .unwrap(),
     }
 }
+
+/// Public CDN children must use the control plane's validating proxy, while
+/// generic proxies stay conservative and no provider credentials cross origins.
+#[tokio::test]
+async fn validated_proxy_follows_cdn_without_leaking_credentials_or_transport_fields() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+    let seen = requests.clone();
+    let server = tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut bytes = Vec::new();
+            while !bytes.ends_with(b"\r\n\r\n") {
+                bytes.push(socket.read_u8().await.unwrap());
+                assert!(bytes.len() < 16_384);
+            }
+            let request = String::from_utf8(bytes).unwrap();
+            let body = if request.starts_with("GET http://origin.example/") {
+                "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=500000\nhttp://cdn.example/variant.jpg\n"
+            } else if request.starts_with("GET http://cdn.example/unsafe") {
+                "#EXTM3U\n#EXTINF:1,\nhttp://127.0.0.1:1/private.ts\n"
+            } else {
+                "#EXTM3U\n#EXTINF:1,\nsegment.jpg\n#EXT-X-ENDLIST\n"
+            };
+            seen.lock().await.push(request);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+        }
+    });
+    let root = Url::parse("http://origin.example/index.m3u8").unwrap();
+    let headers = HashMap::from([
+        (
+            crate::VALIDATED_EGRESS_PROXY_HEADER.into(),
+            format!("http://{address}"),
+        ),
+        (crate::NORMALIZE_HLS_HEADER.into(), "1".into()),
+        ("Authorization".into(), "Bearer provider-secret".into()),
+        ("X-provider-key".into(), "provider-key".into()),
+    ]);
+    let direct = Direct::prepare_with(root.clone(), &headers, "hls", None)
+        .await
+        .unwrap();
+    let cdn = direct
+        .playlist(Url::parse("http://cdn.example/variant.jpg").unwrap())
+        .await
+        .unwrap();
+    assert!(std::str::from_utf8(&cdn).unwrap().contains(".ts"));
+    assert!(direct
+        .playlist(Url::parse("http://cdn.example/unsafe").unwrap())
+        .await
+        .is_err());
+    let requests = requests.lock().await;
+    assert_eq!(requests.len(), 3);
+    assert!(requests[0].contains("provider-secret"));
+    for request in &requests[1..] {
+        assert!(!request.contains("provider-secret"));
+        assert!(!request.contains("provider-key"));
+    }
+    assert!(requests
+        .iter()
+        .all(|request| !request.contains("x-playback-")));
+    drop(requests);
+    let generic = HashMap::from([(
+        crate::EGRESS_PROXY_HEADER.into(),
+        format!("http://{address}"),
+    )]);
+    assert!(Direct::prepare_with(root, &generic, "hls", None)
+        .await
+        .is_err());
+    // Re-inspection retains the trusted route without exposing it as a header.
+    let (_, block, _) = direct.inspection_source();
+    assert!(block.contains(crate::VALIDATED_EGRESS_PROXY_HEADER));
+    server.abort();
+}
+
+#[test]
+fn missing_audio_groups_do_not_disable_muxed_audio() {
+    let base = Url::parse("https://origin.example/master.m3u8").unwrap();
+    let descriptor = "#EXT-X-STREAM-INF:BANDWIDTH=500000,CODECS=\"avc1.640028,mp4a.40.2\",AUDIO=\"audio\",RESOLUTION=1920x1080\nvariant.m3u8\n";
+    for rendition in [
+        "",
+        "#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=\"audio\",NAME=\"English\"\n",
+    ] {
+        let (cleaned, _) = rewrite(&format!("#EXTM3U\n{descriptor}{rendition}"), &base).unwrap();
+        assert!(!cleaned.contains("AUDIO=\"audio\""));
+        assert!(cleaned.contains("CODECS=\"avc1.640028,mp4a.40.2\",RESOLUTION=1920x1080"));
+    }
+    for rendition in [
+        "#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"audio\",NAME=\"English, original\",URI=\"audio.m3u8\"\n",
+        "#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"audio\",NAME=\"In-band\"\n",
+    ] {
+        let (cleaned, _) = rewrite(&format!("#EXTM3U\n{descriptor}{rendition}"), &base).unwrap();
+        assert!(cleaned.contains("AUDIO=\"audio\""));
+    }
+}

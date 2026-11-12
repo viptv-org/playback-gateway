@@ -11,6 +11,115 @@ const PNG_1X1: &[u8] = &[
     0x00, 0x03, 0x01, 0x01, 0x00, 0x18, 0xdd, 0x8d, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
     0x44, 0xae, 0x42, 0x60, 0x82,
 ];
+
+#[tokio::test]
+#[ignore = "requires real FFmpeg/ffprobe; isolated fMP4 HLS fixture"]
+async fn real_fmp4_with_image_named_playlist_map_and_segments() {
+    qualify_fmp4(false).await;
+    qualify_fmp4(true).await;
+}
+async fn qualify_fmp4(authenticated: bool) {
+    let ffmpeg = PathBuf::from(std::env::var("PLAYBACK_TEST_FFMPEG").unwrap());
+    let ffprobe = PathBuf::from(std::env::var("PLAYBACK_TEST_FFPROBE").unwrap());
+    let root = tempfile::tempdir().unwrap();
+    let status = Command::new(&ffmpeg)
+        .current_dir(root.path())
+        .args([
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=160x90:rate=25",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=sample_rate=48000",
+            "-t",
+            "3",
+            "-c:v",
+            "libx264",
+            "-threads",
+            "1",
+            "-preset",
+            "ultrafast",
+            "-g",
+            "25",
+            "-c:a",
+            "aac",
+            "-f",
+            "hls",
+            "-hls_time",
+            "1",
+            "-hls_playlist_type",
+            "vod",
+            "-hls_segment_type",
+            "fmp4",
+            "-hls_fmp4_init_filename",
+            "init.mp4",
+            "-hls_segment_filename",
+            "segment%d.m4s",
+            "media.m3u8",
+        ])
+        .status()
+        .await
+        .unwrap();
+    assert!(status.success());
+    let playlist = std::fs::read_to_string(root.path().join("media.m3u8"))
+        .unwrap()
+        .replace("init.mp4", "init.gif")
+        .replace(".m4s", ".jpg");
+    let mut resources = vec![
+        ("variant.jpg".into(), "image/jpeg", playlist.into_bytes()),
+        (
+            "init.gif".into(),
+            "image/gif",
+            std::fs::read(root.path().join("init.mp4")).unwrap(),
+        ),
+    ];
+    for index in 0..3 {
+        resources.push((
+            format!("segment{index}.jpg"),
+            "image/jpeg",
+            std::fs::read(root.path().join(format!("segment{index}.m4s"))).unwrap(),
+        ));
+    }
+    let (url, server) = origin(
+        || {
+            "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=500000\nhttp://cdn.example/live/variant.jpg\n"
+                .into()
+        },
+        resources,
+    )
+    .await;
+    let manager = manager(&ffmpeg, ffprobe, root.path());
+    let route = Url::parse(&url).unwrap().origin().ascii_serialization();
+    let mut block = format!("{}: {route}\r\n", crate::VALIDATED_EGRESS_PROXY_HEADER);
+    if authenticated {
+        block.push_str("Authorization: Bearer fixture-only\r\n");
+        block.push_str(&format!("{}: 1\r\n", crate::NORMALIZE_HLS_HEADER));
+    }
+    let probe = manager
+        .probe(
+            if authenticated {
+                "http://origin.example/live/asset"
+            } else {
+                "http://origin.example/live/index.m3u8"
+            },
+            &block,
+            None,
+        )
+        .await
+        .expect("cross-origin image-named fMP4 must be inspected through the validating proxy");
+    assert!(probe.disguised_hls);
+    assert_eq!(probe.video().unwrap().codec_name.as_deref(), Some("h264"));
+    assert!(probe
+        .streams
+        .iter()
+        .any(|stream| stream.codec_name.as_deref() == Some("aac")));
+    server.abort();
+}
+
 /// Three MPEG-TS null packets: enough for the transport to classify a segment.
 fn ts_packet() -> Vec<u8> {
     let mut packet = [0xff_u8; 188];
@@ -24,10 +133,18 @@ async fn origin(
     playlist: impl Fn() -> String + Clone + Send + Sync + 'static,
     resources: Vec<(String, &'static str, Vec<u8>)>,
 ) -> (String, tokio::task::JoinHandle<()>) {
+    let opaque_playlist = playlist.clone();
     let mut router = axum::Router::new().route(
         "/live/index.m3u8",
         axum::routing::get(move || {
             let playlist = playlist.clone();
+            async move { playlist() }
+        }),
+    );
+    router = router.route(
+        "/live/asset",
+        axum::routing::get(move || {
+            let playlist = opaque_playlist.clone();
             async move { playlist() }
         }),
     );
@@ -527,5 +644,57 @@ async fn real_disguised_live_window_reloads_through_sanitizer() {
         .filter(|line| !line.starts_with('#') && !line.is_empty())
         .count();
     assert_eq!(live, expected);
+    server.abort();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn authenticated_hls_never_passes_provider_headers_to_ffprobe() {
+    let (url, server) = origin(|| "#EXTM3U\n#EXTINF:1,\nsegment.ts\n".into(), vec![]).await;
+    let root = tempfile::tempdir().unwrap();
+    let manager = scripted_probe(
+        root.path(),
+        r#"
+for arg in "$@"; do
+  case "$arg" in
+    -headers|*provider-secret*|*origin.example*) exit 4 ;;
+  esac
+done
+printf '%s' '{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","field_order":"progressive"}],"format":{"format_name":"hls"}}'
+"#,
+    );
+    let probe = manager
+        .probe(
+            &url.replace("index.m3u8", "asset"),
+            &format!(
+                "Authorization: Bearer provider-secret\r\n{}: 1\r\n",
+                crate::NORMALIZE_HLS_HEADER
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(
+        probe.disguised_hls,
+        "readers must retain the normalizing transport"
+    );
+    server.abort();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn opaque_hls_hint_never_falls_back_to_raw_headers_on_non_playlist_bytes() {
+    let (url, server) = origin(|| "<html>Not a media playlist</html>".into(), vec![]).await;
+    let root = tempfile::tempdir().unwrap();
+    let manager = scripted_probe(root.path(), "exit 9");
+    let block = format!(
+        "Authorization: Bearer fixture-only\r\n{}: 1\r\n",
+        crate::NORMALIZE_HLS_HEADER
+    );
+    assert!(manager
+        .probe(&url.replace("index.m3u8", "asset"), &block, None)
+        .await
+        .is_none());
+    assert!(!root.path().join("probe.sh.count").exists());
     server.abort();
 }

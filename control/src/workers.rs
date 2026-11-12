@@ -344,6 +344,7 @@ impl Workers {
         {
             return Err("source_preparation_cancelled");
         }
+        self.reclaim_idle_for_admission(principal, now).await?;
         let observation = if request.input.torrent() {
             let key = (principal.key.id.clone(), idempotency.to_owned());
             let mut pending = self
@@ -378,7 +379,11 @@ impl Workers {
         let started = Instant::now();
         let deadline = self.start_budget(request);
         let mediate_http = request.output.protocol == OutputProtocol::NativeMp4;
-        let pending = if request.input.owned_source() || mediate_http {
+        // Header-bearing HLS uses the engine's nested-resource sanitizer. The
+        // binary range relay deliberately refuses manifests/nonranged inputs.
+        let pending = if (request.input.owned_source() && !request.input.authenticated_hls())
+            || mediate_http
+        {
             if (request.input.torrent() || request.input.archive()) && !self.sources.enabled() {
                 return Err("unsupported_output");
             }
@@ -415,7 +420,8 @@ impl Workers {
             match result {
                 Ok(source) => Some(source),
                 Err("unsupported_output" | "source_preparation_failed")
-                    if mediate_http && request.input.headers.is_empty() =>
+                    if (mediate_http && request.input.headers.is_empty())
+                        || (request.output.protocol == OutputProtocol::Hls && request.input.mediated_http()) =>
                 {
                     None
                 }
@@ -471,7 +477,12 @@ impl Workers {
         };
         // The root's exact private Range URI is registered, while every nested
         // HTTP(S) URL still goes through ordinary destination validation.
-        headers.insert("x-playback-egress-proxy".into(), self.proxy.url());
+        headers.insert(playback_engine::VALIDATED_EGRESS_PROXY_HEADER.into(), self.proxy.url());
+        if resolved.is_none() && request.input.mediated_http() && request.output.protocol == OutputProtocol::Hls {
+            // Header-bearing extensionless playlists need byte validation and
+            // nested-resource mediation, never a raw FFmpeg header fallback.
+            headers.insert(playback_engine::NORMALIZE_HLS_HEADER.into(), "1".into());
+        }
         let prepared = tokio::time::timeout(
             deadline.saturating_sub(started.elapsed()),
             self.engine.prepare_shared_with_selection(
@@ -679,11 +690,30 @@ impl Workers {
         idempotency: &str,
         now: u64,
     ) -> Result<Viewer, &'static str> {
+        request.validate()?;
+        principal.require(&request.namespace, Scope::Create)?;
         self.require_active(principal, now).await?;
+        self.reclaim_idle_for_admission(principal, now).await?;
         self.sessions
             .lock()
             .map_err(|_| "session_store_unavailable")?
             .prepare(principal, request, idempotency, now)
+    }
+
+    async fn reclaim_idle_for_admission(
+        &self,
+        principal: &Principal,
+        now: u64,
+    ) -> Result<(), &'static str> {
+        let reclaim = self
+            .sessions
+            .lock()
+            .map_err(|_| "session_store_unavailable")?
+            .reclaim_idle_for_admission(principal, now);
+        if reclaim {
+            self.reap(now).await?;
+        }
+        Ok(())
     }
 
     async fn activate_inner(
@@ -2962,6 +2992,50 @@ pub(crate) mod tests {
             workers.available(&principal, 41).unwrap().inputs,
             if shared { 1 } else { 2 }
         );
+        workers.shutdown().await;
+    }
+    #[tokio::test]
+    async fn rapid_replacements_reclaim_released_jobs_before_the_idle_grace_elapses() {
+        let (_root, workers, principal) = fixture_with_outputs(false, 2).await;
+        let mut input = request(640);
+        let first = workers
+            .create(&principal, &input, "first", 0)
+            .await
+            .unwrap();
+        workers
+            .sessions
+            .lock()
+            .unwrap()
+            .release(&principal, &first.id, 1)
+            .unwrap();
+        input.input.url.push_str("/replacement");
+        let second = workers
+            .create(&principal, &input, "second", 2)
+            .await
+            .unwrap();
+        assert_eq!(
+            workers
+                .sessions
+                .lock()
+                .unwrap()
+                .get(&principal, &second.id, 2)
+                .unwrap()
+                .status,
+            Status::Ready
+        );
+        workers
+            .sessions
+            .lock()
+            .unwrap()
+            .release(&principal, &second.id, 3)
+            .unwrap();
+        input.input.url.push_str("/captions");
+        let third = workers
+            .create(&principal, &input, "third", 4)
+            .await
+            .unwrap();
+        assert_eq!(third.status, Status::Ready);
+        assert_eq!(workers.sessions.lock().unwrap().job_count(), 1);
         workers.shutdown().await;
     }
     pub(crate) async fn fixture(stall: bool) -> (tempfile::TempDir, Arc<Workers>, Principal) {

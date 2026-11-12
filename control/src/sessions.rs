@@ -285,6 +285,27 @@ impl Sessions {
                 .saturating_sub(viewers.saturating_add(pending_viewers)),
         }
     }
+    /// Cache reuse must not prevent the next explicit seek/track replacement.
+    /// Reclaim only this key's fully released jobs under admission pressure;
+    /// stopping jobs remain charged until the worker confirms physical teardown.
+    pub fn reclaim_idle_for_admission(&mut self, principal: &Principal, now: u64) -> bool {
+        let available = self.available(principal, now);
+        if available.inputs > 0 && available.outputs > 0 {
+            return false;
+        }
+        let mut reclaimed = false;
+        for job in self.jobs.values_mut() {
+            if job.reservations.contains(&principal.key.id)
+                && job.viewers.is_empty()
+                && job.idle_since.is_some()
+                && job.state == JobState::Ready
+            {
+                job.state = JobState::Stopping;
+                reclaimed = true;
+            }
+        }
+        reclaimed
+    }
     /// Resolve idempotent retries before performing any source network I/O.
     pub fn replay(
         &self,
@@ -867,7 +888,7 @@ impl Sessions {
         viewer.media_token = None;
         viewer.media_hash = None;
         viewer.captions.clear();
-                    viewer.subtitle_sync = None;
+        viewer.subtitle_sync = None;
         viewer.view.expires_at = now;
         let job_id = viewer.view.job_id.clone();
         let owner = viewer.owner.clone();
@@ -1196,6 +1217,47 @@ mod tests {
             shareable: true,
             shared_ingest: true,
         }
+    }
+    #[test]
+    fn admission_pressure_reclaims_only_released_owned_jobs_without_freeing_quota_early() {
+        let p = principal("one", "family");
+        let other = principal("other", "family");
+        let mut sessions = Sessions::default();
+        let first = sessions
+            .reserve(&p, &request("family"), &plan(), "first", 0)
+            .unwrap();
+        let mut different = request("family");
+        different.input.url.push_str("/different");
+        let current = sessions
+            .reserve(&p, &different, &plan(), "current", 0)
+            .unwrap();
+        let mut foreign = request("family");
+        foreign.input.url.push_str("/foreign");
+        let foreign = sessions
+            .reserve(&other, &foreign, &plan(), "foreign", 0)
+            .unwrap();
+        for viewer in [&first, &current, &foreign] {
+            sessions.ready(&viewer.viewer.job_id, 0);
+        }
+        sessions.release(&p, &first.viewer.id, 1).unwrap();
+        sessions.release(&other, &foreign.viewer.id, 1).unwrap();
+        assert!(sessions.reclaim_idle_for_admission(&p, 2));
+        assert_eq!(sessions.stopping_jobs(), vec![first.viewer.job_id.clone()]);
+        assert_eq!(
+            sessions.available(&p, 2).inputs,
+            0,
+            "quota stays charged during teardown"
+        );
+        assert_eq!(
+            sessions.get(&p, &current.viewer.id, 2).unwrap().status,
+            Status::Ready
+        );
+        assert!(sessions.finish_stop(&first.viewer.job_id));
+        assert_eq!(sessions.available(&p, 2).inputs, 1);
+        assert!(
+            !sessions.reclaim_idle_for_admission(&other, 2),
+            "preserve the idle reuse window without pressure"
+        );
     }
     fn progressive_plan() -> ExecutionPlan {
         ExecutionPlan {
